@@ -1,0 +1,28 @@
+{
+  "name": "verifiable-thinking-mcp",
+  "version": "0.1.0",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "fastmcp": "latest",
+    "zod": "latest"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "lefthook": "^2.0.13"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "scripts": {
+    "dev": "fastmcp dev src/index.ts",
+    "inspect": "fastmcp inspect src/index.ts",
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "test:coverage": "bun test --coverage",
+    "test:ci": "bun test --coverage --bail",
+    "typecheck": "tsc --noEmit",
+    "prepare": "lefthook install"
+  }
+}

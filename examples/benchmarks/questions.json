@@ -1,0 +1,827 @@
+{
+  "version": "1.0.0",
+  "description": "Comprehensive benchmark: 100 questions across Easy, Medium, Hard, Trap, Impossible, SOTA difficulties",
+  "questions": [
+    {
+      "id": "easy_math_001",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "What is 17 + 28?",
+      "expected_answer": "45",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_math_002",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "What is the 8th Fibonacci number? (Sequence: 1, 1, 2, 3, 5, ...)",
+      "expected_answer": "21",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_math_003",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "Right triangle with legs 5 and 12. What is the hypotenuse?",
+      "expected_answer": "13",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_math_004",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "What is x² - 5x + 6 = 0? What is the LARGER root?",
+      "expected_answer": "3",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_math_005",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "What is log₁₀(100) + log₁₀(1000)?",
+      "expected_answer": "5",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_math_006",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "Is 91 prime? Answer YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_math_007",
+      "category": "math",
+      "difficulty": "easy",
+      "question": "Is sqrt(2) rational or irrational? Answer RATIONAL or IRRATIONAL.",
+      "expected_answer": "IRRATIONAL",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_logic_001",
+      "category": "logic",
+      "difficulty": "easy",
+      "question": "If it rains, the ground is wet. It's raining. Is the ground wet? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_logic_002",
+      "category": "logic",
+      "difficulty": "easy",
+      "question": "If it rains, the ground is wet. Ground is dry. Is it raining? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_logic_003",
+      "category": "logic",
+      "difficulty": "easy",
+      "question": "All A are B. All B are C. Therefore all A are C. Valid? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_logic_004",
+      "category": "logic",
+      "difficulty": "easy",
+      "question": "\"You can have cake or ice cream\" (exclusive). You have both. Violated the rule? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_prob_001",
+      "category": "reasoning",
+      "difficulty": "easy",
+      "question": "A fair coin has landed heads 10 times in a row. What's the probability the next flip is heads? Answer as percentage.",
+      "expected_answer": "50",
+      "verification_type": "numeric",
+      "tolerance": 1
+    },
+    {
+      "id": "easy_prob_002",
+      "category": "reasoning",
+      "difficulty": "easy",
+      "question": "A basketball player has made 5 shots in a row. Assuming shots are independent with 50% success rate, what's the probability they make the next shot? Answer as percentage.",
+      "expected_answer": "50",
+      "verification_type": "numeric",
+      "tolerance": 1
+    },
+    {
+      "id": "easy_reasoning_001",
+      "category": "reasoning",
+      "difficulty": "easy",
+      "question": "A surgeon says \"I can't operate on this boy, he's my son.\" The boy's father died in the accident. How is this possible? The surgeon is the boy's _____.",
+      "expected_answer": "mother",
+      "verification_type": "contains"
+    },
+    {
+      "id": "easy_reasoning_002",
+      "category": "reasoning",
+      "difficulty": "easy",
+      "question": "Ice cream sales and drowning deaths are correlated. Does ice cream cause drowning? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "easy_decision_001",
+      "category": "reasoning",
+      "difficulty": "easy",
+      "question": "Gamble A: 100% chance of $50. Gamble B: 50% of $100, 50% of $0. Same expected value, but risk-averse person prefers? A or B.",
+      "expected_answer": "A",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_001",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "What is the derivative d/dx of x³ evaluated at x=2?",
+      "expected_answer": "12",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_002",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "What is the integral of 2x from 0 to 3?",
+      "expected_answer": "9",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_003",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "What is the determinant of the matrix [[1,2],[3,4]]?",
+      "expected_answer": "-2",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_004",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "10 people at a party, each shakes hands with everyone else exactly once. Total number of handshakes?",
+      "expected_answer": "45",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_005",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "How many ways to choose 3 items from 10? (10 choose 3)",
+      "expected_answer": "120",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_006",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "Sum of infinite series: 1 + 1/2 + 1/4 + 1/8 + ... Answer as integer.",
+      "expected_answer": "2",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_007",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "Place 1 grain on first square, 2 on second, 4 on third, etc. Total grains on all 64 squares = 2^n - 1. What is n?",
+      "expected_answer": "64",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_math_008",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "$1000 at 5% annual compound interest for 10 years. Final amount in whole dollars?",
+      "expected_answer": "1629",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "medium_logic_001",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "If it rains, ground is wet. Ground is wet. Therefore it rained. Valid reasoning? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_logic_002",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "If it rains, ground is wet. It's not raining. Therefore ground is dry. Valid? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_logic_003",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "NOT(A AND B) is equivalent to (NOT A) ___ (NOT B). Fill: AND or OR.",
+      "expected_answer": "OR",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_logic_004",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "\"All dogs are mammals\" is equivalent to \"All non-mammals are non-dogs\"? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_logic_005",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "Some A are B. Some B are C. Therefore some A are C. Valid? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_logic_006",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "Being a dog is _____ for being a mammal: NECESSARY, SUFFICIENT, or NEITHER.",
+      "expected_answer": "SUFFICIENT",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_logic_007",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "\"A if and only if B\" means A→B AND B→A. If A is true and B is false, is the biconditional TRUE or FALSE?",
+      "expected_answer": "FALSE",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_prob_001",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Roll two fair dice. Given sum is 9, probability first die is 6? Answer numerator (denominator is 4).",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_prob_002",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "From a shuffled deck, first card is Ace of Spades. Probability second card is also an ace? Answer numerator (denominator is 51).",
+      "expected_answer": "3",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_prob_003",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Urn has 3 red, 2 blue balls. Draw 2 without replacement. Probability both are red? Answer numerator (denominator is 10).",
+      "expected_answer": "3",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_prob_004",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "In a room of 50 people, probability at least two share a birthday? Round to nearest percent.",
+      "expected_answer": "97",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "medium_stats_001",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Survey of 10 people: 90% prefer A. Survey of 10000: 51% prefer A. Which gives stronger evidence for population preference? Answer 10 or 10000.",
+      "expected_answer": "10000",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_stats_002",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Incomes: $30k, $30k, $30k, $30k, $1M. Mean income in thousands?",
+      "expected_answer": "224",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_stats_003",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Sample mean 100, SD 10, n=100. Standard error of mean?",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_causal_001",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Coffee drinkers have more heart attacks. Coffee drinkers also smoke more. Is smoking a CONFOUNDER? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_causal_002",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Exercise → Weight Loss → Lower Blood Pressure. Weight loss is a MEDIATOR, CONFOUNDER, or COLLIDER?",
+      "expected_answer": "MEDIATOR",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_decision_001",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "One-shot Prisoner's Dilemma. Both cooperate: 3 years each. Both defect: 5 years. One defects: defector 1 year, cooperator 10. Nash equilibrium? COOPERATE or DEFECT.",
+      "expected_answer": "DEFECT",
+      "verification_type": "exact"
+    },
+    {
+      "id": "medium_decision_002",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "You have a free ticket to concert A worth $50. Concert B costs $40 and you'd pay up to $80 for it. Net benefit of choosing B over A? In dollars.",
+      "expected_answer": "10",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_math_001",
+      "category": "math",
+      "difficulty": "hard",
+      "question": "How many trailing zeros in 100! (100 factorial)?",
+      "expected_answer": "24",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_math_002",
+      "category": "math",
+      "difficulty": "hard",
+      "question": "What is 7^100 mod 10? (Last digit of 7^100)",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_math_003",
+      "category": "math",
+      "difficulty": "hard",
+      "question": "How many times do clock hands overlap in 12 hours?",
+      "expected_answer": "11",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_math_004",
+      "category": "math",
+      "difficulty": "hard",
+      "question": "How many ways to arrange the letters in MISSISSIPPI?",
+      "expected_answer": "34650",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_logic_001",
+      "category": "logic",
+      "difficulty": "hard",
+      "question": "Cards show: A, K, 4, 7. Rule: \"If vowel on one side, even number on other.\" Which cards must you flip to test the rule? Answer the LETTERS/NUMBERS separated by comma.",
+      "expected_answer": ["A,7", "A, 7", "7,A", "7, A"],
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_logic_002",
+      "category": "logic",
+      "difficulty": "hard",
+      "question": "Island: Knights always tell truth, Knaves always lie. A says \"We are both knaves.\" What is A? KNIGHT or KNAVE.",
+      "expected_answer": "KNAVE",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_logic_003",
+      "category": "logic",
+      "difficulty": "hard",
+      "question": "\"This statement is false.\" Is it TRUE, FALSE, or NEITHER (paradox)?",
+      "expected_answer": "NEITHER",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_logic_004",
+      "category": "logic",
+      "difficulty": "hard",
+      "question": "1 grain isn't a heap. Adding 1 grain to a non-heap doesn't make a heap. Therefore no amount of grains is a heap. This argument is VALID but UNSOUND, or INVALID?",
+      "expected_answer": "INVALID",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_prob_001",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Monty Hall: You pick door 1. Host opens door 3 (goat). What's the probability of winning if you switch to door 2? Answer as percentage.",
+      "expected_answer": "67",
+      "verification_type": "numeric",
+      "tolerance": 1
+    },
+    {
+      "id": "hard_prob_002",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Disease affects 1 in 1000. Test is 99% accurate (99% sensitivity, 99% specificity). You test positive. Probability you have the disease? Round to nearest percent.",
+      "expected_answer": "9",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "hard_prob_003",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "In a room of 23 people, probability at least two share a birthday? Round to nearest percent.",
+      "expected_answer": "51",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "hard_prob_004",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Linda: 31, single, outspoken, philosophy major, concerned with discrimination. More probable: (A) bank teller, or (B) feminist bank teller? Answer A or B.",
+      "expected_answer": "A",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_prob_005",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "A family has two children. At least one is a boy. What's the probability both are boys? Answer as a fraction with denominator 3.",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_prob_006",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Three prisoners A, B, C. One will be pardoned randomly. A asks guard to name someone other than A who will be executed. Guard says B. What's A's probability of being pardoned? Express as fraction with denominator 3.",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_prob_007",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "10% of emails are spam. 'FREE' appears in 90% of spam, 5% of non-spam. Email contains 'FREE'. Probability it's spam? Round to nearest percent.",
+      "expected_answer": "67",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "hard_stats_001",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Hospital A: 90/100 mild survive, 10/100 severe survive. Overall 100/200=50%. Hospital B: 5/10 mild survive, 50/90 severe survive. Overall 55/100=55%. Which is better for BOTH mild AND severe cases? A or B.",
+      "expected_answer": "A",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_stats_002",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "WWII bombers return with bullet holes in wings. Add armor there? Wald says armor spots WITHOUT holes. Is Wald correct? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_stats_003",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Pilots who performed exceptionally poorly got extra training, then improved. Pilots who performed well got praised, then got worse. Is this evidence training works and praise hurts? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_stats_004",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Researcher tests 20 hypotheses at p<0.05. One is significant. Strong evidence? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_stats_005",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "A 95% confidence interval means: if we repeat the experiment many times, 95% of intervals contain the true value. Is this interpretation CORRECT or INCORRECT?",
+      "expected_answer": "CORRECT",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_causal_001",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Hollywood: Being talented OR attractive gets you hired. Among actors, talent and attractiveness appear negatively correlated. This is collider bias? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_causal_002",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "X Granger-causes Y if past X helps predict future Y. Does Granger causality imply TRUE causality? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_decision_001",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "A judge tells a prisoner: \"You will be hanged on a weekday next week, and you won't know which day until the morning of.\" The prisoner argues this is impossible via backward induction. Is the hanging logically possible? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "hard_decision_002",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Pascal's Wager argues for belief in God based on infinite utility. Does it commit the \"many gods\" objection? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_bat_ball",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A bat and ball cost $1.10 total. The bat costs $1.00 more than the ball. How much does the ball cost in cents?",
+      "expected_answer": "5",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_lily_pad",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A lily pad doubles in size every day. If it takes 48 days to cover the entire lake, how many days does it take to cover half the lake?",
+      "expected_answer": "47",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_widget_machine",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "If 5 machines take 5 minutes to make 5 widgets, how many minutes would it take 100 machines to make 100 widgets?",
+      "expected_answer": "5",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_socks",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A drawer contains 10 black socks and 10 white socks. In complete darkness, what is the minimum number of socks you must draw to guarantee a matching pair?",
+      "expected_answer": "3",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_harmonic",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "Train goes A→B at 60 mph, returns at 40 mph. Average speed for round trip in mph?",
+      "expected_answer": "48",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_switches",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You have 3 switches outside a room, one controls a light inside. You can only enter once. How do you determine which switch controls the light? Answer the METHOD in one word: HEAT, SOUND, or TIMING.",
+      "expected_answer": "HEAT",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_rope",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You have two ropes that each take exactly 1 hour to burn, but burn non-uniformly. How do you measure exactly 45 minutes? Answer: Light ___ ends total at the start.",
+      "expected_answer": "3",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_manhole",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Why are manhole covers round? Answer the PRIMARY engineering reason in one word: FALL, ROLL, or STRENGTH.",
+      "expected_answer": "FALL",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_achilles",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "Achilles: 10 m/s. Tortoise: 1 m/s with 100m head start. Seconds until Achilles catches tortoise? Round to nearest integer.",
+      "expected_answer": "11",
+      "verification_type": "numeric",
+      "tolerance": 1
+    },
+    {
+      "id": "trap_coin_sequence",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You flip a fair coin until you get heads. What is the probability of getting heads on exactly the third flip? Express as a fraction with denominator 8.",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_sunk_cost",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You paid $100 for concert ticket. Day of concert, you feel sick. Should the $100 factor into your decision to go? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_lottery",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Lottery: $1 ticket, 1/1000000 chance of $500000. Expected value per ticket in cents? Round to nearest integer.",
+      "expected_answer": "50",
+      "verification_type": "numeric",
+      "tolerance": 1
+    },
+    {
+      "id": "trap_anchoring",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Asked \"Is the Mississippi River longer or shorter than 500 miles?\" then asked length. A different group asked about 5000 miles. Which group estimates higher? 500 or 5000 group.",
+      "expected_answer": "5000",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_prosecutor",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "DNA match probability is 1 in a million. In a city of 5 million, a match is found. Is \"1 in a million chance of innocence\" a valid conclusion? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "trap_selection",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Study finds hospital patients who pray recover faster. Can we conclude prayer causes faster recovery? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_halting",
+      "category": "reasoning",
+      "difficulty": "impossible",
+      "question": "Can you write a program that determines whether any arbitrary program will halt or run forever? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_godel",
+      "category": "reasoning",
+      "difficulty": "impossible",
+      "question": "Can a consistent formal system powerful enough to express arithmetic prove all true statements about natural numbers? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_trisect",
+      "category": "math",
+      "difficulty": "impossible",
+      "question": "Can you trisect an arbitrary angle using only compass and straightedge? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_square_circle",
+      "category": "math",
+      "difficulty": "impossible",
+      "question": "Can you construct a square with the same area as a given circle using only compass and straightedge? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_double_cube",
+      "category": "math",
+      "difficulty": "impossible",
+      "question": "Can you construct a cube with exactly twice the volume of a given cube using only compass and straightedge? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_continuum",
+      "category": "reasoning",
+      "difficulty": "impossible",
+      "question": "Is the continuum hypothesis (no set has cardinality between integers and reals) provable or disprovable from ZFC axioms? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_np_complete",
+      "category": "reasoning",
+      "difficulty": "impossible",
+      "question": "Is there a known polynomial-time algorithm that solves all NP-complete problems? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "impossible_perpetual",
+      "category": "reasoning",
+      "difficulty": "impossible",
+      "question": "Can a perpetual motion machine of the first kind (creates energy from nothing) exist? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_envelope",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Two envelopes contain money. One has twice the other. You pick one with $100. The naive argument says E[other] = 0.5($50) + 0.5($200) = $125, so switch. But this applies symmetrically! What is the TRUE expected value of the other envelope?",
+      "expected_answer": "100",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_prisoners",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "100 prisoners, 100 boxes with their numbers randomly placed. Each opens 50 boxes to find their number. With the loop-following strategy, what's the approximate survival probability (percentage)?",
+      "expected_answer": "31",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "sota_blue_eyes",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "100 blue-eyed islanders, rule: if you know your eye color, leave at midnight. A visitor says \"at least one person has blue eyes.\" How many days until anyone leaves?",
+      "expected_answer": "100",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_sleeping_beauty",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Sleeping Beauty: Woken once if heads, twice if tails (Mon and Tue, no memory between). When woken, probability of heads? Answer numerator (denominator is 3).",
+      "expected_answer": "1",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_russian_roulette",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "6-chamber revolver, 2 adjacent bullets. First trigger: click (empty). Better to SPIN again or FIRE without spinning?",
+      "expected_answer": "FIRE",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_boy_tuesday",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Family has two children. At least one is a boy born on Tuesday. Probability both are boys? Answer numerator (denominator is 27).",
+      "expected_answer": "13",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_newcomb",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Newcomb: Box A has $1000. Box B has $1M if Predictor (99% accurate) predicted you'd one-box, else $0. You're a one-boxer. Expected value in thousands of dollars?",
+      "expected_answer": "990",
+      "verification_type": "numeric",
+      "tolerance": 10
+    },
+    {
+      "id": "sota_st_petersburg",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "St. Petersburg paradox: Flip until heads, get $2^n. Expected value is infinite, but how much would you pay to play? A reasonable amount would be around $___ (single digit).",
+      "expected_answer": "4",
+      "verification_type": "numeric",
+      "tolerance": 2
+    },
+    {
+      "id": "sota_allais",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Choice 1: A) $1M certain, B) 89% $1M, 10% $5M, 1% $0. Most prefer A. Choice 2: C) 11% $1M, D) 10% $5M. Most prefer D. Are these preferences consistent with expected utility? YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_ellsberg",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Urn: 30 red balls, 60 black OR yellow (unknown ratio). Most prefer red for red-vs-black bet, but black+yellow for not-red vs not-black. This violates expected utility. TRUE or FALSE.",
+      "expected_answer": "TRUE",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_front_door",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "Smoking → Tar → Cancer, but Smoking ← Genetics → Cancer (confounder). Can we identify smoking's effect on cancer through the front-door criterion? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact"
+    },
+    {
+      "id": "sota_instrumental",
+      "category": "reasoning",
+      "difficulty": "sota",
+      "question": "To estimate effect of education on earnings, we use distance to college as instrument. This requires distance affects earnings ONLY through education. TRUE or FALSE.",
+      "expected_answer": "TRUE",
+      "verification_type": "exact"
+    }
+  ]
+}

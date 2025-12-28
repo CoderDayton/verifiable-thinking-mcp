@@ -1,0 +1,37 @@
+# Lefthook configuration for git hooks
+# Install: bun run prepare (runs lefthook install)
+
+pre-commit:
+  parallel: true
+  commands:
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: bun run typecheck
+      stage_fixed: true
+
+    test:
+      glob: "*.{ts,tsx}"
+      run: bun test --bail
+      stage_fixed: true
+
+pre-push:
+  commands:
+    coverage:
+      run: bun test:coverage
+      fail_text: "Coverage check failed. Ensure >80% coverage on src/lib/"
+
+commit-msg:
+  commands:
+    validate:
+      run: |
+        msg=$(cat {1})
+        # Check for conventional commit format (optional but recommended)
+        if ! echo "$msg" | grep -qE "^(feat|fix|docs|style|refactor|test|chore|ci|deps)(\(.+\))?: .+"; then
+          echo "Warning: Consider using conventional commits format:"
+          echo "  feat|fix|docs|style|refactor|test|chore|ci|deps(scope): message"
+        fi
+        # Enforce minimum length
+        if [ ${#msg} -lt 10 ]; then
+          echo "Error: Commit message too short (min 10 chars)"
+          exit 1
+        fi
