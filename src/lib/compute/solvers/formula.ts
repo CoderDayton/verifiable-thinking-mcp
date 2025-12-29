@@ -356,6 +356,191 @@ function tryFormulaTier2(text: string, lower: string): ComputeResult | null {
   return null;
 }
 
+// =============================================================================
+// TIER 3 HELPERS (extracted to reduce cognitive complexity)
+// =============================================================================
+
+/** Try logarithm patterns: log₁₀(x), ln(x) */
+function tryLogarithm(text: string, lower: string, start: number): ComputeResult | null {
+  if (!lower.includes("log") && !lower.includes("ln")) return null;
+
+  // Base 10 log - need fresh regex each time due to global flag
+  const logBase10Pattern = /log[\u2081\u20801]?[\u2080\u20800]?\s*\(?\s*(\d+)\s*\)?/gi;
+  const logBase10 = text.match(logBase10Pattern);
+  if (logBase10 && logBase10.length > 0) {
+    let sum = 0;
+    let valid = true;
+    for (const match of logBase10) {
+      const numMatch = match.match(/\d+/);
+      if (numMatch?.[0]) {
+        const val = parseInt(numMatch[0], 10);
+        if (val > 0) {
+          sum += Math.log10(val);
+        } else {
+          valid = false;
+          break;
+        }
+      }
+    }
+    if (valid && (lower.includes("+") || logBase10.length === 1)) {
+      return {
+        solved: true,
+        result: formatResult(sum),
+        method: "logarithm_base10",
+        confidence: 1.0,
+        time_ms: performance.now() - start,
+      };
+    }
+  }
+
+  // Natural log: ln(x)
+  const lnMatch = text.match(TIER3.logNatural);
+  if (lnMatch?.[1]) {
+    const val = parseFloat(lnMatch[1]);
+    if (val > 0) {
+      return {
+        solved: true,
+        result: +Math.log(val).toFixed(6),
+        method: "natural_log",
+        confidence: 1.0,
+        time_ms: performance.now() - start,
+      };
+    }
+  }
+
+  return null;
+}
+
+/** Try quadratic equation: ax² + bx + c = 0 */
+function tryQuadraticEq(text: string, lower: string, start: number): ComputeResult | null {
+  if (!GUARDS.hasX(text) || !text.includes("0")) return null;
+
+  const quadMatch = text.match(TIER3.quadratic);
+  if (!quadMatch?.[2] || !quadMatch[3] || !quadMatch[4] || !quadMatch[5]) return null;
+
+  const a = quadMatch[1] ? parseInt(quadMatch[1], 10) : 1;
+  const bSign = quadMatch[2] === "-" ? -1 : 1;
+  const b = bSign * parseInt(quadMatch[3], 10);
+  const cSign = quadMatch[4] === "-" ? -1 : 1;
+  const c = cSign * parseInt(quadMatch[5], 10);
+  const discriminant = b * b - 4 * a * c;
+
+  if (discriminant < 0) return null;
+
+  const r1 = (-b + Math.sqrt(discriminant)) / (2 * a);
+  const r2 = (-b - Math.sqrt(discriminant)) / (2 * a);
+
+  if (lower.includes("larger") || lower.includes("greater") || lower.includes("bigger")) {
+    return {
+      solved: true,
+      result: Math.max(r1, r2),
+      method: "quadratic_larger",
+      confidence: 1.0,
+      time_ms: performance.now() - start,
+    };
+  }
+  if (lower.includes("smaller") || lower.includes("lesser")) {
+    return {
+      solved: true,
+      result: Math.min(r1, r2),
+      method: "quadratic_smaller",
+      confidence: 1.0,
+      time_ms: performance.now() - start,
+    };
+  }
+  return {
+    solved: true,
+    result: r1 === r2 ? r1 : `${r1}, ${r2}`,
+    method: "quadratic",
+    confidence: 0.95,
+    time_ms: performance.now() - start,
+  };
+}
+
+/** Try combinations: "10 choose 3", nCr */
+function tryCombinationsFormula(text: string, lower: string, start: number): ComputeResult | null {
+  if (!lower.includes("choose") && !/ c /i.test(text) && !lower.includes("combination")) {
+    return null;
+  }
+
+  const combMatch =
+    text.match(TIER3.combinationsChoose) ||
+    text.match(TIER3.combinationsFrom) ||
+    text.match(TIER3.combinationsHowMany);
+
+  if (!combMatch?.[1] || !combMatch[2]) return null;
+
+  let n = parseInt(combMatch[1], 10);
+  let k = parseInt(combMatch[2], 10);
+  if (combMatch[0].includes("from") && n < k) {
+    [n, k] = [k, n];
+  }
+
+  if (n >= k && k >= 0 && n <= 100) {
+    return {
+      solved: true,
+      result: combinations(n, k),
+      method: "combinations",
+      confidence: 1.0,
+      time_ms: performance.now() - start,
+    };
+  }
+  return null;
+}
+
+/** Try permutations: "10 P 3", nPr */
+function tryPermutationsFormula(text: string, lower: string, start: number): ComputeResult | null {
+  if (!/ p /i.test(text) && !lower.includes("permutation") && !lower.includes("arrangement")) {
+    return null;
+  }
+
+  const permMatch = text.match(TIER3.permutationsP) || text.match(TIER3.permutationsWord);
+  if (!permMatch?.[1] || !permMatch[2]) return null;
+
+  const n = parseInt(permMatch[1], 10);
+  const k = parseInt(permMatch[2], 10);
+
+  if (n >= k && k >= 0 && n <= 100) {
+    return {
+      solved: true,
+      result: permutations(n, k),
+      method: "permutations",
+      confidence: 1.0,
+      time_ms: performance.now() - start,
+    };
+  }
+  return null;
+}
+
+/** Try last digit calculation: "7^100 mod 10" */
+function tryLastDigit(text: string, lower: string, start: number): ComputeResult | null {
+  if (!lower.includes("last digit") && !/mod\s*10/i.test(text)) return null;
+
+  const lastDigitMatch = text.match(TIER3.lastDigitMod);
+  if (!lastDigitMatch) return null;
+
+  const base = parseInt(lastDigitMatch[1] || lastDigitMatch[3] || "", 10);
+  const exp = parseInt(lastDigitMatch[2] || lastDigitMatch[4] || "", 10);
+
+  if (Number.isNaN(base) || Number.isNaN(exp) || exp <= 0) return null;
+
+  const lastDigits = [base % 10];
+  let current = base % 10;
+  for (let i = 1; i < 4; i++) {
+    current = (current * (base % 10)) % 10;
+    if (current === lastDigits[0]) break;
+    lastDigits.push(current);
+  }
+
+  return {
+    solved: true,
+    result: lastDigits[(exp - 1) % lastDigits.length],
+    method: "last_digit",
+    confidence: 1.0,
+    time_ms: performance.now() - start,
+  };
+}
+
 /**
  * TIER 3: Medium-cost formulas (more complex patterns)
  * - Logarithms, quadratic, combinations, permutations, last digit
@@ -363,165 +548,13 @@ function tryFormulaTier2(text: string, lower: string): ComputeResult | null {
 function tryFormulaTier3(text: string, lower: string): ComputeResult | null {
   const start = performance.now();
 
-  // LOGARITHMS: log₁₀(x), ln(x) - guard on "log" or "ln"
-  if (lower.includes("log") || lower.includes("ln")) {
-    // Base 10 log - need fresh regex each time due to global flag
-    const logBase10Pattern = /log[\u2081\u20801]?[\u2080\u20800]?\s*\(?\s*(\d+)\s*\)?/gi;
-    const logBase10 = text.match(logBase10Pattern);
-    if (logBase10 && logBase10.length > 0) {
-      let sum = 0;
-      let valid = true;
-      for (const match of logBase10) {
-        const numMatch = match.match(/\d+/);
-        if (numMatch?.[0]) {
-          const val = parseInt(numMatch[0], 10);
-          if (val > 0) {
-            sum += Math.log10(val);
-          } else {
-            valid = false;
-            break;
-          }
-        }
-      }
-      if (valid && (lower.includes("+") || logBase10.length === 1)) {
-        return {
-          solved: true,
-          result: formatResult(sum),
-          method: "logarithm_base10",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
-      }
-    }
-
-    // Natural log: ln(x)
-    const lnMatch = text.match(TIER3.logNatural);
-    if (lnMatch?.[1]) {
-      const val = parseFloat(lnMatch[1]);
-      if (val > 0) {
-        return {
-          solved: true,
-          result: +Math.log(val).toFixed(6),
-          method: "natural_log",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
-      }
-    }
-  }
-
-  // QUADRATIC: ax² + bx + c = 0 - guard on "x²" or "x^2" or "x2" and "= 0"
-  if (GUARDS.hasX(text) && text.includes("0")) {
-    const quadMatch = text.match(TIER3.quadratic);
-    if (quadMatch?.[2] && quadMatch[3] && quadMatch[4] && quadMatch[5]) {
-      const a = quadMatch[1] ? parseInt(quadMatch[1], 10) : 1;
-      const bSign = quadMatch[2] === "-" ? -1 : 1;
-      const b = bSign * parseInt(quadMatch[3], 10);
-      const cSign = quadMatch[4] === "-" ? -1 : 1;
-      const c = cSign * parseInt(quadMatch[5], 10);
-      const discriminant = b * b - 4 * a * c;
-
-      if (discriminant >= 0) {
-        const r1 = (-b + Math.sqrt(discriminant)) / (2 * a);
-        const r2 = (-b - Math.sqrt(discriminant)) / (2 * a);
-
-        if (lower.includes("larger") || lower.includes("greater") || lower.includes("bigger")) {
-          return {
-            solved: true,
-            result: Math.max(r1, r2),
-            method: "quadratic_larger",
-            confidence: 1.0,
-            time_ms: performance.now() - start,
-          };
-        }
-        if (lower.includes("smaller") || lower.includes("lesser")) {
-          return {
-            solved: true,
-            result: Math.min(r1, r2),
-            method: "quadratic_smaller",
-            confidence: 1.0,
-            time_ms: performance.now() - start,
-          };
-        }
-        return {
-          solved: true,
-          result: r1 === r2 ? r1 : `${r1}, ${r2}`,
-          method: "quadratic",
-          confidence: 0.95,
-          time_ms: performance.now() - start,
-        };
-      }
-    }
-  }
-
-  // COMBINATIONS: "10 choose 3" - guard on "choose" or " C " or "combination"
-  if (lower.includes("choose") || / c /i.test(text) || lower.includes("combination")) {
-    const combMatch =
-      text.match(TIER3.combinationsChoose) ||
-      text.match(TIER3.combinationsFrom) ||
-      text.match(TIER3.combinationsHowMany);
-    if (combMatch?.[1] && combMatch[2]) {
-      let n = parseInt(combMatch[1], 10);
-      let k = parseInt(combMatch[2], 10);
-      if (combMatch[0].includes("from") && n < k) {
-        [n, k] = [k, n];
-      }
-      if (n >= k && k >= 0 && n <= 100) {
-        return {
-          solved: true,
-          result: combinations(n, k),
-          method: "combinations",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
-      }
-    }
-  }
-
-  // PERMUTATIONS: "10 P 3" - guard on " P " or "permutation"
-  if (/ p /i.test(text) || lower.includes("permutation") || lower.includes("arrangement")) {
-    const permMatch = text.match(TIER3.permutationsP) || text.match(TIER3.permutationsWord);
-    if (permMatch?.[1] && permMatch[2]) {
-      const n = parseInt(permMatch[1], 10);
-      const k = parseInt(permMatch[2], 10);
-      if (n >= k && k >= 0 && n <= 100) {
-        return {
-          solved: true,
-          result: permutations(n, k),
-          method: "permutations",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
-      }
-    }
-  }
-
-  // LAST DIGIT: "7^100 mod 10" or "last digit of 7^100" - guard on "last digit" or "mod 10"
-  if (lower.includes("last digit") || /mod\s*10/i.test(text)) {
-    const lastDigitMatch = text.match(TIER3.lastDigitMod);
-    if (lastDigitMatch) {
-      const base = parseInt(lastDigitMatch[1] || lastDigitMatch[3] || "", 10);
-      const exp = parseInt(lastDigitMatch[2] || lastDigitMatch[4] || "", 10);
-      if (!Number.isNaN(base) && !Number.isNaN(exp) && exp > 0) {
-        const lastDigits = [base % 10];
-        let current = base % 10;
-        for (let i = 1; i < 4; i++) {
-          current = (current * (base % 10)) % 10;
-          if (current === lastDigits[0]) break;
-          lastDigits.push(current);
-        }
-        return {
-          solved: true,
-          result: lastDigits[(exp - 1) % lastDigits.length],
-          method: "last_digit",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
-      }
-    }
-  }
-
-  return null;
+  return (
+    tryLogarithm(text, lower, start) ||
+    tryQuadraticEq(text, lower, start) ||
+    tryCombinationsFormula(text, lower, start) ||
+    tryPermutationsFormula(text, lower, start) ||
+    tryLastDigit(text, lower, start)
+  );
 }
 
 /**

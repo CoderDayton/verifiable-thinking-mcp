@@ -211,127 +211,70 @@ export function tryWordProblem(text: string): ComputeResult {
   return { solved: false, confidence: 0 };
 }
 
-/**
- * Try to solve multi-step word problems by extracting entities and resolving dependencies
- * E.g., "John has twice as many as Mary, who has 5. How many does John have?"
- */
-export function tryMultiStepWordProblem(text: string): ComputeResult {
-  const start = performance.now();
-  const lower = text.toLowerCase();
+// =============================================================================
+// MULTI-STEP WORD PROBLEM HELPERS (extracted to reduce cognitive complexity)
+// =============================================================================
 
-  // Extract entities and their relationships
-  const entities: Map<string, Entity> = new Map();
+type OperationFn = (x: number) => number;
+
+/** Extract simple binary relations (twice, half, triple) */
+function extractSimpleRelation(
+  text: string,
+  pattern: RegExp,
+  operation: OperationFn,
+  entities: Map<string, Entity>,
+): void {
+  const regex = new RegExp(pattern.source, "gi");
   let match: RegExpExecArray | null;
-
-  // IMPORTANT: Run relational patterns FIRST (more specific), then direct values
-
-  // Pattern: "[Name1] has twice as many as [Name2]"
-  // Need fresh regex due to global flag
-  const twicePattern = new RegExp(MULTI_STEP.twice.source, "gi");
-  while ((match = twicePattern.exec(text)) !== null) {
+  while ((match = regex.exec(text)) !== null) {
     const name1 = match[1]?.toLowerCase();
     const name2 = match[2]?.toLowerCase();
-    if (name1 && name2) {
-      entities.set(name1, { name: name1, value: null, dependsOn: name2, operation: (x) => x * 2 });
+    if (name1 && name2 && !entities.has(name1)) {
+      entities.set(name1, { name: name1, value: null, dependsOn: name2, operation });
       if (!entities.has(name2)) {
         entities.set(name2, { name: name2, value: null, dependsOn: null, operation: null });
       }
     }
   }
+}
 
-  // Pattern: "[Name1] has half as many as [Name2]"
-  const halfPattern = new RegExp(MULTI_STEP.half.source, "gi");
-  while ((match = halfPattern.exec(text)) !== null) {
-    const name1 = match[1]?.toLowerCase();
-    const name2 = match[2]?.toLowerCase();
-    if (name1 && name2) {
-      if (!entities.has(name1)) {
-        entities.set(name1, {
-          name: name1,
-          value: null,
-          dependsOn: name2,
-          operation: (x) => x / 2,
-        });
-      }
-      if (!entities.has(name2)) {
-        entities.set(name2, { name: name2, value: null, dependsOn: null, operation: null });
-      }
-    }
-  }
-
-  // Pattern: "[Name1] has [N] more than [Name2]"
-  const morePattern = new RegExp(MULTI_STEP.more.source, "gi");
-  while ((match = morePattern.exec(text)) !== null) {
+/** Extract delta relations (more, less) where match[2] contains the delta */
+function extractDeltaRelation(
+  text: string,
+  pattern: RegExp,
+  sign: 1 | -1,
+  entities: Map<string, Entity>,
+): void {
+  const regex = new RegExp(pattern.source, "gi");
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
     const name1 = match[1]?.toLowerCase();
     const deltaStr = match[2];
     const name2 = match[3]?.toLowerCase();
-    if (name1 && deltaStr && name2) {
+    if (name1 && deltaStr && name2 && !entities.has(name1)) {
       const delta = parseFloat(deltaStr);
-      if (!entities.has(name1)) {
-        entities.set(name1, {
-          name: name1,
-          value: null,
-          dependsOn: name2,
-          operation: (x) => x + delta,
-        });
-      }
+      entities.set(name1, {
+        name: name1,
+        value: null,
+        dependsOn: name2,
+        operation: (x) => x + sign * delta,
+      });
       if (!entities.has(name2)) {
         entities.set(name2, { name: name2, value: null, dependsOn: null, operation: null });
       }
     }
   }
+}
 
-  // Pattern: "[Name1] has [N] less/fewer than [Name2]"
-  const lessPattern = new RegExp(MULTI_STEP.less.source, "gi");
-  while ((match = lessPattern.exec(text)) !== null) {
-    const name1 = match[1]?.toLowerCase();
-    const deltaStr = match[2];
-    const name2 = match[3]?.toLowerCase();
-    if (name1 && deltaStr && name2) {
-      const delta = parseFloat(deltaStr);
-      if (!entities.has(name1)) {
-        entities.set(name1, {
-          name: name1,
-          value: null,
-          dependsOn: name2,
-          operation: (x) => x - delta,
-        });
-      }
-      if (!entities.has(name2)) {
-        entities.set(name2, { name: name2, value: null, dependsOn: null, operation: null });
-      }
-    }
-  }
-
-  // Pattern: "[Name1] has three/triple times as many as [Name2]"
-  const triplePattern = new RegExp(MULTI_STEP.triple.source, "gi");
-  while ((match = triplePattern.exec(text)) !== null) {
-    const name1 = match[1]?.toLowerCase();
-    const name2 = match[2]?.toLowerCase();
-    if (name1 && name2) {
-      if (!entities.has(name1)) {
-        entities.set(name1, {
-          name: name1,
-          value: null,
-          dependsOn: name2,
-          operation: (x) => x * 3,
-        });
-      }
-      if (!entities.has(name2)) {
-        entities.set(name2, { name: name2, value: null, dependsOn: null, operation: null });
-      }
-    }
-  }
-
-  // NOW extract direct values for entities not already matched with relations
-  // Pattern: "[Name] has [number]" - but only if not already in a relation
-  const directValuePattern = new RegExp(MULTI_STEP.directValue.source, "gi");
-  while ((match = directValuePattern.exec(text)) !== null) {
+/** Extract direct values "[Name] has [number]" */
+function extractDirectValues(text: string, entities: Map<string, Entity>): void {
+  const regex = new RegExp(MULTI_STEP.directValue.source, "gi");
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
     const name = match[1]?.toLowerCase();
     const valueStr = match[2];
     if (name && valueStr) {
       const value = parseFloat(valueStr);
-      // Only set if entity doesn't exist OR exists but has no value and no dependency
       const existing = entities.get(name);
       if (!existing) {
         entities.set(name, { name, value, dependsOn: null, operation: null });
@@ -340,71 +283,99 @@ export function tryMultiStepWordProblem(text: string): ComputeResult {
       }
     }
   }
+}
 
-  // Resolve dependencies (topological order, max 10 iterations to prevent cycles)
+/** Resolve entity dependencies via topological iteration */
+function resolveDependencies(entities: Map<string, Entity>): void {
   let changed = true;
   let iterations = 0;
   while (changed && iterations < 10) {
     changed = false;
     iterations++;
-
     for (const entity of entities.values()) {
       if (entity.value === null && entity.dependsOn && entity.operation) {
-        const dependency = entities.get(entity.dependsOn);
-        if (dependency?.value !== null && dependency?.value !== undefined) {
-          entity.value = entity.operation(dependency.value);
+        const dep = entities.get(entity.dependsOn);
+        if (dep?.value !== null && dep?.value !== undefined) {
+          entity.value = entity.operation(dep.value);
           changed = true;
         }
       }
     }
   }
+}
 
-  // Find what's being asked
-  // Pattern: "How many does [Name] have?" or "What does [Name] have?"
+/** Try to answer a specific entity question */
+function tryAnswerEntityQuestion(
+  text: string,
+  entities: Map<string, Entity>,
+  start: number,
+): ComputeResult | null {
   const questionMatch = text.match(MULTI_STEP.question);
-
   if (questionMatch?.[1]) {
-    const askedName = questionMatch[1].toLowerCase();
-    const entity = entities.get(askedName);
-
+    const entity = entities.get(questionMatch[1].toLowerCase());
     if (entity?.value !== null && entity?.value !== undefined) {
-      const time_ms = performance.now() - start;
       return {
         solved: true,
         result: formatResult(entity.value),
         method: "multi_step_word",
         confidence: 0.9,
-        time_ms,
+        time_ms: performance.now() - start,
       };
     }
   }
+  return null;
+}
 
-  // Alternative: "total" questions - sum all entity values
-  if (/total|altogether|combined|sum/i.test(lower) && entities.size > 0) {
-    let total = 0;
-    let allResolved = true;
+/** Try to answer a "total" question */
+function tryAnswerTotalQuestion(
+  lower: string,
+  entities: Map<string, Entity>,
+  start: number,
+): ComputeResult | null {
+  if (!/total|altogether|combined|sum/i.test(lower) || entities.size === 0) return null;
 
-    for (const entity of entities.values()) {
-      if (entity.value !== null) {
-        total += entity.value;
-      } else {
-        allResolved = false;
-      }
-    }
-
-    if (allResolved && entities.size > 0) {
-      const time_ms = performance.now() - start;
-      return {
-        solved: true,
-        result: formatResult(total),
-        method: "multi_step_total",
-        confidence: 0.85,
-        time_ms,
-      };
-    }
+  let total = 0;
+  for (const entity of entities.values()) {
+    if (entity.value === null) return null; // Not all resolved
+    total += entity.value;
   }
 
-  return { solved: false, confidence: 0 };
+  return {
+    solved: true,
+    result: formatResult(total),
+    method: "multi_step_total",
+    confidence: 0.85,
+    time_ms: performance.now() - start,
+  };
+}
+
+/**
+ * Try to solve multi-step word problems by extracting entities and resolving dependencies
+ * E.g., "John has twice as many as Mary, who has 5. How many does John have?"
+ */
+export function tryMultiStepWordProblem(text: string): ComputeResult {
+  const start = performance.now();
+  const lower = text.toLowerCase();
+  const entities: Map<string, Entity> = new Map();
+
+  // Extract relations (order matters: specific patterns first)
+  extractSimpleRelation(text, MULTI_STEP.twice, (x) => x * 2, entities);
+  extractSimpleRelation(text, MULTI_STEP.half, (x) => x / 2, entities);
+  extractSimpleRelation(text, MULTI_STEP.triple, (x) => x * 3, entities);
+  extractDeltaRelation(text, MULTI_STEP.more, 1, entities);
+  extractDeltaRelation(text, MULTI_STEP.less, -1, entities);
+
+  // Extract direct values last
+  extractDirectValues(text, entities);
+
+  // Resolve dependencies
+  resolveDependencies(entities);
+
+  // Try to answer
+  return (
+    tryAnswerEntityQuestion(text, entities, start) ||
+    tryAnswerTotalQuestion(lower, entities, start) || { solved: false, confidence: 0 }
+  );
 }
 
 // =============================================================================
