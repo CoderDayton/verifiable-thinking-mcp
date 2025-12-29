@@ -822,6 +822,86 @@
       "question": "To estimate effect of education on earnings, we use distance to college as instrument. This requires distance affects earnings ONLY through education. TRUE or FALSE.",
       "expected_answer": "TRUE",
       "verification_type": "exact"
+    },
+    {
+      "id": "open_explain_001",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Explain why the Monty Hall problem has a counterintuitive solution. What makes people initially guess wrong?",
+      "expected_answer": "switching gives 2/3 probability",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_explain_002",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "Explain step by step how to find the derivative of f(x) = x³ + 2x² - 5x + 3. Show your work.",
+      "expected_answer": "3x² + 4x - 5",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_explain_003",
+      "category": "logic",
+      "difficulty": "medium",
+      "question": "Explain the difference between modus ponens and modus tollens. Give an example of each.",
+      "expected_answer": "modus ponens",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_analysis_001",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "A company's revenue grew 20% but profits fell 10%. What are three possible explanations for this? Analyze each.",
+      "expected_answer": "costs",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_analysis_002",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Compare and contrast correlation vs causation. Why is this distinction important in scientific research? Give examples.",
+      "expected_answer": "causation",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_code_001",
+      "category": "code",
+      "difficulty": "medium",
+      "question": "Write a function to check if a string is a palindrome. Explain your approach and handle edge cases.",
+      "expected_answer": "reverse",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_code_002",
+      "category": "code",
+      "difficulty": "hard",
+      "question": "Explain how a hash table works. What is collision resolution? Compare chaining vs open addressing.",
+      "expected_answer": "collision",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_reasoning_001",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "You have 8 balls, one is slightly heavier. Using a balance scale, what's the minimum number of weighings to find it? Explain your strategy.",
+      "expected_answer": "2",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_reasoning_002",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "A bat and ball cost $1.10 together. The bat costs $1 more than the ball. How much does the ball cost? Explain why many people get this wrong.",
+      "expected_answer": "0.05",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_math_001",
+      "category": "math",
+      "difficulty": "hard",
+      "question": "Prove that the square root of 2 is irrational. Show your proof step by step.",
+      "expected_answer": "contradiction",
+      "verification_type": "contains"
     }
   ]
 }

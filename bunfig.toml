@@ -11,5 +11,10 @@ coverageThreshold = { lines = 0.8, functions = 0.8 }
 coveragePathIgnorePatterns = [
   "src/prompts/**",
   "src/index.ts",
-  "reference/**"
+  "reference/**",
+  "crash/**",
+  "**/crash/**"
 ]
+
+# Exclude crash directory from test discovery
+testPathIgnorePatterns = ["crash/**", "**/crash/**"]

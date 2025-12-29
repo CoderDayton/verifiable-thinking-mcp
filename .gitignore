@@ -95,11 +95,13 @@ desktop.ini
 # Benchmark Results (keep questions, ignore generated results)
 # =============================================================================
 examples/benchmarks/results-*.json
+examples/benchmarks/judge-*.json
 
 # =============================================================================
 # Reference materials (research, drafts, not part of the codebase)
 # =============================================================================
 reference/
+crash/
 
 # =============================================================================
 # Temporary & Misc

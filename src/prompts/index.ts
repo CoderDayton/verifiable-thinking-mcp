@@ -1,10 +1,10 @@
-export { 
+export {
   allPrompts,
-  templates,
-  mathematicalProofPrompt,
-  logicalDeductionPrompt,
   codeReviewPrompt,
-  debuggingPrompt,
-  problemDecompositionPrompt,
   comparativeAnalysisPrompt,
+  debuggingPrompt,
+  logicalDeductionPrompt,
+  mathematicalProofPrompt,
+  problemDecompositionPrompt,
+  templates,
 } from "./templates.ts";

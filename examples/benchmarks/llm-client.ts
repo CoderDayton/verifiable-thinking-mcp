@@ -107,9 +107,9 @@ export class LLMClient {
    */
   async ask(
     prompt: string,
-    options: { system?: string; temperature?: number } = {}
+    options: { system?: string; temperature?: number; signal?: AbortSignal } = {}
   ): Promise<string> {
-    const { system, temperature = 0.1 } = options;
+    const { system, temperature = 0.1, signal } = options;
     const messages: ChatMessage[] = [];
 
     if (system) {
@@ -133,6 +133,11 @@ export class LLMClient {
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        
+        // Handle external abort signal
+        if (signal) {
+            signal.addEventListener("abort", () => controller.abort());
+        }
 
         try {
           const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
@@ -187,9 +192,9 @@ export class LLMClient {
    */
   async *stream(
     prompt: string,
-    options: { system?: string; temperature?: number } = {}
+    options: { system?: string; temperature?: number; signal?: AbortSignal } = {}
   ): AsyncGenerator<string> {
-    const { system, temperature = 0.1 } = options;
+    const { system, temperature = 0.1, signal } = options;
     const messages: ChatMessage[] = [];
 
     if (system) {
@@ -209,6 +214,11 @@ export class LLMClient {
       }
       lastRequestTime = Date.now();
 
+      const controller = new AbortController();
+      if (signal) {
+        signal.addEventListener("abort", () => controller.abort());
+      }
+
       const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
@@ -222,6 +232,7 @@ export class LLMClient {
           temperature,
           stream: true,
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {

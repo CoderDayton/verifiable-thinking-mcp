@@ -1,0 +1,65 @@
+/**
+ * Main barrel export for src/lib/
+ * Re-exports commonly used utilities for convenient imports
+ */
+
+// Cache utilities
+export { verificationCache } from "./cache";
+// Compression utilities
+export {
+  calculateEntropy,
+  compress,
+  needsCompression,
+  quickCompress,
+} from "./compression";
+// Local compute
+export {
+  computeConfidence,
+  extractAndCompute,
+  isLikelyComputable,
+  tryLocalCompute,
+} from "./compute/index";
+// Concept tracking
+export {
+  ConceptTracker,
+  clearTracker,
+  getTracker,
+} from "./concepts";
+// Answer extraction & matching
+export {
+  answersMatch,
+  extractAnswer,
+  normalizeAnswer,
+  stripMarkdown,
+} from "./extraction";
+// LLM-as-Judge for response comparison
+export {
+  type DimensionScores,
+  type JudgeInput,
+  type JudgeResult,
+  type JudgeSummary,
+  judgeBatch,
+  judgeResponses,
+  type LLMJudgeFunc,
+  summarizeJudgments,
+} from "./judge";
+// Session management
+export {
+  SessionManager,
+  SessionManagerImpl,
+  type ThoughtRecord,
+} from "./session";
+// Think module (comprehensive)
+export * from "./think";
+// Token estimation (from think/verification)
+export {
+  estimateCodeTokens,
+  estimateTokens,
+  estimateTokensBatch,
+} from "./think/verification";
+// Verification (domain-specific)
+export {
+  clearVerificationCache,
+  getVerificationCacheStats,
+  verify,
+} from "./verification";

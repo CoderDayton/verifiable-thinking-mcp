@@ -9,6 +9,7 @@
     "zod": "latest"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.3.10",
     "@types/bun": "latest",
     "lefthook": "^2.0.13"
   },
@@ -21,8 +22,18 @@
     "start": "bun run src/index.ts",
     "test": "bun test",
     "test:coverage": "bun test --coverage",
-    "test:ci": "bun test --coverage --bail",
+    "test:ci": "bun test --coverage --bail && bun run coverage:check",
+    "coverage:check": "bun run scripts/check-coverage.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint src test scripts",
+    "format": "biome format --write src test scripts",
+    "check": "biome check src test scripts",
     "prepare": "lefthook install"
+  },
+  "coverage": {
+    "threshold": {
+      "lines": 100,
+      "functions": 95
+    }
   }
 }

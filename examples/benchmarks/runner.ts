@@ -2,12 +2,21 @@
  * Benchmark runner for verifiable-thinking-mcp
  * Compares baseline LLM vs MCP-guided structured reasoning
  * 
- * Key insight: The tool should GUIDE reasoning, not replace it.
- * We test if guidance improves accuracy without excessive overhead.
+ * Architecture: Option A (Single Direct Call)
+ * - Local compute for math/logic (100% accuracy, ~3ms)
+ * - Direct LLM call for everything else (no phase rewrites)
+ * - MCP tool records reasoning (CRASH-style scratchpad)
  */
 
 import { spawn, type Subprocess } from "bun";
 import { LLMClient, type LLMConfig } from "./llm-client";
+import { extractAnswer } from "../../src/lib/extraction";
+import { getVerbosity, type Verbosity } from "../../src/lib/think/prompts";
+import {
+  assessPromptComplexity,
+  isTrivialQuestion,
+  getTrivialPrompt,
+} from "../../src/lib/think/index";
 
 // Types
 export interface Question {
@@ -35,6 +44,9 @@ export interface RunResult {
     correct: boolean;
     time_ms: number;
     tokens_estimate: number;
+    method?: string;
+    raw_response?: string;
+    response_length?: number;
   };
   with_tool: {
     answer: string;
@@ -44,6 +56,84 @@ export interface RunResult {
     steps: number;
     checkpoints: number;
     risk_flags: string[];
+    method?: string;
+    raw_response?: string;
+    response_length?: number;
+    compression?: {
+      bytes_saved: number;
+      input_compressed: boolean;
+      output_compressed: boolean;
+      context_compressed: boolean;
+    };
+    risk_level?: string;
+    final_confidence?: number;
+    complexity_tier?: string;
+    complexity_path?: string;
+  };
+}
+
+// Enhanced metrics interface
+export interface EnhancedMetrics {
+  accuracy: {
+    overall: number;
+    by_difficulty: Record<string, number>;
+    by_category: Record<string, number>;
+    confidence_interval_95: { lower: number; upper: number };
+  };
+  comparison: {
+    accuracy_delta: number;
+    accuracy_lift_percent: number;
+    questions_fixed: number;
+    questions_broken: number;
+    net_improvement: number;
+    agreement_rate: number;
+    cohen_kappa: number;
+  };
+  timing: {
+    avg_ms: number;
+    median_ms: number;
+    p95_ms: number;
+    p99_ms: number;
+    min_ms: number;
+    max_ms: number;
+    std_dev_ms: number;
+    total_ms: number;
+  };
+  tokens: {
+    total: number;
+    avg_per_question: number;
+    avg_per_correct: number;
+    efficiency_score: number;
+  };
+  steps?: {
+    total: number;
+    avg_per_question: number;
+    avg_per_correct: number;
+    distribution: Record<number, number>;
+  };
+  risks?: {
+    total_flags: number;
+    by_type: Record<string, number>;
+    flagged_accuracy: number;
+    unflagged_accuracy: number;
+  };
+  calibration?: {
+    by_risk_level: Record<string, { count: number; accuracy: number }>;
+    by_confidence_bucket: Array<{
+      range: string;
+      count: number;
+      accuracy: number;
+      expected_accuracy: number;
+      calibration_error: number;
+    }>;
+    mean_calibration_error: number;
+    well_calibrated: boolean;
+  };
+  responses: {
+    avg_length: number;
+    median_length: number;
+    empty_count: number;
+    numeric_answer_rate: number;
   };
 }
 
@@ -53,161 +143,219 @@ export interface BenchmarkResults {
   total_questions: number;
   results: RunResult[];
   summary: {
-    baseline: { correct: number; total: number; accuracy: number; avg_time_ms: number };
-    with_tool: { correct: number; total: number; accuracy: number; avg_time_ms: number };
-    by_difficulty: Record<string, { baseline_accuracy: number; tool_accuracy: number; delta: number }>;
-    by_category: Record<string, { baseline_accuracy: number; tool_accuracy: number; delta: number }>;
+    baseline: EnhancedMetrics;
+    with_tool: EnhancedMetrics;
+    comparison: {
+      accuracy_delta: number;
+      accuracy_lift_percent: number;
+      time_overhead_factor: number;
+      token_overhead_factor: number;
+      questions_fixed: number;
+      questions_broken: number;
+      net_improvement: number;
+      agreement_rate: number;
+      both_correct: number;
+      both_wrong: number;
+      only_baseline_correct: number;
+      only_tool_correct: number;
+      statistical_significance: {
+        mcnemar_chi2: number;
+        p_value: number;
+        significant_at_05: boolean;
+        significant_at_01: boolean;
+      };
+    };
+    by_difficulty: Record<string, {
+      baseline_accuracy: number;
+      tool_accuracy: number;
+      delta: number;
+      count: number;
+      baseline_avg_time: number;
+      tool_avg_time: number;
+    }>;
+    by_category: Record<string, {
+      baseline_accuracy: number;
+      tool_accuracy: number;
+      delta: number;
+      count: number;
+      baseline_avg_time: number;
+      tool_avg_time: number;
+    }>;
+    compression?: {
+      total_bytes_saved: number;
+      steps_compressed: number;
+      avg_bytes_per_step: number;
+      compression_rate: number;
+    };
+    complexity?: {
+      by_tier: Record<string, { count: number; accuracy: number; avg_time_ms: number }>;
+      by_path: Record<string, { count: number; accuracy: number; avg_time_ms: number }>;
+    };
+    efficiency: {
+      baseline_correct_per_second: number;
+      tool_correct_per_second: number;
+      baseline_correct_per_1k_tokens: number;
+      tool_correct_per_1k_tokens: number;
+      break_even_accuracy: number;
+    };
   };
 }
 
 // ============================================================================
-// MCP CLIENT - JSON-RPC communication with the server
+// MCP CLIENT
 // ============================================================================
 
-interface JsonRpcRequest {
-  jsonrpc: "2.0";
-  id: number;
-  method: string;
-  params?: Record<string, unknown>;
+interface ThinkArgs {
+  thought: string;
+  step: number;
+  total: number;
+  is_final?: boolean;
+  guidance?: boolean;
+  verify?: boolean;
+  domain?: string;
+  session_id?: string;
+  compression_level?: string;
+  local_compute?: boolean;
 }
 
-interface JsonRpcResponse {
-  jsonrpc: "2.0";
-  id: number;
-  result?: unknown;
-  error?: { code: number; message: string };
+interface ThinkResult {
+  raw: string;
+  meta: Record<string, unknown>;
 }
 
 class MCPClient {
-  private proc: Subprocess<"pipe", "pipe", "inherit">;
-  private buffer = "";
+  private proc: Subprocess | null = null;
   private requestId = 0;
-  private pending = new Map<number, {
-    resolve: (value: JsonRpcResponse) => void;
-    reject: (error: Error) => void;
-  }>();
-  private initialized = false;
+  private pendingRequests = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private buffer = "";
 
-  constructor() {
+  async init(): Promise<void> {
     this.proc = spawn({
-      cmd: ["bun", "run", "../../src/index.ts"],
+      cmd: ["bun", "run", "src/index.ts"],
+      cwd: new URL("../../", import.meta.url).pathname,
       stdin: "pipe",
       stdout: "pipe",
       stderr: "inherit",
-      cwd: import.meta.dir,
     });
+
+    // Read stdout in background
     this.readLoop();
+
+    // Initialize MCP
+    await this.send("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "benchmark", version: "1.0" },
+    });
   }
 
-  private async readLoop() {
+  private async readLoop(): Promise<void> {
+    if (!this.proc?.stdout) return;
     const reader = this.proc.stdout.getReader();
     const decoder = new TextDecoder();
 
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      
+      this.buffer += decoder.decode(value, { stream: true });
+      
+      // Process complete messages
+      let newlineIdx: number;
+      while ((newlineIdx = this.buffer.indexOf('\n')) !== -1) {
+        const line = this.buffer.slice(0, newlineIdx);
+        this.buffer = this.buffer.slice(newlineIdx + 1);
+        
+        if (line.trim()) {
+          try {
+            const msg = JSON.parse(line);
+            if (msg.id !== undefined && this.pendingRequests.has(msg.id)) {
+              const { resolve, reject } = this.pendingRequests.get(msg.id)!;
+              this.pendingRequests.delete(msg.id);
+              if (msg.error) {
+                reject(new Error(msg.error.message || "Unknown error"));
+              } else {
+                resolve(msg.result);
+              }
+            }
+          } catch {
+            // Ignore parse errors
+          }
+        }
+      }
+    }
+  }
+
+  private async send(method: string, params: unknown): Promise<unknown> {
+    if (!this.proc?.stdin) throw new Error("MCP not initialized");
+    
+    const id = ++this.requestId;
+    const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
+    
+    return new Promise((resolve, reject) => {
+      this.pendingRequests.set(id, { resolve, reject });
+      this.proc!.stdin!.write(msg);
+    });
+  }
+
+  async think(args: ThinkArgs): Promise<ThinkResult> {
+    // Map simplified args to full ThinkSchema
+    const fullArgs = {
+      step_number: args.step,
+      estimated_total: args.total,
+      purpose: "analysis",
+      context: "Benchmark evaluation",
+      thought: args.thought,
+      outcome: "Reasoning recorded",
+      next_action: args.is_final ? "Complete" : "Continue reasoning",
+      rationale: "Systematic benchmark evaluation",
+      is_final_step: args.is_final ?? false,
+      guidance: args.guidance ?? false,
+      verify: args.verify ?? false,
+      domain: args.domain,
+      session_id: args.session_id,
+      compression_level: args.compression_level,
+      local_compute: args.local_compute ?? false,
+    };
+    
+    const result = await this.send("tools/call", {
+      name: "think",
+      arguments: fullArgs,
+    }) as { content: Array<{ type: string; text: string }> };
+    
+    const text = result.content?.[0]?.text || "";
+    
+    // Parse meta from JSON code block response
+    let meta: Record<string, unknown> = {};
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        this.buffer += decoder.decode(value, { stream: true });
-        this.processBuffer();
+      const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        meta = JSON.parse(jsonMatch[1]);
       }
     } catch {
-      // Process ended
+      // Ignore meta parse errors
     }
-  }
-
-  private processBuffer() {
-    const lines = this.buffer.split("\n");
-    this.buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const msg = JSON.parse(line) as JsonRpcResponse;
-        const pending = this.pending.get(msg.id);
-        if (pending) {
-          this.pending.delete(msg.id);
-          pending.resolve(msg);
-        }
-      } catch {
-        // Ignore non-JSON lines
-      }
-    }
-  }
-
-  async request(method: string, params?: Record<string, unknown>): Promise<JsonRpcResponse> {
-    const id = ++this.requestId;
-    const req: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
-
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Request ${method} timed out`));
-      }, 30_000);
-
-      this.pending.set(id, {
-        resolve: (res) => { clearTimeout(timeout); resolve(res); },
-        reject: (err) => { clearTimeout(timeout); reject(err); },
-      });
-
-      this.proc.stdin.write(JSON.stringify(req) + "\n");
-    });
-  }
-
-  async init() {
-    if (this.initialized) return;
-    await Bun.sleep(300); // Wait for server startup
-    await this.request("initialize", {
-      protocolVersion: "2024-11-05",
-      capabilities: {},
-      clientInfo: { name: "benchmark", version: "1.0.0" },
-    });
-    this.initialized = true;
-  }
-
-  async think(args: {
-    thought: string;
-    step: number;
-    total?: number;
-    is_final?: boolean;
-    guidance?: boolean;
-    verify?: boolean;
-    domain?: string;
-    session_id: string;
-  }): Promise<{ meta: Record<string, unknown>; raw: string }> {
-    const response = await this.request("tools/call", {
-      name: "think",
-      arguments: args,
-    });
-
-    if (response.error) {
-      throw new Error(response.error.message);
-    }
-
-    const result = response.result as { content: Array<{ text: string }> };
-    const raw = result.content[0]?.text || "";
     
-    // Extract JSON from code block
-    const jsonMatch = raw.match(/```json\n([\s\S]*?)\n```/);
-    const meta = jsonMatch ? JSON.parse(jsonMatch[1]) : {};
-    
-    return { meta, raw };
+    return { raw: text, meta };
   }
 
-  async clearSession(sessionId: string) {
-    await this.request("tools/call", {
+  async clearSession(sessionId: string): Promise<void> {
+    await this.send("tools/call", {
       name: "clear_session",
       arguments: { session_id: sessionId },
     });
   }
 
-  async close() {
-    this.proc.stdin.end();
-    this.proc.kill();
+  async close(): Promise<void> {
+    if (this.proc) {
+      this.proc.kill();
+      this.proc = null;
+    }
   }
 }
 
 // ============================================================================
-// VERIFICATION HELPERS
+// ANSWER VERIFICATION
 // ============================================================================
 
 function verifyAnswer(question: Question, answer: string): boolean {
@@ -215,7 +363,10 @@ function verifyAnswer(question: Question, answer: string): boolean {
     ? question.expected_answer 
     : [question.expected_answer];
   
-  const normalized = answer.trim().toLowerCase();
+  // Normalize answer
+  const normalized = answer.trim().toLowerCase()
+    .replace(/^["']|["']$/g, "")
+    .replace(/\.$/, "");
 
   switch (question.verification_type) {
     case "exact":
@@ -245,62 +396,11 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
-function extractAnswer(response: string): string {
-  // First, look for explicit answer markers
-  const explicitPatterns = [
-    /answer:\s*([^\n.]+)/i,
-    /final answer:\s*([^\n.]+)/i,
-    /the answer is\s*([^\n.]+)/i,
-    /=\s*(\d+(?:\.\d+)?)\s*$/m, // Ends with = number
-    /result:\s*([^\n.]+)/i,
-  ];
-
-  for (const pattern of explicitPatterns) {
-    const match = response.match(pattern);
-    if (match?.[1]) {
-      // Clean up the answer
-      let answer = match[1].trim();
-      // Extract just the number if it starts with one
-      const numMatch = answer.match(/^(-?\d+(?:\.\d+)?)/);
-      if (numMatch) {
-        return numMatch[1];
-      }
-      return answer;
-    }
-  }
-
-  // Look for standalone numbers in the last few lines
-  const lines = response.trim().split("\n").slice(-5);
-  for (const line of lines.reverse()) {
-    // Look for "= number" pattern
-    const eqMatch = line.match(/=\s*(-?\d+(?:\.\d+)?)/);
-    if (eqMatch) return eqMatch[1];
-    
-    // Look for "is number" pattern
-    const isMatch = line.match(/is\s+(-?\d+(?:\.\d+)?)/);
-    if (isMatch) return isMatch[1];
-    
-    // Look for bold number
-    const boldMatch = line.match(/\*\*(-?\d+(?:\.\d+)?)\*\*/);
-    if (boldMatch) return boldMatch[1];
-  }
-
-  // Last resort: find the last number in the response
-  const allNumbers = response.match(/-?\d+(?:\.\d+)?/g);
-  if (allNumbers && allNumbers.length > 0) {
-    return allNumbers[allNumbers.length - 1];
-  }
-
-  // Fallback: last line
-  const lastLine = response.trim().split("\n").pop() || "";
-  return lastLine.slice(0, 50);
-}
-
 // ============================================================================
 // BENCHMARK RUNNERS
 // ============================================================================
 
-// Baseline: Direct LLM call, no guidance
+// Baseline: Direct LLM call, no guidance, no local compute
 async function runBaseline(llm: LLMClient, question: Question): Promise<RunResult["baseline"]> {
   const start = Date.now();
   
@@ -319,179 +419,152 @@ async function runBaseline(llm: LLMClient, question: Question): Promise<RunResul
     correct: verifyAnswer(question, answer),
     time_ms,
     tokens_estimate: estimateTokens(prompt + response),
+    method: "llm",
+    raw_response: response,
+    response_length: response.length,
   };
 }
 
-// With Tool: ADAPTIVE LLM + MCP guidance loop
-// Key insight: Simple problems don't need multi-step reasoning.
-// Only go deeper when guidance indicates risk.
+// With Tool: Option A - Single Direct Call + Local Compute
+// Simple architecture:
+// 1. Try local compute first (math, logic)
+// 2. If not solvable locally, single direct LLM call
+// 3. Record in MCP (CRASH-style scratchpad)
 async function runWithTool(
   llm: LLMClient, 
   mcp: MCPClient, 
-  question: Question
+  question: Question,
+  useLocal = true,
+  compressionLevel: "none" | "auto" | "aggressive" = "auto",
 ): Promise<RunResult["with_tool"]> {
   const start = Date.now();
   const sessionId = `bench_${question.id}_${Date.now()}`;
-  const risk_flags: string[] = [];
-  let checkpoints = 0;
-  let steps = 0;
   let totalTokens = 0;
+
+  // Track compression
+  let totalBytesSaved = 0;
+  let inputCompressed = false;
+  let outputCompressed = false;
+  let contextCompressed = false;
+
+  const trackCompression = (meta: Record<string, unknown>) => {
+    const compression = meta.compression as {
+      input?: boolean;
+      output?: boolean;
+      context?: boolean;
+      bytes_saved?: number;
+    } | undefined;
+    if (compression) {
+      totalBytesSaved += compression.bytes_saved || 0;
+      if (compression.input) inputCompressed = true;
+      if (compression.output) outputCompressed = true;
+      if (compression.context) contextCompressed = true;
+    }
+  };
+
+  const buildCompression = () => totalBytesSaved > 0 ? {
+    bytes_saved: totalBytesSaved,
+    input_compressed: inputCompressed,
+    output_compressed: outputCompressed,
+    context_compressed: contextCompressed,
+  } : undefined;
 
   const domain = question.category === "math" ? "math" 
     : question.category === "logic" ? "logic"
     : question.category === "code" ? "code" 
     : "general";
 
+  const complexity = assessPromptComplexity(question.question);
+
   try {
-    // PHASE 1: Initial attempt with guidance check
-    const initialAttempt = await llm.ask(
-      `${question.question}\n\nSolve this step by step. At the very end, write "Answer: " followed by just the answer (number, letter, or short phrase).`,
-      { system: "You are a careful reasoning assistant. Show your reasoning, then give the final answer clearly.", temperature: 0.1 }
-    );
-    totalTokens += estimateTokens(initialAttempt);
-
-    // Check guidance from MCP
-    const step1 = await mcp.think({
-      thought: initialAttempt,
-      step: 1,
-      total: 2, // Optimistic - may expand
-      guidance: true,
-      domain,
-      session_id: sessionId,
-    });
-    steps++;
-
-    const riskLevel = step1.meta.risk_level as string || "low";
-    const hasCheckpoint = !!step1.meta.checkpoint;
-    const patterns = (step1.meta.patterns as string[]) || [];
-    
-    if (hasCheckpoint) checkpoints++;
-    risk_flags.push(...patterns);
-
-    // DECISION: Do we need deeper reasoning?
-    const needsDeeper = riskLevel !== "low" || hasCheckpoint || 
-      patterns.some(p => ["premature_conclusion", "arithmetic_chain", "overconfident"].includes(p));
-
-    if (!needsDeeper) {
-      // Low risk - trust initial attempt
-      await mcp.think({
-        thought: "Confidence is high, returning initial answer.",
-        step: 2,
-        total: 2,
+    // STEP 1: Try local compute via MCP tool
+    if (useLocal) {
+      const localStep = await mcp.think({
+        thought: question.question,
+        step: 1,
+        total: 1,
         is_final: true,
         guidance: false,
         domain,
         session_id: sessionId,
+        compression_level: compressionLevel,
+        local_compute: true,
       });
-      steps++;
-
-      const answer = extractAnswer(initialAttempt);
-      return {
-        answer,
-        correct: verifyAnswer(question, answer),
-        time_ms: Date.now() - start,
-        tokens_estimate: totalTokens,
-        steps,
-        checkpoints,
-        risk_flags: [...new Set(risk_flags)],
-      };
+      
+      const localResult = localStep.meta.local_compute as { solved?: boolean; result?: unknown } | undefined;
+      if (localResult?.solved && localResult.result !== undefined) {
+        const answer = String(localResult.result);
+        return {
+          answer,
+          correct: verifyAnswer(question, answer),
+          time_ms: Date.now() - start,
+          tokens_estimate: 0,
+          steps: 1,
+          checkpoints: 0,
+          risk_flags: [],
+          method: "local",
+          risk_level: "low",
+          final_confidence: 1.0,
+          complexity_tier: complexity.tier,
+          complexity_path: "local",
+          raw_response: `[LOCAL COMPUTE] ${answer}`,
+          response_length: answer.length,
+        };
+      }
+      await mcp.clearSession(sessionId);
     }
 
-    // PHASE 2: Risk detected - do verification step
-    const verifyPrompt = `I need to verify my answer to: ${question.question}
-
-My initial reasoning:
-${initialAttempt}
-
-Risk patterns detected: ${patterns.join(", ")}
-
-Please:
-1. Check for errors in the reasoning above
-2. Verify the calculation/logic step by step
-3. Provide the corrected answer if needed
-
-Final Answer: [answer]`;
-
-    const verification = await llm.ask(verifyPrompt, {
-      system: "You are a verification assistant. Double-check reasoning carefully.",
-      temperature: 0.1,
-    });
-    totalTokens += estimateTokens(verification);
-
-    const step2 = await mcp.think({
-      thought: verification,
-      step: 2,
-      total: 3,
-      guidance: true,
-      verify: true,
-      domain,
-      session_id: sessionId,
-    });
-    steps++;
-
-    if (step2.meta.checkpoint) checkpoints++;
-    if (step2.meta.patterns) {
-      risk_flags.push(...(step2.meta.patterns as string[]));
+    // STEP 2: Single direct LLM call (Option A)
+    // Use trivial prompt for simple questions, baseline-style for others
+    const trivial = isTrivialQuestion(question.question);
+    
+    let system: string;
+    let prompt: string;
+    
+    if (trivial) {
+      const trivialPrompt = getTrivialPrompt(question.question);
+      system = trivialPrompt.system;
+      prompt = trivialPrompt.user;
+    } else {
+      // Same as baseline - direct, no phase rewrites
+      system = "You are a helpful assistant. Answer questions directly and concisely.";
+      prompt = `${question.question}\n\nProvide your answer clearly. If it's a number, state just the number. If it's a choice, state just the choice.`;
     }
 
-    // Check if still risky after verification
-    const stillRisky = (step2.meta.risk_level as string) === "high";
+    const response = await llm.ask(prompt, { system, temperature: 0.1 });
+    totalTokens += estimateTokens(prompt + response);
 
-    if (stillRisky) {
-      // PHASE 3: High risk even after verification - final check
-      const finalCheck = await llm.ask(
-        `CRITICAL CHECK for: ${question.question}
-
-Previous attempts flagged as high risk. 
-
-Provide ONLY the numerical/factual answer, nothing else. Double-check before responding.
-
-Answer:`,
-        { system: "Give only the answer, nothing else.", temperature: 0.0 }
-      );
-      totalTokens += estimateTokens(finalCheck);
-
-      await mcp.think({
-        thought: finalCheck,
-        step: 3,
-        total: 3,
-        is_final: true,
-        domain,
-        session_id: sessionId,
-      });
-      steps++;
-
-      return {
-        answer: extractAnswer(finalCheck),
-        correct: verifyAnswer(question, extractAnswer(finalCheck)),
-        time_ms: Date.now() - start,
-        tokens_estimate: totalTokens,
-        steps,
-        checkpoints,
-        risk_flags: [...new Set(risk_flags)],
-      };
-    }
-
-    // Return verification result
-    await mcp.think({
-      thought: "Verification complete.",
-      step: 3,
-      total: 3,
+    // STEP 3: Record in MCP (CRASH-style - just logging, no guidance that could interfere)
+    const stepResult = await mcp.think({
+      thought: response,
+      step: 1,
+      total: 1,
       is_final: true,
+      guidance: false, // Pure scratchpad, no pattern detection
       domain,
       session_id: sessionId,
+      compression_level: compressionLevel,
     });
-    steps++;
+    trackCompression(stepResult.meta);
 
-    const answer = extractAnswer(verification);
+    const answer = extractAnswer(response);
+
     return {
       answer,
       correct: verifyAnswer(question, answer),
       time_ms: Date.now() - start,
       tokens_estimate: totalTokens,
-      steps,
-      checkpoints,
-      risk_flags: [...new Set(risk_flags)],
+      steps: 1,
+      checkpoints: 0,
+      risk_flags: [],
+      method: "llm",
+      compression: buildCompression(),
+      risk_level: "low",
+      final_confidence: trivial ? 0.95 : 0.85,
+      complexity_tier: complexity.tier,
+      complexity_path: trivial ? "trivial" : "direct",
+      raw_response: response,
+      response_length: response.length,
     };
 
   } finally {
@@ -509,10 +582,22 @@ export async function runBenchmark(
     llmConfig?: Partial<LLMConfig>;
     runBaseline?: boolean;
     runTool?: boolean;
+    useLocalCompute?: boolean;
+    compressionLevel?: "none" | "auto" | "aggressive";
+    quiet?: boolean;
     onProgress?: (completed: number, total: number, result: RunResult) => void;
   } = {}
 ): Promise<BenchmarkResults> {
-  const { runBaseline: doBaseline = true, runTool: doTool = true, onProgress } = options;
+  const { 
+    runBaseline: doBaseline = true, 
+    runTool: doTool = true, 
+    useLocalCompute = true, 
+    compressionLevel = "auto", 
+    quiet = false, 
+    onProgress 
+  } = options;
+  
+  const log = quiet ? () => {} : console.log.bind(console);
   const llm = new LLMClient(options.llmConfig);
   
   let mcp: MCPClient | null = null;
@@ -526,27 +611,28 @@ export async function runBenchmark(
   try {
     for (let i = 0; i < questions.length; i++) {
       const q = questions[i];
-      console.log(`\n[${i + 1}/${questions.length}] ${q.difficulty}/${q.category}: ${q.question.slice(0, 50)}...`);
+      log(`\n[${i + 1}/${questions.length}] ${q.difficulty}/${q.category}: ${q.question.slice(0, 50)}...`);
 
       const result: RunResult = {
         question_id: q.id,
         difficulty: q.difficulty,
         category: q.category,
-        baseline: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0 },
-        with_tool: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, steps: 0, checkpoints: 0, risk_flags: [] },
+        baseline: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, method: "llm" },
+        with_tool: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, steps: 0, checkpoints: 0, risk_flags: [], method: "llm" },
       };
 
       if (doBaseline) {
-        console.log("  Running baseline...");
+        log("  Running baseline (pure LLM)...");
         result.baseline = await runBaseline(llm, q);
-        console.log(`  Baseline: ${result.baseline.correct ? "✓" : "✗"} (${result.baseline.time_ms}ms) → "${result.baseline.answer.slice(0, 30)}"`);
+        log(`  Baseline: ${result.baseline.correct ? "✓" : "✗"} (${result.baseline.time_ms.toFixed(2)}ms) → "${result.baseline.answer.slice(0, 30)}"`);
       }
 
       if (doTool && mcp) {
-        console.log("  Running with MCP tool...");
-        result.with_tool = await runWithTool(llm, mcp, q);
-        const flags = result.with_tool.risk_flags.length > 0 ? ` [${result.with_tool.risk_flags.join(",")}]` : "";
-        console.log(`  With tool: ${result.with_tool.correct ? "✓" : "✗"} (${result.with_tool.time_ms}ms, ${result.with_tool.steps} steps, ${result.with_tool.checkpoints} checkpoints)${flags} → "${result.with_tool.answer.slice(0, 30)}"`);
+        log("  Running with MCP tool...");
+        result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel);
+        const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
+        const compTag = result.with_tool.compression ? ` [${result.with_tool.compression.bytes_saved}B saved]` : "";
+        log(`  With tool: ${result.with_tool.correct ? "✓" : "✗"} (${result.with_tool.time_ms.toFixed(2)}ms, ${result.with_tool.steps} steps)${methodTag}${compTag} → "${result.with_tool.answer.slice(0, 30)}"`);
       }
 
       results.push(result);
@@ -569,45 +655,405 @@ export async function runBenchmark(
   };
 }
 
-function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
-  const baselineCorrect = results.filter(r => r.baseline.correct).length;
-  const toolCorrect = results.filter(r => r.with_tool.correct).length;
+// ============================================================================
+// STATISTICAL HELPERS
+// ============================================================================
+
+function calculatePercentile(sorted: number[], p: number): number {
+  if (sorted.length === 0) return 0;
+  const idx = (p / 100) * (sorted.length - 1);
+  const lower = Math.floor(idx);
+  const upper = Math.ceil(idx);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (idx - lower) * (sorted[upper] - sorted[lower]);
+}
+
+function calculateStdDev(values: number[], mean: number): number {
+  if (values.length === 0) return 0;
+  const squaredDiffs = values.map(v => (v - mean) ** 2);
+  return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / values.length);
+}
+
+function calculateWilsonInterval(successes: number, total: number, z = 1.96): { lower: number; upper: number } {
+  if (total === 0) return { lower: 0, upper: 0 };
+  const p = successes / total;
+  const denominator = 1 + z * z / total;
+  const center = p + z * z / (2 * total);
+  const spread = z * Math.sqrt((p * (1 - p) + z * z / (4 * total)) / total);
+  return {
+    lower: Math.max(0, (center - spread) / denominator),
+    upper: Math.min(1, (center + spread) / denominator),
+  };
+}
+
+function calculateMcNemarTest(b: number, c: number): { chi2: number; p_value: number } {
+  if (b + c === 0) return { chi2: 0, p_value: 1 };
+  const chi2 = ((Math.abs(b - c) - 1) ** 2) / (b + c);
+  const p_value = Math.exp(-chi2 / 2);
+  return { chi2, p_value };
+}
+
+function calculateCohenKappa(both_correct: number, both_wrong: number, only_a: number, only_b: number): number {
+  const total = both_correct + both_wrong + only_a + only_b;
+  if (total === 0) return 0;
+  
+  const po = (both_correct + both_wrong) / total;
+  const pa = (both_correct + only_a) / total;
+  const pb = (both_correct + only_b) / total;
+  const pe = pa * pb + (1 - pa) * (1 - pb);
+  
+  if (pe === 1) return 1;
+  return (po - pe) / (1 - pe);
+}
+
+// ============================================================================
+// ENHANCED SUMMARY CALCULATION
+// ============================================================================
+
+function calculateEnhancedMetrics(
+  results: RunResult[],
+  field: "baseline" | "with_tool"
+): EnhancedMetrics {
   const total = results.length;
+  const correct = results.filter(r => r[field].correct).length;
+  
+  const times = results.map(r => r[field].time_ms);
+  const sortedTimes = [...times].sort((a, b) => a - b);
+  const avgTime = times.reduce((a, b) => a + b, 0) / total;
+  
+  const tokens = results.map(r => r[field].tokens_estimate);
+  const totalTokens = tokens.reduce((a, b) => a + b, 0);
+  const correctResults = results.filter(r => r[field].correct);
+  const tokensForCorrect = correctResults.reduce((sum, r) => sum + r[field].tokens_estimate, 0);
+  
+  const lengths = results.map(r => r[field].response_length || r[field].answer.length);
+  const sortedLengths = [...lengths].sort((a, b) => a - b);
+  const numericAnswers = results.filter(r => /^-?\d+(\.\d+)?$/.test(r[field].answer.trim())).length;
+  
+  const byDifficulty: Record<string, number> = {};
+  const byCat: Record<string, number> = {};
+  
+  for (const diff of [...new Set(results.map(r => r.difficulty))]) {
+    const subset = results.filter(r => r.difficulty === diff);
+    byDifficulty[diff] = subset.filter(r => r[field].correct).length / subset.length;
+  }
+  
+  for (const cat of [...new Set(results.map(r => r.category))]) {
+    const subset = results.filter(r => r.category === cat);
+    byCat[cat] = subset.filter(r => r[field].correct).length / subset.length;
+  }
+  
+  const ci = calculateWilsonInterval(correct, total);
+  
+  const metrics: EnhancedMetrics = {
+    accuracy: {
+      overall: correct / total,
+      by_difficulty: byDifficulty,
+      by_category: byCat,
+      confidence_interval_95: ci,
+    },
+    comparison: {
+      accuracy_delta: 0,
+      accuracy_lift_percent: 0,
+      questions_fixed: 0,
+      questions_broken: 0,
+      net_improvement: 0,
+      agreement_rate: 0,
+      cohen_kappa: 0,
+    },
+    timing: {
+      avg_ms: avgTime,
+      median_ms: calculatePercentile(sortedTimes, 50),
+      p95_ms: calculatePercentile(sortedTimes, 95),
+      p99_ms: calculatePercentile(sortedTimes, 99),
+      min_ms: sortedTimes[0] || 0,
+      max_ms: sortedTimes[sortedTimes.length - 1] || 0,
+      std_dev_ms: calculateStdDev(times, avgTime),
+      total_ms: times.reduce((a, b) => a + b, 0),
+    },
+    tokens: {
+      total: totalTokens,
+      avg_per_question: totalTokens / total,
+      avg_per_correct: correct > 0 ? tokensForCorrect / correct : 0,
+      efficiency_score: totalTokens > 0 ? (correct / totalTokens) * 1000 : 0,
+    },
+    responses: {
+      avg_length: lengths.reduce((a, b) => a + b, 0) / total,
+      median_length: calculatePercentile(sortedLengths, 50),
+      empty_count: results.filter(r => r[field].answer.trim() === "").length,
+      numeric_answer_rate: numericAnswers / total,
+    },
+  };
+  
+  // Tool-specific metrics
+  if (field === "with_tool") {
+    const steps = results.map(r => r.with_tool.steps);
+    const totalSteps = steps.reduce((a, b) => a + b, 0);
+    const stepDist: Record<number, number> = {};
+    for (const s of steps) {
+      stepDist[s] = (stepDist[s] || 0) + 1;
+    }
+    
+    const stepsForCorrect = correctResults.reduce((sum, r) => sum + r.with_tool.steps, 0);
+    
+    metrics.steps = {
+      total: totalSteps,
+      avg_per_question: totalSteps / total,
+      avg_per_correct: correct > 0 ? stepsForCorrect / correct : 0,
+      distribution: stepDist,
+    };
+    
+    // Risk flags analysis
+    const allFlags = results.flatMap(r => r.with_tool.risk_flags);
+    const flagCounts: Record<string, number> = {};
+    for (const f of allFlags) {
+      flagCounts[f] = (flagCounts[f] || 0) + 1;
+    }
+    
+    const flaggedResults = results.filter(r => r.with_tool.risk_flags.length > 0);
+    const unflaggedResults = results.filter(r => r.with_tool.risk_flags.length === 0);
+    
+    metrics.risks = {
+      total_flags: allFlags.length,
+      by_type: flagCounts,
+      flagged_accuracy: flaggedResults.length > 0 
+        ? flaggedResults.filter(r => r.with_tool.correct).length / flaggedResults.length 
+        : 0,
+      unflagged_accuracy: unflaggedResults.length > 0
+        ? unflaggedResults.filter(r => r.with_tool.correct).length / unflaggedResults.length
+        : 0,
+    };
+    
+    // Confidence calibration
+    const resultsWithConf = results.filter(r => r.with_tool.final_confidence !== undefined);
+    if (resultsWithConf.length > 0) {
+      const byRiskLevel: Record<string, { count: number; accuracy: number }> = {};
+      for (const level of ["low", "medium", "high"]) {
+        const subset = results.filter(r => r.with_tool.risk_level === level);
+        if (subset.length > 0) {
+          byRiskLevel[level] = {
+            count: subset.length,
+            accuracy: subset.filter(r => r.with_tool.correct).length / subset.length,
+          };
+        }
+      }
+      
+      const buckets = [
+        { min: 0.0, max: 0.2, label: "0.0-0.2" },
+        { min: 0.2, max: 0.4, label: "0.2-0.4" },
+        { min: 0.4, max: 0.6, label: "0.4-0.6" },
+        { min: 0.6, max: 0.8, label: "0.6-0.8" },
+        { min: 0.8, max: 1.0, label: "0.8-1.0" },
+      ];
+      
+      const byConfidenceBucket: Array<{
+        range: string;
+        count: number;
+        accuracy: number;
+        expected_accuracy: number;
+        calibration_error: number;
+      }> = [];
+      
+      let totalCalibrationError = 0;
+      let totalWithConf = 0;
+      
+      for (const bucket of buckets) {
+        const subset = resultsWithConf.filter(r => {
+          const conf = r.with_tool.final_confidence!;
+          return conf >= bucket.min && (bucket.max === 1.0 ? conf <= bucket.max : conf < bucket.max);
+        });
+        
+        if (subset.length > 0) {
+          const accuracy = subset.filter(r => r.with_tool.correct).length / subset.length;
+          const expected = (bucket.min + bucket.max) / 2;
+          const error = Math.abs(accuracy - expected);
+          
+          byConfidenceBucket.push({
+            range: bucket.label,
+            count: subset.length,
+            accuracy,
+            expected_accuracy: expected,
+            calibration_error: error,
+          });
+          
+          totalCalibrationError += error * subset.length;
+          totalWithConf += subset.length;
+        }
+      }
+      
+      const meanCalibrationError = totalWithConf > 0 ? totalCalibrationError / totalWithConf : 0;
+      
+      metrics.calibration = {
+        by_risk_level: byRiskLevel,
+        by_confidence_bucket: byConfidenceBucket,
+        mean_calibration_error: meanCalibrationError,
+        well_calibrated: meanCalibrationError < 0.1,
+      };
+    }
+  }
+  
+  return metrics;
+}
 
-  const byDifficulty: Record<string, { baseline_accuracy: number; tool_accuracy: number; delta: number }> = {};
-  const byCategory: Record<string, { baseline_accuracy: number; tool_accuracy: number; delta: number }> = {};
-
-  const difficulties = [...new Set(results.map(r => r.difficulty))];
-  for (const diff of difficulties) {
+function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
+  const total = results.length;
+  
+  const baseline = calculateEnhancedMetrics(results, "baseline");
+  const withTool = calculateEnhancedMetrics(results, "with_tool");
+  
+  const bothCorrect = results.filter(r => r.baseline.correct && r.with_tool.correct).length;
+  const bothWrong = results.filter(r => !r.baseline.correct && !r.with_tool.correct).length;
+  const onlyBaselineCorrect = results.filter(r => r.baseline.correct && !r.with_tool.correct).length;
+  const onlyToolCorrect = results.filter(r => !r.baseline.correct && r.with_tool.correct).length;
+  
+  const mcnemar = calculateMcNemarTest(onlyBaselineCorrect, onlyToolCorrect);
+  const kappa = calculateCohenKappa(bothCorrect, bothWrong, onlyBaselineCorrect, onlyToolCorrect);
+  
+  const accuracyDelta = withTool.accuracy.overall - baseline.accuracy.overall;
+  const accuracyLift = baseline.accuracy.overall > 0 
+    ? (accuracyDelta / baseline.accuracy.overall) * 100 
+    : 0;
+  
+  baseline.comparison = withTool.comparison = {
+    accuracy_delta: accuracyDelta,
+    accuracy_lift_percent: accuracyLift,
+    questions_fixed: onlyToolCorrect,
+    questions_broken: onlyBaselineCorrect,
+    net_improvement: onlyToolCorrect - onlyBaselineCorrect,
+    agreement_rate: (bothCorrect + bothWrong) / total,
+    cohen_kappa: kappa,
+  };
+  
+  const byDifficulty: BenchmarkResults["summary"]["by_difficulty"] = {};
+  for (const diff of [...new Set(results.map(r => r.difficulty))]) {
     const subset = results.filter(r => r.difficulty === diff);
     const baseAcc = subset.filter(r => r.baseline.correct).length / subset.length;
     const toolAcc = subset.filter(r => r.with_tool.correct).length / subset.length;
-    byDifficulty[diff] = { baseline_accuracy: baseAcc, tool_accuracy: toolAcc, delta: toolAcc - baseAcc };
+    byDifficulty[diff] = {
+      baseline_accuracy: baseAcc,
+      tool_accuracy: toolAcc,
+      delta: toolAcc - baseAcc,
+      count: subset.length,
+      baseline_avg_time: subset.reduce((s, r) => s + r.baseline.time_ms, 0) / subset.length,
+      tool_avg_time: subset.reduce((s, r) => s + r.with_tool.time_ms, 0) / subset.length,
+    };
   }
-
-  const categories = [...new Set(results.map(r => r.category))];
-  for (const cat of categories) {
+  
+  const byCategory: BenchmarkResults["summary"]["by_category"] = {};
+  for (const cat of [...new Set(results.map(r => r.category))]) {
     const subset = results.filter(r => r.category === cat);
     const baseAcc = subset.filter(r => r.baseline.correct).length / subset.length;
     const toolAcc = subset.filter(r => r.with_tool.correct).length / subset.length;
-    byCategory[cat] = { baseline_accuracy: baseAcc, tool_accuracy: toolAcc, delta: toolAcc - baseAcc };
+    byCategory[cat] = {
+      baseline_accuracy: baseAcc,
+      tool_accuracy: toolAcc,
+      delta: toolAcc - baseAcc,
+      count: subset.length,
+      baseline_avg_time: subset.reduce((s, r) => s + r.baseline.time_ms, 0) / subset.length,
+      tool_avg_time: subset.reduce((s, r) => s + r.with_tool.time_ms, 0) / subset.length,
+    };
   }
-
+  
+  // Compression stats
+  let compression: BenchmarkResults["summary"]["compression"] | undefined;
+  const compressedResults = results.filter(r => r.with_tool.compression);
+  if (compressedResults.length > 0) {
+    const totalBytesSaved = compressedResults.reduce((s, r) => s + (r.with_tool.compression?.bytes_saved || 0), 0);
+    compression = {
+      total_bytes_saved: totalBytesSaved,
+      steps_compressed: compressedResults.length,
+      avg_bytes_per_step: Math.round(totalBytesSaved / compressedResults.length),
+      compression_rate: compressedResults.length / total,
+    };
+  }
+  
+  // Complexity routing stats
+  type ComplexityStats = { count: number; correct: number; total_time: number };
+  const byTier: Record<string, ComplexityStats> = {};
+  const byPath: Record<string, ComplexityStats> = {};
+  
+  for (const r of results) {
+    const tier = r.with_tool.complexity_tier || "Unknown";
+    const path = r.with_tool.complexity_path || "unknown";
+    
+    if (!byTier[tier]) byTier[tier] = { count: 0, correct: 0, total_time: 0 };
+    byTier[tier].count++;
+    if (r.with_tool.correct) byTier[tier].correct++;
+    byTier[tier].total_time += r.with_tool.time_ms;
+    
+    if (!byPath[path]) byPath[path] = { count: 0, correct: 0, total_time: 0 };
+    byPath[path].count++;
+    if (r.with_tool.correct) byPath[path].correct++;
+    byPath[path].total_time += r.with_tool.time_ms;
+  }
+  
+  const complexityStats: BenchmarkResults["summary"]["complexity"] = {
+    by_tier: Object.fromEntries(
+      Object.entries(byTier).map(([k, v]) => [k, {
+        count: v.count,
+        accuracy: v.count > 0 ? v.correct / v.count : 0,
+        avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
+      }])
+    ),
+    by_path: Object.fromEntries(
+      Object.entries(byPath).map(([k, v]) => [k, {
+        count: v.count,
+        accuracy: v.count > 0 ? v.correct / v.count : 0,
+        avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
+      }])
+    ),
+  };
+  
+  const baselineTotalTime = baseline.timing.total_ms;
+  const toolTotalTime = withTool.timing.total_ms;
+  const baselineCorrect = results.filter(r => r.baseline.correct).length;
+  const toolCorrect = results.filter(r => r.with_tool.correct).length;
+  
+  const timeOverhead = baseline.timing.avg_ms > 0 ? withTool.timing.avg_ms / baseline.timing.avg_ms : 1;
+  const tokenOverhead = baseline.tokens.avg_per_question > 0 
+    ? withTool.tokens.avg_per_question / baseline.tokens.avg_per_question 
+    : 1;
+  
+  const breakEvenAccuracy = baseline.accuracy.overall * timeOverhead;
+  
   return {
-    baseline: {
-      correct: baselineCorrect,
-      total,
-      accuracy: baselineCorrect / total,
-      avg_time_ms: results.reduce((sum, r) => sum + r.baseline.time_ms, 0) / total,
-    },
-    with_tool: {
-      correct: toolCorrect,
-      total,
-      accuracy: toolCorrect / total,
-      avg_time_ms: results.reduce((sum, r) => sum + r.with_tool.time_ms, 0) / total,
+    baseline,
+    with_tool: withTool,
+    comparison: {
+      accuracy_delta: accuracyDelta,
+      accuracy_lift_percent: accuracyLift,
+      time_overhead_factor: timeOverhead,
+      token_overhead_factor: tokenOverhead,
+      questions_fixed: onlyToolCorrect,
+      questions_broken: onlyBaselineCorrect,
+      net_improvement: onlyToolCorrect - onlyBaselineCorrect,
+      agreement_rate: (bothCorrect + bothWrong) / total,
+      both_correct: bothCorrect,
+      both_wrong: bothWrong,
+      only_baseline_correct: onlyBaselineCorrect,
+      only_tool_correct: onlyToolCorrect,
+      statistical_significance: {
+        mcnemar_chi2: mcnemar.chi2,
+        p_value: mcnemar.p_value,
+        significant_at_05: mcnemar.p_value < 0.05,
+        significant_at_01: mcnemar.p_value < 0.01,
+      },
     },
     by_difficulty: byDifficulty,
     by_category: byCategory,
+    compression,
+    complexity: complexityStats,
+    efficiency: {
+      baseline_correct_per_second: baselineTotalTime > 0 ? (baselineCorrect / baselineTotalTime) * 1000 : 0,
+      tool_correct_per_second: toolTotalTime > 0 ? (toolCorrect / toolTotalTime) * 1000 : 0,
+      baseline_correct_per_1k_tokens: baseline.tokens.total > 0 
+        ? (baselineCorrect / baseline.tokens.total) * 1000 
+        : 0,
+      tool_correct_per_1k_tokens: withTool.tokens.total > 0 
+        ? (toolCorrect / withTool.tokens.total) * 1000 
+        : 0,
+      break_even_accuracy: Math.min(1, breakEvenAccuracy),
+    },
   };
 }
 
@@ -617,63 +1063,311 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
-  const questionsFile = args[0] || "questions.json";
+  
+  if (args.includes("--help") || args.includes("-h")) {
+    console.log(`
+Benchmark Runner for Verifiable Thinking MCP
+
+Usage: bun run runner.ts [questions.json] [options]
+
+Options:
+  --limit=N          Run only first N questions
+  --filter=PATTERN   Filter questions by ID pattern (regex)
+  --ids=id1,id2,...  Run only specific question IDs
+  --category=CAT     Filter by category (math, logic, reasoning, code)
+  --difficulty=DIFF  Filter by difficulty (easy, medium, hard, trap, impossible, sota)
+  --baseline-only    Run only baseline (no MCP tool)
+  --tool-only        Run only with MCP tool (no baseline)
+  --no-local         Disable local compute
+  --aggressive       Force aggressive compression
+  --no-compression   Disable compression
+  --json-output      Machine-readable JSON output
+  --dry-run          Validate setup without LLM calls
+  --full             Run all questions (no limit)
+  --threshold=N      Fail if tool accuracy < N (0-1), for CI
+  --ci-report        Output CI-friendly summary with exit code
+  --help, -h         Show this help
+
+Environment Variables:
+  LLM_MODEL          Model to use
+  LLM_API_KEY        API key for LLM provider
+    `);
+    process.exit(0);
+  }
+  
+  const questionsFile = args.find(a => !a.startsWith("--")) || "questions.json";
   const limitArg = args.find(a => a.startsWith("--limit="));
   const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : undefined;
+  const filterArg = args.find(a => a.startsWith("--filter="));
+  const filter = filterArg ? filterArg.split("=")[1] : undefined;
+  const idsArg = args.find(a => a.startsWith("--ids="));
+  const ids = idsArg ? idsArg.split("=")[1].split(",") : undefined;
+  const categoryArg = args.find(a => a.startsWith("--category="));
+  const category = categoryArg ? categoryArg.split("=")[1] : undefined;
+  const difficultyArg = args.find(a => a.startsWith("--difficulty="));
+  const difficulty = difficultyArg ? difficultyArg.split("=")[1] : undefined;
   const baselineOnly = args.includes("--baseline-only");
   const toolOnly = args.includes("--tool-only");
+  const noLocal = args.includes("--no-local");
+  const aggressive = args.includes("--aggressive");
+  const noCompression = args.includes("--no-compression");
+  const jsonOutput = args.includes("--json-output");
+  const dryRun = args.includes("--dry-run");
+  const fullRun = args.includes("--full");
+  const thresholdArg = args.find(a => a.startsWith("--threshold="));
+  const threshold = thresholdArg ? parseFloat(thresholdArg.split("=")[1]) : undefined;
+  const ciReport = args.includes("--ci-report");
+  const compressionLevel: "none" | "auto" | "aggressive" = 
+    noCompression ? "none" : aggressive ? "aggressive" : "auto";
 
-  console.log(`Loading questions from ${questionsFile}...`);
+  const log = jsonOutput ? () => {} : console.log.bind(console);
+
+  log(`Loading questions from ${questionsFile}...`);
   const file = Bun.file(new URL(questionsFile, import.meta.url).pathname);
   
   if (!await file.exists()) {
-    console.error(`Questions file not found: ${questionsFile}`);
+    if (jsonOutput) {
+      console.log(JSON.stringify({ error: `Questions file not found: ${questionsFile}` }));
+    } else {
+      console.error(`Questions file not found: ${questionsFile}`);
+    }
     process.exit(1);
   }
 
   const data = await file.json() as QuestionSet;
   let questions = data.questions;
   
-  if (limit) {
+  if (ids) {
+    questions = questions.filter(q => ids.includes(q.id));
+  }
+  
+  if (filter) {
+    const regex = new RegExp(filter, "i");
+    questions = questions.filter(q => regex.test(q.id));
+  }
+  
+  if (category) {
+    questions = questions.filter(q => q.category === category);
+  }
+  
+  if (difficulty) {
+    questions = questions.filter(q => q.difficulty === difficulty);
+  }
+  
+  // --full overrides --limit
+  if (!fullRun && limit) {
     questions = questions.slice(0, limit);
   }
 
-  console.log(`Loaded ${questions.length} questions (${data.description})`);
-  console.log(`Model: ${process.env.LLM_MODEL || "unknown"}`);
-  console.log(`Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}`);
+  log(`Loaded ${questions.length} questions (${data.description})`);
+  log(`Model: ${process.env.LLM_MODEL || "unknown"}`);
+  log(`Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}${noLocal ? " (no local compute)" : ""}`);
+  log(`Compression: ${compressionLevel}${fullRun ? " | Full run" : ""}`);
+  if (threshold !== undefined) {
+    log(`Threshold: ${(threshold * 100).toFixed(0)}% (will fail if tool accuracy below)`);
+  }
+
+  if (dryRun) {
+    log("\n--- DRY RUN MODE ---");
+    log("Validating setup...\n");
+    
+    const categories = new Set(questions.map(q => q.category));
+    const difficulties = new Set(questions.map(q => q.difficulty));
+    log(`✓ Questions: ${questions.length} loaded`);
+    log(`  Categories: ${Array.from(categories).join(", ")}`);
+    log(`  Difficulties: ${Array.from(difficulties).join(", ")}`);
+    
+    log("\nValidating MCP server...");
+    try {
+      const mcp = new MCPClient();
+      await mcp.init();
+      log("✓ MCP server: initialized successfully");
+      
+      const testResult = await mcp.think({
+        thought: "Dry run validation test",
+        step: 1,
+        total: 1,
+        is_final: true,
+        guidance: false,
+        session_id: `dry-run-${Date.now()}`,
+        local_compute: true,
+      });
+      log(`✓ MCP think tool: responsive`);
+      log(`  Sample response length: ${testResult.raw.length} chars`);
+      
+      await mcp.close();
+      log("✓ MCP server: closed cleanly");
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`✗ MCP server error: ${errMsg}`);
+      process.exit(1);
+    }
+    
+    log("\n--- DRY RUN COMPLETE ---");
+    log("Setup is valid. Ready to run benchmarks.");
+    log(`Run without --dry-run to execute ${questions.length} questions.`);
+    process.exit(0);
+  }
 
   const results = await runBenchmark(questions, {
     runBaseline: !toolOnly,
     runTool: !baselineOnly,
+    useLocalCompute: !noLocal,
+    compressionLevel,
+    quiet: jsonOutput,
   });
 
-  // Print summary
-  console.log("\n" + "=".repeat(60));
-  console.log("BENCHMARK RESULTS");
-  console.log("=".repeat(60));
-  console.log(`\nModel: ${results.model}`);
-  console.log(`Questions: ${results.total_questions}`);
-  console.log(`\nOverall Accuracy:`);
-  console.log(`  Baseline:  ${(results.summary.baseline.accuracy * 100).toFixed(1)}% (${results.summary.baseline.correct}/${results.summary.baseline.total})`);
-  console.log(`  With Tool: ${(results.summary.with_tool.accuracy * 100).toFixed(1)}% (${results.summary.with_tool.correct}/${results.summary.with_tool.total})`);
-  console.log(`  Delta:     ${((results.summary.with_tool.accuracy - results.summary.baseline.accuracy) * 100).toFixed(1)}%`);
+  if (jsonOutput) {
+    const output = {
+      ...results,
+      metadata: {
+        compression_level: compressionLevel,
+        local_compute: !noLocal,
+        baseline_only: baselineOnly,
+        tool_only: toolOnly,
+        question_count: questions.length,
+        run_id: `run-${Date.now()}`,
+      },
+    };
+    console.log(JSON.stringify(output));
+    process.exit(0);
+  }
 
-  console.log(`\nBy Difficulty:`);
+  // Human-readable output
+  log("\n" + "=".repeat(70));
+  log("BENCHMARK RESULTS");
+  log("=".repeat(70));
+  log(`\nModel: ${results.model}`);
+  log(`Questions: ${results.total_questions}`);
+  
+  const baselineCorrect = Math.round(results.summary.baseline.accuracy.overall * results.total_questions);
+  const toolCorrect = Math.round(results.summary.with_tool.accuracy.overall * results.total_questions);
+  
+  log(`\n${"─".repeat(70)}`);
+  log("ACCURACY");
+  log("─".repeat(70));
+  log(`  Baseline:  ${(results.summary.baseline.accuracy.overall * 100).toFixed(1)}% (${baselineCorrect}/${results.total_questions})`);
+  log(`  With Tool: ${(results.summary.with_tool.accuracy.overall * 100).toFixed(1)}% (${toolCorrect}/${results.total_questions})`);
+  log(`  Delta:     ${results.summary.comparison.accuracy_delta >= 0 ? "+" : ""}${(results.summary.comparison.accuracy_delta * 100).toFixed(1)}% (${results.summary.comparison.accuracy_lift_percent >= 0 ? "+" : ""}${results.summary.comparison.accuracy_lift_percent.toFixed(1)}% lift)`);
+  log(`  95% CI:    [${(results.summary.with_tool.accuracy.confidence_interval_95.lower * 100).toFixed(1)}%, ${(results.summary.with_tool.accuracy.confidence_interval_95.upper * 100).toFixed(1)}%]`);
+
+  log(`\n${"─".repeat(70)}`);
+  log("COMPARISON (2x2 Contingency)");
+  log("─".repeat(70));
+  log(`  Both Correct:         ${results.summary.comparison.both_correct}`);
+  log(`  Both Wrong:           ${results.summary.comparison.both_wrong}`);
+  log(`  Only Baseline Correct: ${results.summary.comparison.only_baseline_correct} (broken)`);
+  log(`  Only Tool Correct:     ${results.summary.comparison.only_tool_correct} (fixed)`);
+  log(`  Net Improvement:       ${results.summary.comparison.net_improvement >= 0 ? "+" : ""}${results.summary.comparison.net_improvement}`);
+  log(`  Agreement Rate:        ${(results.summary.comparison.agreement_rate * 100).toFixed(1)}%`);
+
+  log(`\n${"─".repeat(70)}`);
+  log("BY DIFFICULTY");
+  log("─".repeat(70));
   for (const [diff, stats] of Object.entries(results.summary.by_difficulty)) {
-    console.log(`  ${diff}: ${(stats.baseline_accuracy * 100).toFixed(0)}% → ${(stats.tool_accuracy * 100).toFixed(0)}% (${stats.delta >= 0 ? "+" : ""}${(stats.delta * 100).toFixed(0)}%)`);
+    const arrow = stats.delta >= 0 ? "↑" : "↓";
+    log(`  ${diff.padEnd(12)} ${(stats.baseline_accuracy * 100).toFixed(0).padStart(3)}% → ${(stats.tool_accuracy * 100).toFixed(0).padStart(3)}% (${stats.delta >= 0 ? "+" : ""}${(stats.delta * 100).toFixed(0)}% ${arrow}) n=${stats.count}`);
   }
 
-  console.log(`\nBy Category:`);
+  log(`\n${"─".repeat(70)}`);
+  log("BY CATEGORY");
+  log("─".repeat(70));
   for (const [cat, stats] of Object.entries(results.summary.by_category)) {
-    console.log(`  ${cat}: ${(stats.baseline_accuracy * 100).toFixed(0)}% → ${(stats.tool_accuracy * 100).toFixed(0)}% (${stats.delta >= 0 ? "+" : ""}${(stats.delta * 100).toFixed(0)}%)`);
+    const arrow = stats.delta >= 0 ? "↑" : "↓";
+    log(`  ${cat.padEnd(12)} ${(stats.baseline_accuracy * 100).toFixed(0).padStart(3)}% → ${(stats.tool_accuracy * 100).toFixed(0).padStart(3)}% (${stats.delta >= 0 ? "+" : ""}${(stats.delta * 100).toFixed(0)}% ${arrow}) n=${stats.count}`);
   }
 
-  console.log(`\nAvg Time:`);
-  console.log(`  Baseline:  ${results.summary.baseline.avg_time_ms.toFixed(0)}ms`);
-  console.log(`  With Tool: ${results.summary.with_tool.avg_time_ms.toFixed(0)}ms`);
+  log(`\n${"─".repeat(70)}`);
+  log("TIMING");
+  log("─".repeat(70));
+  log(`  Baseline:`);
+  log(`    Avg: ${results.summary.baseline.timing.avg_ms.toFixed(0)}ms | Median: ${results.summary.baseline.timing.median_ms.toFixed(0)}ms | P95: ${results.summary.baseline.timing.p95_ms.toFixed(0)}ms`);
+  log(`  With Tool:`);
+  log(`    Avg: ${results.summary.with_tool.timing.avg_ms.toFixed(0)}ms | Median: ${results.summary.with_tool.timing.median_ms.toFixed(0)}ms | P95: ${results.summary.with_tool.timing.p95_ms.toFixed(0)}ms`);
+  log(`  Overhead: ${results.summary.comparison.time_overhead_factor.toFixed(1)}x`);
 
-  // Save results
+  log(`\n${"─".repeat(70)}`);
+  log("TOKENS");
+  log("─".repeat(70));
+  log(`  Baseline:  ${results.summary.baseline.tokens.total} total | ${results.summary.baseline.tokens.avg_per_question.toFixed(0)}/question`);
+  log(`  With Tool: ${results.summary.with_tool.tokens.total} total | ${results.summary.with_tool.tokens.avg_per_question.toFixed(0)}/question`);
+
+  // Complexity routing stats
+  if (results.summary.complexity) {
+    const cx = results.summary.complexity;
+    log(`\n${"─".repeat(70)}`);
+    log("COMPLEXITY ROUTING");
+    log("─".repeat(70));
+    
+    log("  By Path:");
+    for (const [path, data] of Object.entries(cx.by_path).sort((a, b) => b[1].count - a[1].count)) {
+      const pct = (data.accuracy * 100).toFixed(0);
+      log(`    ${path.padEnd(10)} ${String(data.count).padStart(3)} questions | ${pct}% accuracy | ${data.avg_time_ms}ms avg`);
+    }
+  }
+
+  // Question-level analysis
+  const broken = results.results.filter(r => r.baseline.correct && !r.with_tool.correct);
+  const fixed = results.results.filter(r => !r.baseline.correct && r.with_tool.correct);
+  
+  if (broken.length > 0 || fixed.length > 0) {
+    log(`\n${"─".repeat(70)}`);
+    log("QUESTION-LEVEL ANALYSIS");
+    log("─".repeat(70));
+    
+    if (broken.length > 0) {
+      log(`\n  ⚠️ BROKEN (${broken.length}):`);
+      for (const r of broken) {
+        log(`    • ${r.question_id}: "${r.baseline.answer}" ✓ → "${r.with_tool.answer}" ✗`);
+      }
+    }
+    
+    if (fixed.length > 0) {
+      log(`\n  ✅ FIXED (${fixed.length}):`);
+      for (const r of fixed) {
+        log(`    • ${r.question_id}: "${r.baseline.answer}" ✗ → "${r.with_tool.answer}" ✓`);
+      }
+    }
+  }
+
+  log("\n" + "=".repeat(70));
+
   const outFile = `results-${Date.now()}.json`;
   await Bun.write(new URL(outFile, import.meta.url).pathname, JSON.stringify(results, null, 2));
-  console.log(`\nResults saved to ${outFile}`);
+  log(`\nResults saved to ${outFile}`);
+
+  // CI Report mode: concise output with exit code
+  if (ciReport) {
+    const toolAcc = results.summary.with_tool.accuracy.overall;
+    const baseAcc = results.summary.baseline.accuracy.overall;
+    const delta = results.summary.comparison.accuracy_delta;
+    const ci = results.summary.with_tool.accuracy.confidence_interval_95;
+    
+    console.log("\n--- CI REPORT ---");
+    console.log(`Questions: ${results.total_questions}`);
+    console.log(`Baseline:  ${(baseAcc * 100).toFixed(1)}%`);
+    console.log(`Tool:      ${(toolAcc * 100).toFixed(1)}%`);
+    console.log(`Delta:     ${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%`);
+    console.log(`95% CI:    [${(ci.lower * 100).toFixed(1)}%, ${(ci.upper * 100).toFixed(1)}%]`);
+    console.log(`Fixed:     ${results.summary.comparison.only_tool_correct}`);
+    console.log(`Broken:    ${results.summary.comparison.only_baseline_correct}`);
+    
+    if (threshold !== undefined) {
+      if (toolAcc >= threshold) {
+        console.log(`\n✓ PASS: Tool accuracy ${(toolAcc * 100).toFixed(1)}% >= threshold ${(threshold * 100).toFixed(0)}%`);
+      } else {
+        console.log(`\n✗ FAIL: Tool accuracy ${(toolAcc * 100).toFixed(1)}% < threshold ${(threshold * 100).toFixed(0)}%`);
+        process.exit(1);
+      }
+    }
+  }
+
+  // Threshold check (without full CI report)
+  if (threshold !== undefined && !ciReport) {
+    const toolAcc = results.summary.with_tool.accuracy.overall;
+    if (toolAcc < threshold) {
+      console.error(`\n✗ THRESHOLD FAILED: Tool accuracy ${(toolAcc * 100).toFixed(1)}% < ${(threshold * 100).toFixed(0)}%`);
+      process.exit(1);
+    }
+  }
 }

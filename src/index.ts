@@ -1,13 +1,13 @@
 import { FastMCP } from "fastmcp";
-import { 
-  thinkTool, 
-  listSessionsTool, 
-  getSessionTool, 
-  clearSessionTool,
-  compressTool,
-} from "./tools/index.ts";
 import { allPrompts } from "./prompts/index.ts";
 import { allResources, allResourceTemplates } from "./resources/index.ts";
+import {
+  clearSessionTool,
+  compressTool,
+  getSessionTool,
+  listSessionsTool,
+  thinkTool,
+} from "./tools/index.ts";
 
 const server = new FastMCP({
   name: "Verifiable Thinking MCP",

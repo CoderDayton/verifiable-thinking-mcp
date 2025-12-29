@@ -57,7 +57,7 @@ For each step:
 Categories to check: null handling, off-by-one errors, resource leaks, error handling, type safety.`,
   },
 
-  "debugging": {
+  debugging: {
     name: "Debugging",
     description: "Systematic bug investigation with hypothesis testing",
     domain: "code",
@@ -154,9 +154,7 @@ export const logicalDeductionPrompt = {
   ] as const,
   load: async (args: { premises?: string; conclusion?: string }) => {
     const template = templates["logical-deduction"]!;
-    const goal = args.conclusion 
-      ? `Prove: ${args.conclusion}` 
-      : "Derive valid conclusions";
+    const goal = args.conclusion ? `Prove: ${args.conclusion}` : "Derive valid conclusions";
     return {
       messages: [
         {
@@ -233,7 +231,7 @@ export const debuggingPrompt = {
     },
   ] as const,
   load: async (args: { symptom?: string; context?: string }) => {
-    const template = templates["debugging"]!;
+    const template = templates.debugging!;
     const contextNote = args.context ? `\nContext:\n${args.context}` : "";
     return {
       messages: [

@@ -1,8 +1,8 @@
-export { 
+export {
   allResources,
   allResourceTemplates,
+  sessionBranchResource,
   sessionResource,
   sessionSummaryResource,
-  sessionBranchResource,
   sessionsListResource,
 } from "./sessions.ts";

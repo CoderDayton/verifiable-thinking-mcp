@@ -12,7 +12,8 @@ import { SessionManager } from "../lib/session.ts";
 export const sessionResource = {
   name: "Session",
   uriTemplate: "session://{session_id}",
-  description: "Access reasoning session data including thoughts, branches, and verification results",
+  description:
+    "Access reasoning session data including thoughts, branches, and verification results",
   mimeType: "application/json",
   arguments: [
     {
@@ -42,7 +43,7 @@ export const sessionResource = {
       updated_at: new Date(session.updated_at).toISOString(),
       branches: Array.from(session.branches),
       thought_count: session.thoughts.length,
-      thoughts: session.thoughts.map(t => ({
+      thoughts: session.thoughts.map((t) => ({
         id: t.id,
         step_number: t.step_number,
         branch_id: t.branch_id,
@@ -131,7 +132,7 @@ export const sessionBranchResource = {
         };
       }
       return {
-        text: JSON.stringify({ 
+        text: JSON.stringify({
           error: `Branch '${branchId}' not found or empty`,
           available_branches: Array.from(session.branches),
         }),
@@ -142,7 +143,7 @@ export const sessionBranchResource = {
       session_id: sessionId,
       branch_id: branchId,
       thought_count: thoughts.length,
-      thoughts: thoughts.map(t => ({
+      thoughts: thoughts.map((t) => ({
         id: t.id,
         step_number: t.step_number,
         thought: t.thought,
@@ -168,10 +169,10 @@ export const sessionsListResource = {
   mimeType: "application/json",
   load: async () => {
     const sessions = SessionManager.list();
-    
+
     const data = {
       count: sessions.length,
-      sessions: sessions.map(s => ({
+      sessions: sessions.map((s) => ({
         id: s.id,
         thought_count: s.thought_count,
         branches: s.branches,
@@ -186,9 +187,7 @@ export const sessionsListResource = {
 };
 
 // Export all resources
-export const allResources = [
-  sessionsListResource,
-];
+export const allResources = [sessionsListResource];
 
 export const allResourceTemplates = [
   sessionResource,

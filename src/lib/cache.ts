@@ -4,7 +4,7 @@
  * Includes rate limiting to prevent memory exhaustion under high load
  */
 
-import type { VerificationResult, VerificationDomain } from "./verification.ts";
+import type { VerificationDomain, VerificationResult } from "./verification.ts";
 
 interface CacheEntry {
   result: VerificationResult;
@@ -21,15 +21,15 @@ interface CacheConfig {
   max_entries: number;
   ttl_ms: number;
   // Rate limiting
-  rate_limit_ops: number;      // Max operations per window
+  rate_limit_ops: number; // Max operations per window
   rate_limit_window_ms: number; // Window size in ms
 }
 
 const DEFAULT_CONFIG: CacheConfig = {
   max_entries: 1000,
   ttl_ms: 60 * 60 * 1000, // 1 hour
-  rate_limit_ops: 100,         // 100 ops per second
-  rate_limit_window_ms: 1000,  // 1 second window
+  rate_limit_ops: 100, // 100 ops per second
+  rate_limit_window_ms: 1000, // 1 second window
 };
 
 export interface CacheStats {
@@ -45,11 +45,11 @@ export interface CacheStats {
 class VerificationCacheImpl {
   private cache: Map<string, CacheEntry> = new Map();
   private config: CacheConfig;
-  
+
   // Rate limiting state
   private rateLimit: RateLimitWindow = { count: 0, window_start: Date.now() };
   private rateLimitedCount = 0;
-  
+
   // Stats
   private totalHits = 0;
   private totalMisses = 0;
@@ -63,18 +63,18 @@ class VerificationCacheImpl {
    */
   private checkRateLimit(): boolean {
     const now = Date.now();
-    
+
     // Reset window if expired
     if (now - this.rateLimit.window_start >= this.config.rate_limit_window_ms) {
       this.rateLimit = { count: 0, window_start: now };
     }
-    
+
     // Check if under limit
     if (this.rateLimit.count >= this.config.rate_limit_ops) {
       this.rateLimitedCount++;
       return false;
     }
-    
+
     this.rateLimit.count++;
     return true;
   }
@@ -94,7 +94,7 @@ class VerificationCacheImpl {
   private hashString(str: string): string {
     let hash = 5381;
     for (let i = 0; i < str.length; i++) {
-      hash = ((hash << 5) + hash) + str.charCodeAt(i);
+      hash = (hash << 5) + hash + str.charCodeAt(i);
       hash = hash & hash; // Convert to 32-bit integer
     }
     return Math.abs(hash).toString(36);
@@ -135,7 +135,12 @@ class VerificationCacheImpl {
    * Store verification result in cache
    * Respects rate limiting - silently drops if rate limited
    */
-  set(thought: string, domain: VerificationDomain, context: string[], result: VerificationResult): boolean {
+  set(
+    thought: string,
+    domain: VerificationDomain,
+    context: string[],
+    result: VerificationResult,
+  ): boolean {
     // Rate limit check
     if (!this.checkRateLimit()) {
       return false;
@@ -169,9 +174,8 @@ class VerificationCacheImpl {
 
     // If still over limit, remove lowest hit count entries
     if (this.cache.size >= this.config.max_entries) {
-      const entries = Array.from(this.cache.entries())
-        .sort((a, b) => a[1].hits - b[1].hits);
-      
+      const entries = Array.from(this.cache.entries()).sort((a, b) => a[1].hits - b[1].hits);
+
       const toRemove = Math.ceil(this.config.max_entries * 0.1); // Remove 10%
       for (let i = 0; i < toRemove && i < entries.length; i++) {
         const entry = entries[i];
@@ -184,17 +188,18 @@ class VerificationCacheImpl {
    * Get cache statistics including rate limiting info
    */
   getStats(): CacheStats {
-    let entryHits = 0;
+    let _entryHits = 0;
     for (const entry of this.cache.values()) {
-      entryHits += entry.hits;
+      _entryHits += entry.hits;
     }
 
     return {
       size: this.cache.size,
       max: this.config.max_entries,
-      hit_rate: this.totalHits + this.totalMisses > 0 
-        ? this.totalHits / (this.totalHits + this.totalMisses) 
-        : 0,
+      hit_rate:
+        this.totalHits + this.totalMisses > 0
+          ? this.totalHits / (this.totalHits + this.totalMisses)
+          : 0,
       hits: this.totalHits,
       misses: this.totalMisses,
       rate_limited: this.rateLimitedCount,

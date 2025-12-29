@@ -4,6 +4,18 @@
 pre-commit:
   parallel: true
   commands:
+    # Strict lint: fail on any warning or error
+    lint:
+      glob: "*.{ts,tsx}"
+      run: bun run biome check --error-on-warnings src test scripts
+      stage_fixed: true
+
+    # Strict format check (no auto-fix, just fail if not formatted)
+    format:
+      glob: "*.{ts,tsx}"
+      run: bun run biome format --error-on-warnings src test scripts
+      stage_fixed: true
+
     typecheck:
       glob: "*.{ts,tsx}"
       run: bun run typecheck

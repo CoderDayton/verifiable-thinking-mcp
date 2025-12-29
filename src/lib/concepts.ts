@@ -14,10 +14,13 @@ export interface Concept {
 // Domain-specific keyword patterns
 const DOMAIN_KEYWORDS: Record<Concept["domain"], RegExp> = {
   math: /\b(equation|variable|function|derivative|integral|sum|product|matrix|vector|polynomial|coefficient|algebra|calculus|theorem|proof|solve|calculate|compute)\b/gi,
-  logic: /\b(therefore|implies|if|then|because|hence|thus|conclude|assume|given|premise|proposition|valid|invalid|fallacy|deduction|induction|axiom)\b/gi,
+  logic:
+    /\b(therefore|implies|if|then|because|hence|thus|conclude|assume|given|premise|proposition|valid|invalid|fallacy|deduction|induction|axiom)\b/gi,
   code: /\b(function|class|method|variable|loop|array|object|string|boolean|integer|algorithm|complexity|runtime|memory|pointer|reference|async|await|promise|callback)\b/gi,
-  language: /\b(syntax|grammar|semantic|parse|token|lexer|compiler|interpreter|expression|statement|declaration)\b/gi,
-  general: /\b(problem|solution|step|approach|strategy|method|technique|process|result|outcome|goal|objective)\b/gi,
+  language:
+    /\b(syntax|grammar|semantic|parse|token|lexer|compiler|interpreter|expression|statement|declaration)\b/gi,
+  general:
+    /\b(problem|solution|step|approach|strategy|method|technique|process|result|outcome|goal|objective)\b/gi,
 };
 
 export class ConceptTracker {
@@ -29,7 +32,7 @@ export class ConceptTracker {
 
     for (const [domain, pattern] of Object.entries(DOMAIN_KEYWORDS)) {
       const matches = thought.match(pattern) || [];
-      
+
       for (const match of matches) {
         const name = match.toLowerCase();
         if (seen.has(name)) continue;
@@ -62,7 +65,7 @@ export class ConceptTracker {
   }
 
   getByDomain(domain: Concept["domain"]): Concept[] {
-    return this.getAll().filter(c => c.domain === domain);
+    return this.getAll().filter((c) => c.domain === domain);
   }
 
   getTopConcepts(n: number = 5): Concept[] {
@@ -74,7 +77,7 @@ export class ConceptTracker {
   getSummary(): { total: number; by_domain: Record<string, number>; top: string[] } {
     const all = this.getAll();
     const byDomain: Record<string, number> = {};
-    
+
     for (const c of all) {
       byDomain[c.domain] = (byDomain[c.domain] || 0) + 1;
     }
@@ -82,7 +85,7 @@ export class ConceptTracker {
     return {
       total: all.length,
       by_domain: byDomain,
-      top: this.getTopConcepts(5).map(c => c.name),
+      top: this.getTopConcepts(5).map((c) => c.name),
     };
   }
 
