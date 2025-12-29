@@ -35,19 +35,6 @@ export interface ComplexityResult {
     intensity_modifier: number;
   };
   reasoning: string;
-  // Legacy compatibility fields
-  components: {
-    domain: number;
-    derivation: number;
-    proof: number;
-    construction: number;
-    open_problem: number;
-  };
-  signals: {
-    domain_terms_found: string[];
-    research_indicators: string[];
-    proof_requirements: string[];
-  };
 }
 
 export function assessPromptComplexity(text: string): ComplexityResult {
@@ -155,20 +142,53 @@ export function assessPromptComplexity(text: string): ComplexityResult {
   }
 
   // Booster 4: Trap detection (questions that look simple but aren't)
-  // Short questions with numbers and financial/counting keywords are often traps
+  // Short questions with numbers and keywords that indicate deceptive simplicity
   const trap_patterns = [
     /\b(cost|price|pay|spend|total|together)\b.*\$?\d/i, // Bat & Ball style
     /\$?\d+.*\b(cost|price|pay|spend|total|together)\b/i, // Reversed order
     /how many.*\d+!/i, // Factorial problems (100!)
     /trailing zero/i, // Number theory trap
     /\d+\s*(ball|bat|item|object)s?\b/i, // Word problem with objects
+    /\d+\s*machines?.*\d+\s*(minutes?|widgets?)/i, // Rate problems (5 machines, 5 minutes)
+    /\d+\s*(black|white|red|blue).*socks?/i, // Pigeonhole principle
+    /minimum.*guarantee/i, // Pigeonhole phrasing
+    /clock.*hands?.*overlap/i, // Clock problems
+    /hands?.*clock.*overlap/i, // Clock problems alt
+    /average speed.*round trip/i, // Harmonic mean trap
+    /round trip.*average speed/i, // Harmonic mean trap alt
+    /\d+\s*mph.*returns?.*\d+\s*mph/i, // Speed trap
+    /doubles?.*every day.*\d+\s*days/i, // Exponential growth trap (lily pad)
+    /\d+\s*days.*cover.*lake/i, // Lily pad variant
+    /overlap.*\d+\s*hours/i, // Clock overlap
+    /\d+\s*hours.*overlap/i, // Clock overlap alt
+    /times.*hands.*overlap/i, // Clock overlap natural phrasing
+    /times.*overlap/i, // Generic overlap question
+    /wason|selection task/i, // Wason card task
+    /vowel.*even|even.*vowel/i, // Wason card rule pattern
+    /how many ways.*arrange/i, // Combinatorics
+    /arrange.*letters/i, // Anagram problems
+    /letters.*arrange/i, // Anagram variant
+    /how many ways.*letters/i, // Anagram direct question
+    /\^\d{2,}/i, // Large exponents (7^100)
+    /mod\s+\d+/i, // Modular arithmetic
+    /last digit/i, // Modular arithmetic variant
+    /\d+-chamber.*bullet/i, // Russian roulette style
+    /revolver.*bullet/i, // Russian roulette variant
+    /adjacent bullet/i, // Conditional probability setup
   ];
   const has_trap_pattern = trap_patterns.some((p) => p.test(text)); // Use original text for case
-  const is_short_with_numbers = text.length < 250 && /\d/.test(text);
+  const is_short_with_numbers = text.length < 350 && /\d/.test(text); // Increased threshold
+
+  // Some traps don't have numbers but are still traps (anagrams, combinatorics)
+  const is_numberless_trap =
+    text.length < 200 &&
+    (/arrange.*letters/i.test(text) ||
+      /permutation.*letters/i.test(text) ||
+      /how many ways/i.test(text));
 
   // Track trap detection - will add to intensity_signals after it's declared
-  const trap_detected = has_trap_pattern && is_short_with_numbers && verb_base < 0.7;
-  if (trap_detected) {
+  const trap_detected = (has_trap_pattern && is_short_with_numbers) || is_numberless_trap;
+  if (trap_detected && verb_base < 0.7) {
     verb_boosted += 0.25; // Strong boost for trap questions
     verb_type += " [trap-detected]";
   }
@@ -241,7 +261,6 @@ export function assessPromptComplexity(text: string): ComplexityResult {
         "tcp",
         "udp",
         "three-way handshake",
-        "handshake",
         "protocol",
         "packet",
         "routing",
@@ -251,24 +270,32 @@ export function assessPromptComplexity(text: string): ComplexityResult {
       weight: 0.7,
     },
     {
-      name: "distributed_systems",
-      keywords: [
-        "lock-free",
-        "consensus",
-        "distributed",
-        "byzantine",
-        "memory ordering",
-        "cache coherence",
-        "two-phase commit",
-        "paxos",
-        "raft",
-      ],
-      weight: 0.9,
-    },
-    {
       name: "competitive_analysis",
       keywords: ["competitive ratio", "online algorithm", "ski-rental", "adversarial"],
       weight: 0.88,
+    },
+    {
+      name: "paradox",
+      keywords: [
+        "two envelopes",
+        "envelope paradox",
+        "sleeping beauty",
+        "halfers",
+        "thirders",
+        "monty hall",
+        "naive argument",
+        "symmetrically",
+        "prisoners",
+        "loop-following",
+        "survival probability",
+        "100 boxes",
+        "boy born on tuesday",
+        "born on",
+        "probability both are boys",
+        "both children",
+        "two children",
+      ],
+      weight: 0.92,
     },
     {
       name: "probability_statistics",
@@ -278,7 +305,6 @@ export function assessPromptComplexity(text: string): ComplexityResult {
         "conditional probability",
         "bayes",
         "distribution",
-        "monty hall",
         "regression",
         "statistical",
         "expected value",
@@ -328,8 +354,31 @@ export function assessPromptComplexity(text: string): ComplexityResult {
     },
     {
       name: "calculus",
-      keywords: ["derivative", "integral", "limit", "differentiation", "integration", "calculus"],
-      weight: 0.65,
+      keywords: [
+        "derivative",
+        "integral",
+        "limit",
+        "differentiation",
+        "integration",
+        "calculus",
+        "d/dx",
+        "integral of",
+        "∫",
+      ],
+      weight: 0.72,
+    },
+    {
+      name: "linear_algebra",
+      keywords: [
+        "matrix",
+        "determinant",
+        "eigenvalue",
+        "eigenvector",
+        "inverse matrix",
+        "transpose",
+        "linear transformation",
+      ],
+      weight: 0.7,
     },
     // New domains for better coverage
     {
@@ -347,7 +396,7 @@ export function assessPromptComplexity(text: string): ComplexityResult {
         "conclusion follows",
         "logically",
       ],
-      weight: 0.85,
+      weight: 0.92,
     },
     {
       name: "game_theory",
@@ -370,13 +419,124 @@ export function assessPromptComplexity(text: string): ComplexityResult {
         "divisible",
         "remainder",
         "modulo",
+        "mod ",
         "trailing zero",
         "integer",
         "divisor",
         "gcd",
         "lcm",
+        "last digit",
+        "^100",
+        "^10",
+      ],
+      weight: 0.85,
+    },
+    {
+      name: "combinatorics",
+      keywords: [
+        "arrange",
+        "permutation",
+        "combination",
+        "ways to",
+        "how many ways",
+        "choose",
+        "select",
+        "distribute",
+        "partition",
+        "letters in",
+        "anagram",
+        "mississippi",
+        "arrange the letters",
+      ],
+      weight: 0.85,
+    },
+    {
+      name: "constraint_reasoning",
+      keywords: [
+        "minimum number",
+        "guarantee",
+        "worst case",
+        "at least",
+        "at most",
+        "balance scale",
+        "weighing",
+        "pigeonhole",
+        "must draw",
+        "must flip",
+      ],
+      weight: 0.85,
+    },
+    {
+      name: "conditional_probability",
+      keywords: [
+        "given that",
+        "conditional",
+        "revolver",
+        "russian roulette",
+        "chamber",
+        "bullet",
+        "envelope",
+        "adjacent",
+        "spin",
+        "fire",
+      ],
+      weight: 0.9,
+    },
+    {
+      name: "lateral_thinking",
+      keywords: [
+        "trick",
+        "lateral",
+        "only enter once",
+        "can only",
+        "how do you",
+        "determine which",
       ],
       weight: 0.8,
+    },
+    {
+      name: "rate_problems",
+      keywords: [
+        "machines",
+        "widgets",
+        "workers",
+        "mph",
+        "speed",
+        "rate",
+        "per hour",
+        "per minute",
+        "round trip",
+        "average speed",
+      ],
+      weight: 0.75,
+    },
+    {
+      name: "clock_problems",
+      keywords: [
+        "clock hands",
+        "hour hand",
+        "minute hand",
+        "overlap",
+        "12 hours",
+        "24 hours",
+        "times.*overlap",
+      ],
+      weight: 0.85,
+    },
+    {
+      name: "common_knowledge",
+      keywords: [
+        "blue eyes",
+        "blue-eyed",
+        "islanders",
+        "leave at midnight",
+        "know your",
+        "common knowledge",
+        "induction",
+        "eye color",
+        "days until",
+      ],
+      weight: 0.95,
     },
   ];
 
@@ -458,6 +618,32 @@ export function assessPromptComplexity(text: string): ComplexityResult {
     intensity_signals.push("proof_structure");
   }
 
+  // Multi-part questions (higher cognitive load)
+  const multi_part_patterns = [
+    /give (two|three|four|\d+) (examples?|reasons?|explanations?)/i,
+    /what are (two|three|\d+) possible/i,
+    /list (two|three|\d+)/i,
+    /compare.*contrast/i,
+    /similarities.*differences/i,
+  ];
+  if (multi_part_patterns.some((p) => p.test(lower))) {
+    intensity_mod *= 1.12;
+    intensity_signals.push("multi_part");
+  }
+
+  // Rule-based reasoning (Wason selection task style)
+  const rule_patterns = [
+    /rule:.*which.*flip/i,
+    /which cards? must you flip/i,
+    /test the rule/i,
+    /if.*on one side.*on (the )?other/i,
+    /must.*flip.*test/i,
+  ];
+  if (rule_patterns.some((p) => p.test(lower))) {
+    intensity_mod *= 1.35; // Strong boost for logical rule verification
+    intensity_signals.push("rule_based");
+  }
+
   // ===== PHASE 5: NEGATION CORRECTION =====
   // Handle "not difficult", "not complex" → lower score
   const negation_patterns = [
@@ -473,6 +659,12 @@ export function assessPromptComplexity(text: string): ComplexityResult {
   }
 
   // ===== PHASE 6: COMPOSITE SCORING =====
+  // If we detected a high-weight domain but no explicit verb, boost the base
+  // This handles "What is X?" questions in difficult domains
+  if (verb_type === "generic" && domain_weight >= 0.7) {
+    verb_boosted = Math.max(verb_boosted, 0.55);
+  }
+
   const composite_score = verb_boosted * domain_weight * intensity_mod;
   const final_score = Math.min(1.0, composite_score);
 
@@ -524,23 +716,9 @@ Verb: "${verb_type}" (base: ${verb_base.toFixed(2)} → boosted: ${verb_boosted.
 Domain: ${domain_name} (weight: ${domain_weight.toFixed(2)})
 Intensity: ${intensity_signals.join(", ") || "none"} (modifier: ${intensity_mod.toFixed(2)}x)
 
-Calculation: ${verb_boosted.toFixed(2)} × ${domain_weight.toFixed(2)} × ${intensity_mod.toFixed(2)} = ${final_score.toFixed(3)}`;
-
-  // Legacy compatibility: map to old interface
-  const legacyComponents = {
-    domain: domain_weight,
-    derivation: verb_type.includes("derive") ? verb_boosted : 0,
-    proof: verb_type.includes("prove") ? verb_boosted : 0,
-    construction:
-      verb_type.includes("construct") || verb_type.includes("design") ? verb_boosted : 0,
-    open_problem: intensity_signals.includes("impossibility") ? intensity_mod : 0,
-  };
-
-  const legacySignals = {
-    domain_terms_found: domain_name !== "general" ? [domain_name] : [],
-    research_indicators: intensity_signals.slice(0, 2),
-    proof_requirements: intensity_signals.includes("proof_structure") ? ["proof"] : [],
-  };
+Calculation: ${verb_boosted.toFixed(2)} × ${domain_weight.toFixed(
+    2,
+  )} × ${intensity_mod.toFixed(2)} = ${final_score.toFixed(3)}`;
 
   return {
     score: final_score,
@@ -559,9 +737,6 @@ Calculation: ${verb_boosted.toFixed(2)} × ${domain_weight.toFixed(2)} × ${inte
       intensity_modifier: intensity_mod,
     },
     reasoning: reasoning.trim(),
-    // Legacy compatibility
-    components: legacyComponents,
-    signals: legacySignals,
   };
 }
 /**
@@ -569,12 +744,25 @@ Calculation: ${verb_boosted.toFixed(2)} × ${domain_weight.toFixed(2)} × ${inte
  * These questions should use direct LLM answer with minimal prompting
  */
 export function isTrivialQuestion(question: string): boolean {
-  // Must be short
-  if (question.length > 150) return false;
+  // Must be very short
+  if (question.length > 80) return false; // Reduced from 150
 
-  // Must have low complexity score
+  // Must have very low complexity score
   const complexity = assessPromptComplexity(question);
-  if (complexity.score >= 0.3) return false; // Not "Low" tier (v3 threshold)
+  if (complexity.score >= 0.25) return false; // Stricter than 0.3
+
+  // Exclude questions with reasoning indicators
+  const reasoningIndicators = [
+    /minimum|maximum|optimal/i,
+    /guarantee|ensure|worst case/i,
+    /how many (ways|times|steps)/i,
+    /strategy|approach|method/i,
+    /arrange|permutation|combination/i,
+    /probability|chance|likely/i,
+    /\d+.*machines?.*\d+/i, // Rate problems
+    /overlap|intersect/i,
+  ];
+  if (reasoningIndicators.some((p) => p.test(question))) return false;
 
   // Check for simple answer patterns
   const expectsSimpleAnswer =
@@ -596,7 +784,10 @@ export function isTrivialQuestion(question: string): boolean {
  * Get a minimal prompt for trivial questions
  * Designed for direct LLM answer with no reasoning overhead
  */
-export function getTrivialPrompt(question: string): { system: string; user: string } {
+export function getTrivialPrompt(question: string): {
+  system: string;
+  user: string;
+} {
   return {
     system: "Answer directly. Just YES, NO, or the answer. Nothing else.",
     user: question,

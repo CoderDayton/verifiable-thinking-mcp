@@ -77,9 +77,9 @@ describe("assessPromptComplexity", () => {
       const result = assessPromptComplexity(
         "Explain why the Monty Hall problem has a counterintuitive solution",
       );
-      expect(result.tier).toBe("High");
+      expect(result.tier).toBe("Very Hard");
       expect(result.explanation.verb_type).toContain("counterintuitive");
-      expect(result.explanation.domain_detected).toBe("probability_statistics");
+      expect(result.explanation.domain_detected).toBe("paradox");
     });
 
     test("why can't with complexity domain", () => {
@@ -190,7 +190,7 @@ describe("assessPromptComplexity", () => {
 
     test("detects probability domain with Monty Hall", () => {
       const result = assessPromptComplexity("Analyze the Monty Hall problem");
-      expect(result.explanation.domain_detected).toBe("probability_statistics");
+      expect(result.explanation.domain_detected).toBe("paradox");
     });
 
     test("detects ML domain", () => {
@@ -203,7 +203,7 @@ describe("assessPromptComplexity", () => {
         "On an island, every inhabitant is either a knight or a knave. Who is lying?",
       );
       expect(result.explanation.domain_detected).toBe("logic_puzzle");
-      expect(result.explanation.domain_weight).toBe(0.85);
+      expect(result.explanation.domain_weight).toBe(0.92);
     });
 
     test("detects game_theory domain", () => {
@@ -215,7 +215,7 @@ describe("assessPromptComplexity", () => {
     test("detects number_theory domain", () => {
       const result = assessPromptComplexity("How many trailing zeros are in 100 factorial?");
       expect(result.explanation.domain_detected).toBe("number_theory");
-      expect(result.explanation.domain_weight).toBe(0.8);
+      expect(result.explanation.domain_weight).toBe(0.85);
     });
   });
 

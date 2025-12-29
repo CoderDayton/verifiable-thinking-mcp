@@ -134,7 +134,8 @@ PURPOSE VALUES: analysis, action, reflection, decision, summary, validation, exp
         tier: complexity.tier,
         score: complexity.score,
         trivial,
-        signals: complexity.signals,
+        domain: complexity.explanation.domain_detected,
+        intensity_signals: complexity.explanation.intensity_signals,
       };
     }
 
