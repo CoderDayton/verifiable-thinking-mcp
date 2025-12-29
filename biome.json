@@ -10,7 +10,7 @@
         "noEmptyCharacterClassInRegex": "off"
       },
       "suspicious": {
-        "noExplicitAny": "off",
+        "noExplicitAny": "warn",
         "noAssignInExpressions": "off",
         "noImplicitAnyLet": "warn"
       },
@@ -19,7 +19,13 @@
         "noNonNullAssertion": "off"
       },
       "complexity": {
-        "useOptionalChain": "error"
+        "useOptionalChain": "error",
+        "noExcessiveCognitiveComplexity": {
+          "level": "warn",
+          "options": {
+            "maxAllowedComplexity": 30
+          }
+        }
       }
     }
   },

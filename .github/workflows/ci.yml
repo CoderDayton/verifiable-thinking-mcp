@@ -24,8 +24,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Lint
-        run: bun run lint
+      - name: Lint (fail on errors)
+        run: bun run biome check src test scripts
+
+      - name: Format check
+        run: bun run biome format src test scripts
+
+      - name: Lint warnings report
+        run: |
+          echo "::notice::Checking for lint warnings (non-blocking)"
+          bun run biome check src test scripts 2>&1 | grep -E "^src/.*lint/" | wc -l | xargs -I {} echo "Total warnings: {}"
+        continue-on-error: true
 
       - name: Typecheck
         run: bun run typecheck
