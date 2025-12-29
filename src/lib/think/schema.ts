@@ -71,6 +71,18 @@ export const ThinkSchema = z.object({
   domain: z.enum(["math", "logic", "code", "general"]).optional().describe("Domain hint"),
   local_compute: z.boolean().default(false).describe("Try local compute for math"),
 
+  // Local compute augmentation - inject computed values into thought
+  augment_compute: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Extract and inject locally computed values into thought (math, logic, probability, facts)",
+    ),
+  system_prompt: z
+    .string()
+    .optional()
+    .describe("System prompt context for domain-aware filtering of compute augmentation"),
+
   // Compression control
   compression_level: z
     .enum(["none", "auto", "aggressive"])

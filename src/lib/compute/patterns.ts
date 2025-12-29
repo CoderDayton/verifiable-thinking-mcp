@@ -467,10 +467,12 @@ export const LIKELY_COMPUTABLE_POSITIVE = [
   /if\s+[^,]+,\s*[^.]+\.\s*[^.]+\.\s*is\s+/i, // If X, Y. Z. Is ...?
   /all\s+\w+\s+are\s+\w+.*valid/i,
   /exclusive.*both.*violated/i,
-  // Probability patterns (independent events, gambler's fallacy)
+  // Probability patterns (independent events, gambler's fallacy, birthday paradox)
   /fair\s+coin.*(?:probability|chance)/i,
   /independent.*(?:probability|chance)/i,
   /in\s+a\s+row.*(?:probability|chance|what['']?s)/i,
+  /birthday.*share|share.*birthday/i,
+  /\d+\s*(?:people|persons?).*birthday/i,
 ] as const;
 
 export const LIKELY_COMPUTABLE_NEGATIVE = [

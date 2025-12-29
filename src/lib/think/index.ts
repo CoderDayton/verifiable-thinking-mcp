@@ -19,6 +19,34 @@ export {
   VALID_PURPOSES,
 } from "./guidance.ts";
 
+// Helpers (extracted for cognitive complexity reduction)
+export {
+  type AugmentResult,
+  assessComplexity,
+  buildBaselineResponse,
+  buildRecord,
+  buildResponse,
+  type ComplexityInfo,
+  type CompressionLevel,
+  type CompressionStats,
+  compressChainContext,
+  compressInput,
+  compressOutput,
+  type ExecuteContext,
+  errorResponse,
+  findMissingDeps,
+  initContext,
+  jsonResponse,
+  runGuidance,
+  runVerify,
+  type StreamFn,
+  storeThought,
+  tryAugment,
+  tryCompute,
+  validateBranch,
+  validateRevision,
+} from "./helpers.ts";
+
 // Prompts (verbosity-aware templates)
 export {
   // User prompts
@@ -45,6 +73,19 @@ export {
   SYSTEM_VERIFICATION_TERSE,
   type Verbosity,
 } from "./prompts.ts";
+
+// Routing (complexity-based path selection)
+export {
+  buildSpotCheckPrompt,
+  getComplexityInfo,
+  parseSpotCheckResponse,
+  type RoutePrompts,
+  type RouteResult,
+  type RoutingPath,
+  routeQuestion,
+  type SpotCheckInput,
+} from "./route.ts";
+
 // Schema
 export { NextActionSchema, type ThinkArgs, ThinkSchema } from "./schema.ts";
 

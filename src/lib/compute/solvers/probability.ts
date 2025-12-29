@@ -5,6 +5,7 @@
  * - Independent events: "fair coin landed heads N times, probability of heads?" → 50%
  * - Gambler's fallacy detection: Previous outcomes don't affect independent events
  * - Hot hand fallacy: Streak doesn't change underlying probability
+ * - Birthday paradox: "N people, probability at least 2 share birthday?"
  *
  * O(n) pattern matching - no backtracking, single-pass regex
  *
@@ -45,6 +46,18 @@ const PATTERNS = {
   // "What's the probability" patterns for independent events
   whatProbability:
     /what['']?s?\s+(?:the\s+)?(?:probability|chance).*(?:next|following)\s+(?:flip|shot|roll|toss)/i,
+
+  // Birthday paradox: "N people in a room, probability at least 2 share birthday"
+  birthdayParadox:
+    /(\d+)\s*(?:people|persons?|students?|guests?|employees?|members?).*?(?:probability|chance|what['']?s|likely).*?(?:at\s+least\s+(?:two|2)|two\s+or\s+more|same\s+birthday|share\s+(?:a\s+)?birthday)/i,
+
+  // Alternative birthday pattern: "probability that at least 2 of N people share a birthday"
+  birthdayParadoxAlt:
+    /(?:probability|chance).*?(?:at\s+least\s+(?:two|2)|two\s+or\s+more).*?(\d+)\s*(?:people|persons?|students?|guests?).*?(?:same\s+birthday|share\s+(?:a\s+)?birthday)/i,
+
+  // Birthday pattern starting with "In a room of N people"
+  birthdayRoom:
+    /(?:in\s+a\s+)?(?:room|group|class|team)\s+(?:of\s+)?(\d+)\s*(?:people|persons?|students?|guests?).*?(?:birthday|born\s+on\s+the\s+same)/i,
 } as const;
 
 // =============================================================================
@@ -60,6 +73,17 @@ function hasIndependent(lower: string): boolean {
 }
 
 /**
+ * Detect if this is a birthday paradox question
+ */
+function hasBirthdayContext(lower: string): boolean {
+  return (
+    lower.includes("birthday") ||
+    (lower.includes("share") && lower.includes("born")) ||
+    (lower.includes("same day") && lower.includes("people"))
+  );
+}
+
+/**
  * Detect if this is asking about probability of next event
  * NOT just mentioning "chance" or "%" in context of expected value
  */
@@ -72,7 +96,7 @@ function hasProbabilityQuestion(lower: string): boolean {
   return (
     lower.includes("probability") ||
     // "chance" must be about asking probability, not stating odds like "100% chance of $50"
-    (lower.includes("chance") && lower.includes("next")) ||
+    (lower.includes("chance") && (lower.includes("next") || lower.includes("at least"))) ||
     lower.includes("what's the prob") ||
     lower.includes("what is the prob")
   );
@@ -123,6 +147,28 @@ function wantsPercentage(text: string): boolean {
   );
 }
 
+/**
+ * Calculate birthday paradox probability
+ * P(at least 2 share) = 1 - P(all different)
+ * P(all different) = 365/365 * 364/365 * ... * (365-n+1)/365
+ *
+ * @param n - Number of people
+ * @returns Probability as percentage (0-100)
+ */
+function birthdayParadoxProbability(n: number): number {
+  if (n <= 1) return 0;
+  if (n >= 365) return 100;
+
+  // Calculate P(all different) = ∏(365-i)/365 for i=0 to n-1
+  let pAllDifferent = 1;
+  for (let i = 0; i < n; i++) {
+    pAllDifferent *= (365 - i) / 365;
+  }
+
+  // P(at least 2 share) = 1 - P(all different)
+  return (1 - pAllDifferent) * 100;
+}
+
 // =============================================================================
 // SOLVER
 // =============================================================================
@@ -132,8 +178,46 @@ export function tryProbability(text: string): ComputeResult {
   const lower = text.toLowerCase();
 
   // Quick exit if no probability-related keywords
-  if (!hasProbabilityQuestion(lower)) {
+  if (!hasProbabilityQuestion(lower) && !hasBirthdayContext(lower)) {
     return { solved: false, confidence: 0 };
+  }
+
+  // BIRTHDAY PARADOX: "N people, probability at least 2 share birthday?"
+  if (hasBirthdayContext(lower)) {
+    let n: number | null = null;
+
+    // Try multiple patterns to extract N
+    const match1 = text.match(PATTERNS.birthdayParadox);
+    if (match1?.[1]) n = parseInt(match1[1], 10);
+
+    if (n === null) {
+      const match2 = text.match(PATTERNS.birthdayParadoxAlt);
+      if (match2?.[1]) n = parseInt(match2[1], 10);
+    }
+
+    if (n === null) {
+      const match3 = text.match(PATTERNS.birthdayRoom);
+      if (match3?.[1]) n = parseInt(match3[1], 10);
+    }
+
+    if (n !== null && n > 0 && n <= 1000) {
+      const probability = birthdayParadoxProbability(n);
+      // Round to nearest integer for percentage answers
+      // Default to percentage for birthday paradox (common convention)
+      const rounded = Math.round(probability);
+      // Only return decimal if explicitly asking for decimal/fraction
+      const wantsDecimal =
+        lower.includes("decimal") || lower.includes("fraction") || lower.includes("0.");
+      const result = wantsDecimal ? (probability / 100).toFixed(4) : String(rounded);
+
+      return {
+        solved: true,
+        result,
+        method: "birthday_paradox",
+        confidence: 1.0,
+        time_ms: performance.now() - start,
+      };
+    }
   }
 
   // FAIR COIN: Independent events with known 50% probability
@@ -206,7 +290,8 @@ export function tryProbability(text: string): ComputeResult {
 
 export const solver: Solver = {
   name: "probability",
-  description: "Independent events, fair coin, gambler's fallacy, hot hand fallacy",
+  description:
+    "Independent events, fair coin, gambler's fallacy, hot hand fallacy, birthday paradox",
   types: SolverType.PROBABILITY,
   priority: 12, // After facts and arithmetic, before logic
   solve: (text, _lower) => tryProbability(text),

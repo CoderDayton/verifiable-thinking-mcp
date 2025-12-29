@@ -336,6 +336,18 @@ const CLASSIFIER_RULES: ClassifierRule[] = [
     types: SolverType.PROBABILITY,
   },
 
+  // PROBABILITY: Birthday paradox (people + share birthday)
+  {
+    guard: (_text, lower, _chars) =>
+      lower.includes("birthday") &&
+      (lower.includes("share") || lower.includes("same")) &&
+      (lower.includes("people") ||
+        lower.includes("person") ||
+        lower.includes("room") ||
+        lower.includes("group")),
+    types: SolverType.PROBABILITY,
+  },
+
   // CRT: Bat and ball style (X costs $Y more than Z)
   {
     guard: (_text, lower, chars) =>

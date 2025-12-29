@@ -339,8 +339,8 @@ describe("SessionManager", () => {
 
     expect(manager.list()).toHaveLength(1);
 
-    // Wait for TTL to expire and cleanup to run
-    await Bun.sleep(80);
+    // Wait for TTL to expire and cleanup to run (extra buffer for CI)
+    await Bun.sleep(150);
 
     // Session should be cleaned up
     expect(manager.list()).toHaveLength(0);
@@ -3119,14 +3119,44 @@ describe("LocalCompute - Probability", () => {
     });
   });
 
-  describe("Non-matching questions", () => {
-    test("complex probability - not solvable", () => {
+  describe("Birthday Paradox", () => {
+    test("23 people - classic case (~50.7%)", () => {
       const result = tryProbability(
-        "In a room of 23 people, what's the probability at least two share a birthday?",
+        "In a room of 23 people, what's the probability at least two share a birthday? Answer as percentage.",
       );
-      expect(result.solved).toBe(false);
+      expect(result.solved).toBe(true);
+      expect(result.method).toBe("birthday_paradox");
+      // 23 people gives ~50.7%
+      expect(result.result).toBe("51");
     });
 
+    test("50 people - high probability (~97%)", () => {
+      const result = tryProbability(
+        "50 people in a room. Probability that at least two share a birthday?",
+      );
+      expect(result.solved).toBe(true);
+      expect(result.result).toBe("97");
+    });
+
+    test("70 people - very high probability (~99.9%)", () => {
+      const result = tryProbability(
+        "What's the probability that at least 2 of 70 students share a birthday?",
+      );
+      expect(result.solved).toBe(true);
+      // Should be ~99.9%
+      expect(parseInt(result.result as string, 10)).toBeGreaterThanOrEqual(99);
+    });
+
+    test("1 person - 0%", () => {
+      const result = tryProbability(
+        "In a room with 1 person, what's the probability at least two share a birthday?",
+      );
+      expect(result.solved).toBe(true);
+      expect(result.result).toBe("0");
+    });
+  });
+
+  describe("Non-matching questions", () => {
     test("conditional probability - not solvable", () => {
       const result = tryProbability(
         "Given sum is 9 when rolling two dice, what's the probability the first die is 6?",

@@ -39,9 +39,17 @@ describe("assessPromptComplexity", () => {
   });
 
   describe("Moderate complexity", () => {
-    test("derive formula", () => {
-      const result = assessPromptComplexity("Derive the formula for compound interest.");
+    test("derive simple formula", () => {
+      // "Derive" (0.8 verb) × "general" domain (0.5) = 0.4 (Moderate)
+      const result = assessPromptComplexity("Derive the formula for the area of a triangle.");
       expect(result.tier).toBe("Moderate");
+    });
+
+    test("derive financial formula is High due to domain", () => {
+      // "Derive" (0.8) × "financial" (0.65) = 0.52 (High)
+      const result = assessPromptComplexity("Derive the formula for compound interest.");
+      expect(result.tier).toBe("High");
+      expect(result.explanation.domain_detected).toBe("financial");
     });
 
     test("why does with domain", () => {
@@ -247,6 +255,23 @@ describe("assessPromptComplexity", () => {
       expect(result.tier).toBe("Low");
       expect(result.explanation.verb_type).not.toContain("[trap-detected]");
     });
+
+    test("100 prisoners problem triggers trap", () => {
+      const result = assessPromptComplexity(
+        "100 prisoners, 100 boxes with their numbers randomly placed. Each opens 50 boxes to find their number. With the loop-following strategy, what's the approximate survival probability (percentage)?",
+      );
+      expect(result.explanation.verb_type).toContain("[trap-detected]");
+      expect(result.explanation.intensity_signals).toContain("trap_pattern");
+      // Should be boosted to High or Very Hard due to counterintuitive nature
+      expect(["High", "Very Hard", "Almost Impossible"]).toContain(result.tier);
+    });
+
+    test("Monty Hall problem triggers trap", () => {
+      const result = assessPromptComplexity(
+        "On a game show, you choose door 1 of 3. The host opens door 3 revealing a goat. Should you switch to door 2?",
+      );
+      expect(result.explanation.intensity_signals).toContain("trap_pattern");
+    });
   });
 
   describe("Asymmetric default (safety net)", () => {
@@ -349,5 +374,160 @@ describe("Performance", () => {
     const ratio = longTime / shortTime;
     expect(ratio).toBeLessThan(200);
     console.log(`Time ratio (100x input): ${ratio.toFixed(2)}x`);
+  });
+});
+
+// =============================================================================
+// ROUTING TESTS
+// =============================================================================
+
+import {
+  buildSpotCheckPrompt,
+  parseSpotCheckResponse,
+  routeQuestion,
+} from "../src/lib/think/route";
+
+describe("routeQuestion", () => {
+  describe("Path: trivial", () => {
+    test("simple yes/no question routes to trivial", () => {
+      const route = routeQuestion("Is 5 > 3?");
+      expect(route.path).toBe("trivial");
+      expect(route.steps).toBe(1);
+      expect(route.hasVerification).toBe(false);
+    });
+
+    test("trivial prompt is minimal", () => {
+      const route = routeQuestion("Is water wet?");
+      expect(route.prompts.main.system).toContain("Answer directly");
+      expect(route.prompts.spotCheck).toBeUndefined();
+    });
+  });
+
+  describe("Path: direct (Low complexity)", () => {
+    test("simple factual question routes to trivial or direct", () => {
+      const route = routeQuestion("What is the capital of France?");
+      expect(["trivial", "direct"]).toContain(route.path);
+      expect(route.tier).toBe("Low");
+      expect(route.steps).toBe(1);
+      expect(route.hasVerification).toBe(false);
+    });
+
+    test("basic arithmetic routes to direct or trivial", () => {
+      const route = routeQuestion("What is 2 + 2?");
+      expect(["trivial", "direct"]).toContain(route.path);
+      expect(route.hasVerification).toBe(false);
+    });
+
+    test("slightly longer Low question routes to direct", () => {
+      const route = routeQuestion(
+        "List the first five prime numbers and explain why they are prime.",
+      );
+      // This should be Low or Moderate, but not trivial
+      expect(route.tier).not.toBe("Very Hard");
+      expect(route.hasVerification).toBe(false);
+    });
+  });
+
+  describe("Path: reasoning (Moderate/High complexity)", () => {
+    test("moderate question routes to reasoning without verification", () => {
+      const route = routeQuestion("Explain how photosynthesis works.");
+      expect(route.path).toBe("reasoning");
+      expect(route.tier).toBe("Moderate");
+      expect(route.steps).toBe(1);
+      expect(route.hasVerification).toBe(false);
+    });
+
+    test("High complexity routes to reasoning without verification", () => {
+      // Force a High tier question
+      const route = routeQuestion("Design an algorithm for sorting with O(n log n) complexity.");
+      // Could be Moderate or High depending on domain detection
+      expect(["reasoning"]).toContain(route.path);
+      expect(route.hasVerification).toBe(false);
+    });
+
+    test("reasoning prompt includes step-by-step instruction", () => {
+      const route = routeQuestion("Derive the quadratic formula step by step.");
+      expect(route.prompts.main.user).toContain("step");
+    });
+  });
+
+  describe("Path: reasoning+spot (Very Hard/Almost Impossible)", () => {
+    test("Very Hard question routes to reasoning+spot", () => {
+      const route = routeQuestion("Prove that the halting problem is undecidable.");
+      expect(route.path).toBe("reasoning+spot");
+      expect(["Very Hard", "Almost Impossible"]).toContain(route.tier);
+      expect(route.steps).toBe(2);
+      expect(route.hasVerification).toBe(true);
+    });
+
+    test("Almost Impossible question includes spot-check", () => {
+      const route = routeQuestion("Prove P ≠ NP rigorously with a formal proof.");
+      expect(route.hasVerification).toBe(true);
+      expect(route.prompts.spotCheck).toBeDefined();
+      expect(route.prompts.spotCheck?.userTemplate).toContain("CORRECT");
+    });
+
+    test("skipVerify=true forces reasoning path even for Very Hard", () => {
+      const route = routeQuestion("Prove that the halting problem is undecidable.", true);
+      expect(route.path).toBe("reasoning");
+      expect(route.steps).toBe(1);
+      expect(route.hasVerification).toBe(false);
+    });
+  });
+
+  describe("Verbosity detection", () => {
+    test("short simple question gets terse verbosity", () => {
+      const route = routeQuestion("What is 5?");
+      expect(route.verbosity).toBe("terse");
+    });
+
+    test("question with 'explain' gets verbose verbosity", () => {
+      const route = routeQuestion("Explain why the sky is blue in detail.");
+      expect(route.verbosity).toBe("verbose");
+    });
+  });
+});
+
+describe("buildSpotCheckPrompt", () => {
+  test("replaces question placeholder", () => {
+    const template = "Q: {{question}}\nAnswer: {{answer}}";
+    const result = buildSpotCheckPrompt(template, {
+      question: "What is 2+2?",
+      proposedAnswer: "4",
+    });
+    expect(result).toBe("Q: What is 2+2?\nAnswer: 4");
+  });
+
+  test("handles complex questions with special chars", () => {
+    const template = "Q: {{question}}\nProposed: {{answer}}";
+    const result = buildSpotCheckPrompt(template, {
+      question: 'Is "hello" == "hello"?',
+      proposedAnswer: "true",
+    });
+    expect(result).toContain('Is "hello"');
+  });
+});
+
+describe("parseSpotCheckResponse", () => {
+  test("YES at start returns true", () => {
+    expect(parseSpotCheckResponse("YES, the answer is correct.")).toBe(true);
+    expect(parseSpotCheckResponse("Yes, that's right.")).toBe(true);
+    expect(parseSpotCheckResponse("yes")).toBe(true);
+  });
+
+  test("NO at start returns false", () => {
+    expect(parseSpotCheckResponse("NO, the answer should be 5.")).toBe(false);
+    expect(parseSpotCheckResponse("No, incorrect.")).toBe(false);
+    expect(parseSpotCheckResponse("no")).toBe(false);
+  });
+
+  test("handles whitespace", () => {
+    expect(parseSpotCheckResponse("  YES  ")).toBe(true);
+    expect(parseSpotCheckResponse("\nNO\n")).toBe(false);
+  });
+
+  test("YES not at start returns false", () => {
+    expect(parseSpotCheckResponse("I think YES")).toBe(false);
+    expect(parseSpotCheckResponse("The answer is YES")).toBe(false);
   });
 });

@@ -25,6 +25,19 @@ export {
   clearTracker,
   getTracker,
 } from "./concepts";
+// Unified domain detection
+export {
+  type DomainResult,
+  detectDomainFull,
+  detectGranularDomain,
+  detectMetaDomain,
+  detectVerificationDomain,
+  type GranularDomain,
+  getDomainWeight,
+  getRelevantSolvers,
+  isSolverRelevant,
+  type MetaDomain,
+} from "./domain";
 // Answer extraction & matching
 export {
   answersMatch,

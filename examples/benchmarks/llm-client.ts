@@ -18,6 +18,44 @@ export interface LLMConfig {
   maxTokens: number;
 }
 
+// Tool-calling types (OpenAI-compatible)
+export interface ToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description: string;
+    parameters: Record<string, unknown>;
+  };
+}
+
+export interface ToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: string; // JSON string
+  };
+}
+
+export interface ChatMessageWithTools {
+  role: "system" | "user" | "assistant" | "tool";
+  content: string | null;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string; // For tool responses
+}
+
+export interface ChatResponseWithTools {
+  choices: Array<{
+    message: {
+      content?: string | null;
+      reasoning_content?: string;
+      reasoning?: string;
+      tool_calls?: ToolCall[];
+    };
+    finish_reason?: "stop" | "tool_calls" | "length";
+  }>;
+}
+
 interface ChatMessage {
   role: "system" | "user" | "assistant";
   content: string;
@@ -188,13 +226,86 @@ export class LLMClient {
   }
 
   /**
+   * Ask LLM with tool-calling support.
+   * Returns the response message which may contain tool_calls or content.
+   */
+  async askWithTools(
+    messages: ChatMessageWithTools[],
+    tools: ToolDefinition[],
+    options: { temperature?: number; signal?: AbortSignal } = {}
+  ): Promise<ChatResponseWithTools["choices"][0]["message"]> {
+    const { temperature = 0.1, signal } = options;
+    const semaphore = getSemaphore();
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const release = await semaphore.acquire();
+
+      try {
+        const now = Date.now();
+        const elapsed = now - lastRequestTime;
+        if (elapsed < LLM_DELAY) {
+          await Bun.sleep(LLM_DELAY - elapsed);
+        }
+        lastRequestTime = Date.now();
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), this.config.timeout);
+        
+        if (signal) {
+          signal.addEventListener("abort", () => controller.abort());
+        }
+
+        try {
+          const response = await fetch(`${this.config.baseUrl}/chat/completions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${this.config.apiKey}`,
+            },
+            body: JSON.stringify({
+              model: this.config.model,
+              messages,
+              tools,
+              max_tokens: this.config.maxTokens,
+              temperature,
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+
+          if (response.status === 429 && attempt < 2) {
+            const waitTime = 30_000 * (attempt + 1);
+            console.log(`  [rate limit] Waiting ${waitTime / 1000}s before retry...`);
+            await Bun.sleep(waitTime);
+            continue;
+          }
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+          }
+
+          const data = (await response.json()) as ChatResponseWithTools;
+          return data.choices[0]?.message || { content: "" };
+        } finally {
+          clearTimeout(timeoutId);
+        }
+      } finally {
+        release();
+      }
+    }
+
+    return { content: "" };
+  }
+
+  /**
    * Stream LLM response, yielding chunks as they arrive.
    */
   async *stream(
     prompt: string,
-    options: { system?: string; temperature?: number; signal?: AbortSignal } = {}
+    options: { system?: string; temperature?: number; signal?: AbortSignal; maxTokens?: number } = {}
   ): AsyncGenerator<string> {
-    const { system, temperature = 0.1, signal } = options;
+    const { system, temperature = 0.1, signal, maxTokens } = options;
     const messages: ChatMessage[] = [];
 
     if (system) {
@@ -228,7 +339,7 @@ export class LLMClient {
         body: JSON.stringify({
           model: this.config.model,
           messages,
-          max_tokens: this.config.maxTokens,
+          max_tokens: maxTokens ?? this.config.maxTokens,
           temperature,
           stream: true,
         }),

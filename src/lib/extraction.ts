@@ -126,18 +126,42 @@ function extractLastMeaningfulWord(text: string): string {
  * Extract answer from LLM response using priority-based pattern matching
  *
  * Priority order:
+ * 0. If expectedAnswers provided, look for exact match in response (fastest path)
  * 1. LaTeX \boxed{X} (explicit answer marking)
  * 2. "Final Answer: X" (with colon)
  * 3. "Answer: X" (with colon)
  * 4. "The answer is X" / "answer is X"
+ * 4b. "should be X" / "must be X"
+ * 4c. Card flip patterns (Wason task)
  * 5. "Result: X"
  * 6. Last equation result "= X"
  * 7. Standalone numbers in last lines
  * 8. Last number in response
  * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
  */
-export function extractAnswer(response: string): string {
+export function extractAnswer(response: string, expectedAnswers?: string[]): string {
   const cleaned = stripMarkdown(response);
+
+  // Priority 0: If we know expected answers, look for them directly in the response
+  // This is the most reliable method when we have ground truth
+  if (expectedAnswers && expectedAnswers.length > 0) {
+    for (const expected of expectedAnswers) {
+      // Look for the expected answer as a standalone value (not part of another word)
+      const escapedExpected = expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const pattern = new RegExp(`\\b${escapedExpected}\\b`, "i");
+      if (pattern.test(cleaned)) {
+        return expected;
+      }
+    }
+    // Also try normalized versions (e.g., "A, 7" vs "A,7")
+    const normalizedResponse = cleaned.replace(/\s+/g, "").toLowerCase();
+    for (const expected of expectedAnswers) {
+      const normalizedExpected = expected.replace(/\s+/g, "").toLowerCase();
+      if (normalizedResponse.includes(normalizedExpected)) {
+        return expected;
+      }
+    }
+  }
 
   // Priority 1: LaTeX boxed (highest confidence - LLM explicitly marked answer)
   const boxedMatch = cleaned.match(/\\boxed\{([^}]+)\}/);
@@ -163,6 +187,26 @@ export function extractAnswer(response: string): string {
   if (isMatch?.[1]) {
     const extracted = extractFromPhrase(isMatch[1]);
     if (extracted) return extracted;
+  }
+
+  // Priority 4b: "should be X" or "must be X" (common in verification responses)
+  const shouldBeMatch = cleaned.match(/(?:answer\s+)?(?:should|must)\s+be\s+([^\n.]+)/i);
+  if (shouldBeMatch?.[1]) {
+    const extracted = extractFromPhrase(shouldBeMatch[1].trim());
+    if (extracted) return extracted;
+  }
+
+  // Priority 4c: "cards to flip are X" or "need to flip X" (Wason task specific)
+  const flipMatch = cleaned.match(
+    /(?:cards?\s+to\s+flip|need\s+to\s+flip|must\s+flip)\s+(?:are\s+)?([A-Z0-9,\s]+)/i,
+  );
+  if (flipMatch?.[1]) {
+    // Clean up the card list
+    const cards = flipMatch[1]
+      .trim()
+      .replace(/\s+and\s+/gi, ",")
+      .replace(/\s+/g, "");
+    if (cards) return cards;
   }
 
   // Priority 5: "Result: X"

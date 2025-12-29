@@ -18,6 +18,7 @@
  * - Context injection: returns augmented prompt with computed values
  * - LRU caching: avoids recomputing identical questions
  * - Confidence scoring: returns likelihood of successful local compute
+ * - Domain filtering: filters computations by domain relevance
  */
 
 // Re-export cache utilities
@@ -34,9 +35,25 @@ export {
 } from "./classifier.ts";
 // Re-export confidence
 export { computeConfidence, isLikelyComputable } from "./confidence.ts";
+// Re-export context-aware compute
+export {
+  type ContextAwareInput,
+  type ContextAwareResult,
+  computeWithContext,
+  contextAwareCompute,
+  wouldKeepComputation,
+} from "./context.ts";
 
 // Re-export extraction
 export { computeAndReplace, extractAndCompute } from "./extract.ts";
+// Re-export filtering
+export {
+  type FilterResult,
+  filterByDomainRelevance,
+  filterByMask,
+  isMethodRelevant,
+  methodToSolverType,
+} from "./filter.ts";
 // Re-export math helpers (for testing)
 export {
   combinations,

@@ -16,6 +16,17 @@ import {
 import { GUARDS, TIER1, TIER2, TIER3, TIER4 } from "../patterns.ts";
 import type { ComputeResult, Solver } from "../types.ts";
 
+/** Helper to build a successful ComputeResult */
+function solved(result: string | number, method: string, start: number): ComputeResult {
+  return {
+    solved: true,
+    result,
+    method,
+    confidence: 1.0,
+    time_ms: performance.now() - start,
+  };
+}
+
 /**
  * Matrix determinant using Gaussian elimination
  * O(n³) complexity - works for any NxN matrix
@@ -182,14 +193,7 @@ function tryFormulaTier1(text: string, lower: string): ComputeResult | null {
     if (percentMatch?.[1] && percentMatch[2]) {
       const percent = parseFloat(percentMatch[1]);
       const value = parseFloat(percentMatch[2]);
-      const result = (percent / 100) * value;
-      return {
-        solved: true,
-        result: formatResult(result),
-        method: "percentage",
-        confidence: 1.0,
-        time_ms: performance.now() - start,
-      };
+      return solved(formatResult((percent / 100) * value), "percentage", start);
     }
   }
 
@@ -201,13 +205,7 @@ function tryFormulaTier1(text: string, lower: string): ComputeResult | null {
       if (nStr) {
         const n = parseInt(nStr, 10);
         if (n >= 0 && n <= 170) {
-          return {
-            solved: true,
-            result: factorial(n),
-            method: "factorial",
-            confidence: 1.0,
-            time_ms: performance.now() - start,
-          };
+          return solved(factorial(n), "factorial", start);
         }
       }
     }
@@ -226,13 +224,7 @@ function tryFormulaTier1(text: string, lower: string): ComputeResult | null {
       const a = parseInt(modMatch[1], 10);
       const b = parseInt(modMatch[2], 10);
       if (b !== 0) {
-        return {
-          solved: true,
-          result: a % b,
-          method: "modulo",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
+        return solved(a % b, "modulo", start);
       }
     }
   }
@@ -243,13 +235,7 @@ function tryFormulaTier1(text: string, lower: string): ComputeResult | null {
     if (primeMatch?.[1]) {
       const n = parseInt(primeMatch[1], 10);
       if (n <= 1_000_000) {
-        return {
-          solved: true,
-          result: isPrime(n) ? "YES" : "NO",
-          method: "primality",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
+        return solved(isPrime(n) ? "YES" : "NO", "primality", start);
       }
     }
   }
@@ -260,13 +246,7 @@ function tryFormulaTier1(text: string, lower: string): ComputeResult | null {
     if (fibMatch?.[1]) {
       const n = parseInt(fibMatch[1], 10);
       if (n > 0 && n <= 100) {
-        return {
-          solved: true,
-          result: fibonacci(n),
-          method: "fibonacci",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
+        return solved(fibonacci(n), "fibonacci", start);
       }
     }
   }
@@ -287,14 +267,7 @@ function tryFormulaTier2(text: string, lower: string): ComputeResult | null {
     if (sqrtMatch?.[1]) {
       const val = parseFloat(sqrtMatch[1]);
       if (val >= 0) {
-        const result = Math.sqrt(val);
-        return {
-          solved: true,
-          result: formatResult(result),
-          method: "square_root",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
+        return solved(formatResult(Math.sqrt(val)), "square_root", start);
       }
     }
   }
@@ -309,13 +282,7 @@ function tryFormulaTier2(text: string, lower: string): ComputeResult | null {
         const exp = parseFloat(powMatch[2]);
         const result = base ** exp;
         if (Number.isFinite(result)) {
-          return {
-            solved: true,
-            result: formatResult(result),
-            method: "power",
-            confidence: 1.0,
-            time_ms: performance.now() - start,
-          };
+          return solved(formatResult(result), "power", start);
         }
       }
     }
@@ -327,13 +294,7 @@ function tryFormulaTier2(text: string, lower: string): ComputeResult | null {
     if (gcdMatch?.[1] && gcdMatch[2]) {
       const a = parseInt(gcdMatch[1], 10);
       const b = parseInt(gcdMatch[2], 10);
-      return {
-        solved: true,
-        result: gcd(a, b),
-        method: "gcd",
-        confidence: 1.0,
-        time_ms: performance.now() - start,
-      };
+      return solved(gcd(a, b), "gcd", start);
     }
   }
 
@@ -343,13 +304,7 @@ function tryFormulaTier2(text: string, lower: string): ComputeResult | null {
     if (lcmMatch?.[1] && lcmMatch[2]) {
       const a = parseInt(lcmMatch[1], 10);
       const b = parseInt(lcmMatch[2], 10);
-      return {
-        solved: true,
-        result: lcm(a, b),
-        method: "lcm",
-        confidence: 1.0,
-        time_ms: performance.now() - start,
-      };
+      return solved(lcm(a, b), "lcm", start);
     }
   }
 
@@ -572,14 +527,7 @@ function tryFormulaTier4(text: string, lower: string): ComputeResult | null {
         const a = parseFloat(match[1]);
         const b = parseFloat(match[2]);
         if (!Number.isNaN(a) && !Number.isNaN(b)) {
-          const c = Math.sqrt(a * a + b * b);
-          return {
-            solved: true,
-            result: formatResult(c),
-            method: "pythagorean",
-            confidence: 1.0,
-            time_ms: performance.now() - start,
-          };
+          return solved(formatResult(Math.sqrt(a * a + b * b)), "pythagorean", start);
         }
       }
     }
@@ -597,13 +545,7 @@ function tryFormulaTier4(text: string, lower: string): ComputeResult | null {
           zeros += Math.floor(n / power);
           power *= 5;
         }
-        return {
-          solved: true,
-          result: zeros,
-          method: "trailing_zeros",
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
+        return solved(zeros, "trailing_zeros", start);
       }
     }
   }
@@ -620,14 +562,7 @@ function tryFormulaTier4(text: string, lower: string): ComputeResult | null {
       if (geoSeriesMatch?.[1]) {
         const r = 1 / parseInt(geoSeriesMatch[1], 10);
         if (r > 0 && r < 1) {
-          const sum = 1 / (1 - r);
-          return {
-            solved: true,
-            result: formatResult(sum),
-            method: "geometric_series",
-            confidence: 1.0,
-            time_ms: performance.now() - start,
-          };
+          return solved(formatResult(1 / (1 - r)), "geometric_series", start);
         }
       }
     }
@@ -635,19 +570,11 @@ function tryFormulaTier4(text: string, lower: string): ComputeResult | null {
 
   // MATRIX DETERMINANT: guard on "[" and "det"
   if (GUARDS.hasBracket(text) && (lower.includes("det") || lower.includes("determinant"))) {
-    // Try parsing NxN matrix from various formats
     const matrix = parseMatrix(text);
     if (matrix && matrix.length > 0) {
       const det = matrixDeterminant(matrix);
       if (det !== null) {
-        const n = matrix.length;
-        return {
-          solved: true,
-          result: formatResult(det),
-          method: `determinant_${n}x${n}`,
-          confidence: 1.0,
-          time_ms: performance.now() - start,
-        };
+        return solved(formatResult(det), `determinant_${matrix.length}x${matrix.length}`, start);
       }
     }
   }
@@ -659,14 +586,7 @@ function tryFormulaTier4(text: string, lower: string): ComputeResult | null {
       const P = parseFloat(compoundMatch[1].replace(/,/g, ""));
       const r = parseFloat(compoundMatch[2]) / 100;
       const t = parseInt(compoundMatch[3], 10);
-      const A = P * (1 + r) ** t;
-      return {
-        solved: true,
-        result: Math.round(A),
-        method: "compound_interest",
-        confidence: 1.0,
-        time_ms: performance.now() - start,
-      };
+      return solved(Math.round(P * (1 + r) ** t), "compound_interest", start);
     }
   }
 

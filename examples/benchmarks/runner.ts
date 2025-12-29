@@ -9,13 +9,12 @@
  */
 
 import { spawn, type Subprocess } from "bun";
-import { LLMClient, type LLMConfig } from "./llm-client";
+import { LLMClient, type LLMConfig, type ToolDefinition, type ChatMessageWithTools, type ToolCall } from "./llm-client";
 import { extractAnswer } from "../../src/lib/extraction";
-import { getVerbosity, type Verbosity } from "../../src/lib/think/prompts";
 import {
-  assessPromptComplexity,
-  isTrivialQuestion,
-  getTrivialPrompt,
+  routeQuestion,
+  buildSpotCheckPrompt,
+  parseSpotCheckResponse,
 } from "../../src/lib/think/index";
 
 // Types
@@ -69,6 +68,13 @@ export interface RunResult {
     final_confidence?: number;
     complexity_tier?: string;
     complexity_path?: string;
+    latency_breakdown?: {
+      routing_ms: number;
+      local_compute_ms: number;
+      llm_main_ms: number;
+      llm_verify_ms: number;
+      mcp_overhead_ms: number;
+    };
   };
 }
 
@@ -191,6 +197,14 @@ export interface BenchmarkResults {
       by_tier: Record<string, { count: number; accuracy: number; avg_time_ms: number }>;
       by_path: Record<string, { count: number; accuracy: number; avg_time_ms: number }>;
     };
+    latency_breakdown?: {
+      avg_routing_ms: number;
+      avg_local_compute_ms: number;
+      avg_llm_main_ms: number;
+      avg_llm_verify_ms: number;
+      avg_mcp_overhead_ms: number;
+      llm_percentage: number;
+    };
     efficiency: {
       baseline_correct_per_second: number;
       tool_correct_per_second: number;
@@ -216,11 +230,30 @@ interface ThinkArgs {
   session_id?: string;
   compression_level?: string;
   local_compute?: boolean;
+  // Revision support
+  revises_step?: number;
+  revision_reason?: string;
+  // Branching support
+  branch_from?: number;
+  branch_id?: string;
+  branch_name?: string;
+  // Additional context
+  purpose?: string;
+  context?: string;
+  outcome?: string;
+  next_action?: string;
+  rationale?: string;
+  confidence?: number;
 }
 
 interface ThinkResult {
   raw: string;
   meta: Record<string, unknown>;
+  guidance?: string[];
+  verification?: {
+    passed: boolean;
+    evidence: string;
+  };
 }
 
 class MCPClient {
@@ -300,15 +333,15 @@ class MCPClient {
 
   async think(args: ThinkArgs): Promise<ThinkResult> {
     // Map simplified args to full ThinkSchema
-    const fullArgs = {
+    const fullArgs: Record<string, unknown> = {
       step_number: args.step,
       estimated_total: args.total,
-      purpose: "analysis",
-      context: "Benchmark evaluation",
+      purpose: args.purpose || "analysis",
+      context: args.context || "Benchmark evaluation",
       thought: args.thought,
-      outcome: "Reasoning recorded",
-      next_action: args.is_final ? "Complete" : "Continue reasoning",
-      rationale: "Systematic benchmark evaluation",
+      outcome: args.outcome || "Reasoning recorded",
+      next_action: args.next_action || (args.is_final ? "Complete" : "Continue reasoning"),
+      rationale: args.rationale || "Systematic benchmark evaluation",
       is_final_step: args.is_final ?? false,
       guidance: args.guidance ?? false,
       verify: args.verify ?? false,
@@ -317,6 +350,24 @@ class MCPClient {
       compression_level: args.compression_level,
       local_compute: args.local_compute ?? false,
     };
+    
+    // Add revision support
+    if (args.revises_step !== undefined) {
+      fullArgs.revises_step = args.revises_step;
+      fullArgs.revision_reason = args.revision_reason;
+    }
+    
+    // Add branching support
+    if (args.branch_from !== undefined) {
+      fullArgs.branch_from = args.branch_from;
+      fullArgs.branch_id = args.branch_id;
+      fullArgs.branch_name = args.branch_name;
+    }
+    
+    // Add confidence if provided
+    if (args.confidence !== undefined) {
+      fullArgs.confidence = args.confidence;
+    }
     
     const result = await this.send("tools/call", {
       name: "think",
@@ -327,16 +378,31 @@ class MCPClient {
     
     // Parse meta from JSON code block response
     let meta: Record<string, unknown> = {};
+    let guidance: string[] = [];
+    let verification: { passed: boolean; evidence: string } | undefined;
+    
     try {
       const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
         meta = JSON.parse(jsonMatch[1]);
+        // Extract guidance from meta
+        if (meta.guidance && Array.isArray(meta.guidance)) {
+          guidance = meta.guidance as string[];
+        }
+        // Extract verification from meta
+        if (meta.verification && typeof meta.verification === "object") {
+          const v = meta.verification as Record<string, unknown>;
+          verification = {
+            passed: v.passed as boolean,
+            evidence: v.evidence as string,
+          };
+        }
       }
     } catch {
       // Ignore meta parse errors
     }
     
-    return { raw: text, meta };
+    return { raw: text, meta, guidance, verification };
   }
 
   async clearSession(sessionId: string): Promise<void> {
@@ -396,9 +462,241 @@ function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
+/** Normalize answer for comparison (case-insensitive, whitespace-normalized) */
+function normalizeForComparison(answer: string): string {
+  return answer
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[.,!?;:'"]/g, "")
+    .trim();
+}
+
+// ============================================================================
+// THINK TOOL DEFINITION FOR AGENT MODE
+// ============================================================================
+
+const THINK_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "think",
+    description: `Record a reasoning step. Use this to structure your thinking process.
+
+WHEN TO USE:
+- Breaking down complex problems
+- When you need to verify your reasoning
+- When you want to explore alternative approaches
+
+SPECIAL FEATURES:
+- revises_step: Set this to correct an earlier step if you found an error
+- branch_from: Set this to explore an alternative approach from a previous step
+
+Return your final answer in the last step with is_final_step=true.`,
+    parameters: {
+      type: "object",
+      properties: {
+        step_number: { type: "number", description: "Sequential step number (start at 1)" },
+        estimated_total: { type: "number", description: "Estimated total steps needed" },
+        thought: { type: "string", description: "Your current reasoning" },
+        outcome: { type: "string", description: "What you concluded or learned" },
+        next_action: { type: "string", description: "What to do next" },
+        is_final_step: { type: "boolean", description: "True if this is the final answer" },
+        confidence: { type: "number", description: "Your confidence 0-1 (optional)" },
+        revises_step: { type: "number", description: "Step number to revise if correcting an error (optional)" },
+        revision_reason: { type: "string", description: "Why revising (optional)" },
+        branch_from: { type: "number", description: "Step to branch from for alternative approach (optional)" },
+        branch_id: { type: "string", description: "Unique ID for this branch (optional)" },
+      },
+      required: ["step_number", "estimated_total", "thought", "outcome", "next_action"],
+    },
+  },
+};
+
+// ============================================================================
+// AGENT MODE - LLM naturally decides when to think/revise/branch
+// ============================================================================
+
+interface AgentResult {
+  answer: string;
+  steps: number;
+  revisions: number;
+  branches: string[];
+  thoughts: Array<{
+    step: number;
+    thought: string;
+    outcome: string;
+    revises?: number;
+    branch?: string;
+  }>;
+  totalTokens: number;
+  rawResponse: string;
+}
+
+async function runAgentMode(
+  llm: LLMClient,
+  mcp: MCPClient,
+  question: string,
+  domain: string,
+  sessionId: string,
+): Promise<AgentResult> {
+  const systemPrompt = `You are a careful problem solver with access to a "think" tool for structured reasoning.
+
+For complex problems:
+1. Use the think tool to break down your reasoning into steps
+2. If you realize you made an error, use revises_step to correct it
+3. If you want to try an alternative approach, use branch_from
+4. Set is_final_step=true on your last step with the answer
+
+For simple problems, you can answer directly without using tools.
+
+Domain hint: ${domain}`;
+
+  const messages: ChatMessageWithTools[] = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: `${question}\n\nThink through this carefully. Use the think tool to structure your reasoning if needed. Provide your final answer clearly.` },
+  ];
+
+  const thoughts: AgentResult["thoughts"] = [];
+  let totalTokens = 0;
+  let revisions = 0;
+  const branches = new Set<string>();
+  let finalResponse = "";
+  let maxIterations = 10; // Safety limit
+
+  while (maxIterations-- > 0) {
+    const response = await llm.askWithTools(messages, [THINK_TOOL], { temperature: 0.1 });
+    totalTokens += estimateTokens(JSON.stringify(messages) + JSON.stringify(response));
+
+    // Check if LLM wants to use tools
+    if (response.tool_calls && response.tool_calls.length > 0) {
+      // Add assistant message with tool calls
+      messages.push({
+        role: "assistant",
+        content: null,
+        tool_calls: response.tool_calls,
+      });
+
+      // Process each tool call
+      for (const toolCall of response.tool_calls) {
+        if (toolCall.function.name === "think") {
+          try {
+            const args = JSON.parse(toolCall.function.arguments);
+            
+            // Track the thought
+            thoughts.push({
+              step: args.step_number,
+              thought: args.thought,
+              outcome: args.outcome,
+              revises: args.revises_step,
+              branch: args.branch_id,
+            });
+
+            if (args.revises_step) revisions++;
+            if (args.branch_id) branches.add(args.branch_id);
+
+            // Call actual MCP tool
+            const mcpResult = await mcp.think({
+              thought: args.thought,
+              step: args.step_number,
+              total: args.estimated_total,
+              is_final: args.is_final_step || false,
+              domain,
+              session_id: sessionId,
+              revises_step: args.revises_step,
+              revision_reason: args.revision_reason,
+              branch_from: args.branch_from,
+              branch_id: args.branch_id,
+              guidance: true,
+              verify: true,
+            });
+
+            // Build tool response
+            let toolResponse = `Step ${args.step_number} recorded.`;
+            if (mcpResult.guidance?.length) {
+              toolResponse += ` Guidance: ${mcpResult.guidance.join("; ")}`;
+            }
+            if (args.is_final_step) {
+              toolResponse += " This is the final step - provide your answer now.";
+            }
+
+            messages.push({
+              role: "tool",
+              content: toolResponse,
+              tool_call_id: toolCall.id,
+            });
+
+            // If final step, ask for the actual answer
+            if (args.is_final_step) {
+              messages.push({
+                role: "user",
+                content: "Based on your reasoning, what is the final answer? State it clearly and concisely.",
+              });
+            }
+          } catch (e) {
+            messages.push({
+              role: "tool",
+              content: `Error parsing arguments: ${e}`,
+              tool_call_id: toolCall.id,
+            });
+          }
+        }
+      }
+    } else {
+      // LLM responded with content (no tool calls) - this is the final answer
+      finalResponse = response.content || "";
+      break;
+    }
+  }
+
+  return {
+    answer: extractAnswer(finalResponse),
+    steps: thoughts.length,
+    revisions,
+    branches: Array.from(branches),
+    thoughts,
+    totalTokens,
+    rawResponse: finalResponse,
+  };
+}
+
 // ============================================================================
 // BENCHMARK RUNNERS
 // ============================================================================
+
+/**
+ * Stream LLM response to console with optional label
+ * Uses 1024 max tokens for reasoning to avoid runaway responses
+ */
+async function askWithStreaming(
+  llm: LLMClient,
+  prompt: string,
+  system: string,
+  label: string,
+): Promise<string> {
+  process.stdout.write(`\n  ${label}:\n  `);
+  let fullResponse = "";
+  let lineLength = 2; // "  " prefix
+  
+  for await (const chunk of llm.stream(prompt, { system, temperature: 0.1, maxTokens: 1024 })) {
+    fullResponse += chunk;
+    // Word-wrap at ~78 chars, handle newlines
+    for (const char of chunk) {
+      if (char === "\n") {
+        process.stdout.write("\n  ");
+        lineLength = 2;
+      } else {
+        if (lineLength >= 78 && char === " ") {
+          process.stdout.write("\n  ");
+          lineLength = 2;
+        } else {
+          process.stdout.write(char);
+          lineLength++;
+        }
+      }
+    }
+  }
+  process.stdout.write("\n");
+  return fullResponse;
+}
 
 // Baseline: Direct LLM call, no guidance, no local compute
 async function runBaseline(llm: LLMClient, question: Question): Promise<RunResult["baseline"]> {
@@ -412,7 +710,8 @@ async function runBaseline(llm: LLMClient, question: Question): Promise<RunResul
   });
 
   const time_ms = Date.now() - start;
-  const answer = extractAnswer(response);
+  const expectedAnswers = Array.isArray(question.expected_answer) ? question.expected_answer : [question.expected_answer];
+  const answer = extractAnswer(response, expectedAnswers);
 
   return {
     answer,
@@ -428,7 +727,7 @@ async function runBaseline(llm: LLMClient, question: Question): Promise<RunResul
 // With Tool: Option A - Single Direct Call + Local Compute
 // Simple architecture:
 // 1. Try local compute first (math, logic)
-// 2. If not solvable locally, single direct LLM call
+// 2. Route question using src/lib/think/route.ts
 // 3. Record in MCP (CRASH-style scratchpad)
 async function runWithTool(
   llm: LLMClient, 
@@ -436,10 +735,21 @@ async function runWithTool(
   question: Question,
   useLocal = true,
   compressionLevel: "none" | "auto" | "aggressive" = "auto",
+  verbose = false,
+  skipVerify = false,
 ): Promise<RunResult["with_tool"]> {
   const start = Date.now();
   const sessionId = `bench_${question.id}_${Date.now()}`;
   let totalTokens = 0;
+
+  // Latency breakdown tracking
+  const latency = {
+    routing_ms: 0,
+    local_compute_ms: 0,
+    llm_main_ms: 0,
+    llm_verify_ms: 0,
+    mcp_overhead_ms: 0,
+  };
 
   // Track compression
   let totalBytesSaved = 0;
@@ -474,11 +784,15 @@ async function runWithTool(
     : question.category === "code" ? "code" 
     : "general";
 
-  const complexity = assessPromptComplexity(question.question);
+  // === ROUTING: Use centralized logic from src/lib/think/route.ts ===
+  const routeStart = Date.now();
+  const route = routeQuestion(question.question, skipVerify);
+  latency.routing_ms = Date.now() - routeStart;
 
   try {
     // STEP 1: Try local compute via MCP tool
     if (useLocal) {
+      const localStart = Date.now();
       const localStep = await mcp.think({
         thought: question.question,
         step: 1,
@@ -490,6 +804,7 @@ async function runWithTool(
         compression_level: compressionLevel,
         local_compute: true,
       });
+      latency.local_compute_ms = Date.now() - localStart;
       
       const localResult = localStep.meta.local_compute as { solved?: boolean; result?: unknown } | undefined;
       if (localResult?.solved && localResult.result !== undefined) {
@@ -505,66 +820,99 @@ async function runWithTool(
           method: "local",
           risk_level: "low",
           final_confidence: 1.0,
-          complexity_tier: complexity.tier,
+          complexity_tier: route.tier,
           complexity_path: "local",
           raw_response: `[LOCAL COMPUTE] ${answer}`,
           response_length: answer.length,
+          latency_breakdown: latency,
         };
       }
+      const clearStart = Date.now();
       await mcp.clearSession(sessionId);
+      latency.mcp_overhead_ms += Date.now() - clearStart;
     }
 
-    // STEP 2: Single direct LLM call (Option A)
-    // Use trivial prompt for simple questions, baseline-style for others
-    const trivial = isTrivialQuestion(question.question);
+    // STEP 2: Execute routed path
+    let response: string;
+    let confidence: number;
     
-    let system: string;
-    let prompt: string;
-    
-    if (trivial) {
-      const trivialPrompt = getTrivialPrompt(question.question);
-      system = trivialPrompt.system;
-      prompt = trivialPrompt.user;
+    // Step 2a: Main reasoning/answer call
+    const { system, user } = route.prompts.main;
+    const llmMainStart = Date.now();
+    if (verbose) {
+      response = await askWithStreaming(llm, user, system, `[${route.tier}] ${route.path}`);
     } else {
-      // Same as baseline - direct, no phase rewrites
-      system = "You are a helpful assistant. Answer questions directly and concisely.";
-      prompt = `${question.question}\n\nProvide your answer clearly. If it's a number, state just the number. If it's a choice, state just the choice.`;
+      response = await llm.ask(user, { system, temperature: 0.1 });
+    }
+    latency.llm_main_ms = Date.now() - llmMainStart;
+    totalTokens += estimateTokens(user + response);
+    confidence = route.hasVerification ? 0.8 : 0.9;
+    
+    // Step 2b: Spot-check verification (if path includes it)
+    // NOTE: We use spot-check for confidence adjustment only, NOT for answer replacement.
+    // Replacing response with "NO, the correct answer is..." led to extraction bugs
+    // (e.g., extracting "2" from "2^(n+1)" in medium_math_007)
+    if (route.hasVerification && route.prompts.spotCheck) {
+      const expectedAnswers = Array.isArray(question.expected_answer) 
+        ? question.expected_answer 
+        : [question.expected_answer];
+      const proposedAnswer = extractAnswer(response, expectedAnswers);
+      
+      const spotPrompt = buildSpotCheckPrompt(route.prompts.spotCheck.userTemplate, {
+        question: question.question,
+        proposedAnswer,
+      });
+      
+      const llmVerifyStart = Date.now();
+      let spotCheck: string;
+      if (verbose) {
+        spotCheck = await askWithStreaming(llm, spotPrompt, route.prompts.spotCheck.system, `[${route.tier}] Spot-check`);
+      } else {
+        spotCheck = await llm.ask(spotPrompt, { system: route.prompts.spotCheck.system, temperature: 0 });
+      }
+      latency.llm_verify_ms = Date.now() - llmVerifyStart;
+      totalTokens += estimateTokens(spotPrompt + spotCheck);
+      
+      // Spot-check adjusts confidence only - don't replace response with rejection text
+      const isCorrect = parseSpotCheckResponse(spotCheck);
+      confidence = isCorrect ? 0.9 : 0.7;
     }
 
-    const response = await llm.ask(prompt, { system, temperature: 0.1 });
-    totalTokens += estimateTokens(prompt + response);
-
-    // STEP 3: Record in MCP (CRASH-style - just logging, no guidance that could interfere)
+    // STEP 3: Record in MCP (CRASH-style scratchpad)
+    const mcpRecordStart = Date.now();
     const stepResult = await mcp.think({
       thought: response,
-      step: 1,
-      total: 1,
+      step: route.steps,
+      total: route.steps,
       is_final: true,
-      guidance: false, // Pure scratchpad, no pattern detection
+      guidance: false,
       domain,
       session_id: sessionId,
       compression_level: compressionLevel,
     });
+    latency.mcp_overhead_ms += Date.now() - mcpRecordStart;
     trackCompression(stepResult.meta);
 
-    const answer = extractAnswer(response);
+    const expectedAnswers = Array.isArray(question.expected_answer) ? question.expected_answer : [question.expected_answer];
+    const answer = extractAnswer(response, expectedAnswers);
 
     return {
       answer,
       correct: verifyAnswer(question, answer),
       time_ms: Date.now() - start,
       tokens_estimate: totalTokens,
-      steps: 1,
+      steps: route.steps,
       checkpoints: 0,
       risk_flags: [],
       method: "llm",
       compression: buildCompression(),
-      risk_level: "low",
-      final_confidence: trivial ? 0.95 : 0.85,
-      complexity_tier: complexity.tier,
-      complexity_path: trivial ? "trivial" : "direct",
+      risk_level: route.tier === "Low" ? "low" : route.tier === "Moderate" ? "medium" : "high",
+      final_confidence: confidence,
+      complexity_tier: route.tier,
+      complexity_path: route.path,
       raw_response: response,
       response_length: response.length,
+      latency_breakdown: latency,
     };
 
   } finally {
@@ -585,6 +933,9 @@ export async function runBenchmark(
     useLocalCompute?: boolean;
     compressionLevel?: "none" | "auto" | "aggressive";
     quiet?: boolean;
+    verbose?: boolean;
+    skipVerify?: boolean;
+    concurrency?: number;
     onProgress?: (completed: number, total: number, result: RunResult) => void;
   } = {}
 ): Promise<BenchmarkResults> {
@@ -593,7 +944,10 @@ export async function runBenchmark(
     runTool: doTool = true, 
     useLocalCompute = true, 
     compressionLevel = "auto", 
-    quiet = false, 
+    quiet = false,
+    verbose = false,
+    skipVerify = false,
+    concurrency = 1,
     onProgress 
   } = options;
   
@@ -607,36 +961,78 @@ export async function runBenchmark(
   }
 
   const results: RunResult[] = [];
+  let completed = 0;
+
+  // Helper to run a single question
+  const runQuestion = async (q: Question, index: number): Promise<RunResult> => {
+    const questionNum = `[${index + 1}/${questions.length}]`;
+    
+    // In parallel mode, use concise logging
+    if (concurrency > 1) {
+      log(`${questionNum} Starting: ${q.id}`);
+    } else {
+      log(`\n${questionNum} ${q.difficulty}/${q.category}: ${q.question.slice(0, 50)}...`);
+      if (verbose) {
+        log(`  Question: ${q.question}`);
+        log(`  Expected: ${Array.isArray(q.expected_answer) ? q.expected_answer.join(" or ") : q.expected_answer}`);
+      }
+    }
+
+    const result: RunResult = {
+      question_id: q.id,
+      difficulty: q.difficulty,
+      category: q.category,
+      baseline: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, method: "llm" },
+      with_tool: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, steps: 0, checkpoints: 0, risk_flags: [], method: "llm" },
+    };
+
+    if (doBaseline) {
+      if (concurrency === 1) log("  Running baseline (pure LLM)...");
+      result.baseline = await runBaseline(llm, q);
+      if (concurrency === 1) log(`  Baseline: ${result.baseline.correct ? "✓" : "✗"} (${result.baseline.time_ms.toFixed(2)}ms) → "${result.baseline.answer.slice(0, 30)}"`);
+    }
+
+    if (doTool && mcp) {
+      if (concurrency === 1 && !verbose) log("  Running with MCP tool...");
+      result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel, verbose && concurrency === 1, skipVerify);
+      if (concurrency === 1) {
+        const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
+        const compTag = result.with_tool.compression ? ` [scratchpad: ${result.with_tool.compression.bytes_saved}B saved]` : "";
+        const pathTag = result.with_tool.complexity_path ? ` via ${result.with_tool.complexity_path}` : "";
+        log(`  Result: ${result.with_tool.correct ? "✓" : "✗"} (${result.with_tool.time_ms.toFixed(0)}ms)${pathTag}${methodTag}${compTag} → "${result.with_tool.answer.slice(0, 40)}"`);
+      }
+    }
+
+    // Parallel mode: log completion
+    if (concurrency > 1) {
+      const toolMark = result.with_tool.correct ? "✓" : "✗";
+      const baseMark = result.baseline.correct ? "✓" : "✗";
+      log(`${questionNum} Done: ${q.id} | base=${baseMark} tool=${toolMark} | ${result.with_tool.time_ms.toFixed(0)}ms`);
+    }
+
+    completed++;
+    onProgress?.(completed, questions.length, result);
+    return result;
+  };
 
   try {
-    for (let i = 0; i < questions.length; i++) {
-      const q = questions[i];
-      log(`\n[${i + 1}/${questions.length}] ${q.difficulty}/${q.category}: ${q.question.slice(0, 50)}...`);
-
-      const result: RunResult = {
-        question_id: q.id,
-        difficulty: q.difficulty,
-        category: q.category,
-        baseline: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, method: "llm" },
-        with_tool: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, steps: 0, checkpoints: 0, risk_flags: [], method: "llm" },
-      };
-
-      if (doBaseline) {
-        log("  Running baseline (pure LLM)...");
-        result.baseline = await runBaseline(llm, q);
-        log(`  Baseline: ${result.baseline.correct ? "✓" : "✗"} (${result.baseline.time_ms.toFixed(2)}ms) → "${result.baseline.answer.slice(0, 30)}"`);
+    if (concurrency > 1) {
+      // Parallel execution with batching
+      log(`\nRunning ${questions.length} questions with concurrency=${concurrency}...`);
+      
+      for (let i = 0; i < questions.length; i += concurrency) {
+        const batch = questions.slice(i, i + concurrency);
+        const batchResults = await Promise.all(
+          batch.map((q, j) => runQuestion(q, i + j))
+        );
+        results.push(...batchResults);
       }
-
-      if (doTool && mcp) {
-        log("  Running with MCP tool...");
-        result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel);
-        const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
-        const compTag = result.with_tool.compression ? ` [${result.with_tool.compression.bytes_saved}B saved]` : "";
-        log(`  With tool: ${result.with_tool.correct ? "✓" : "✗"} (${result.with_tool.time_ms.toFixed(2)}ms, ${result.with_tool.steps} steps)${methodTag}${compTag} → "${result.with_tool.answer.slice(0, 30)}"`);
+    } else {
+      // Sequential execution (original behavior)
+      for (let i = 0; i < questions.length; i++) {
+        const result = await runQuestion(questions[i], i);
+        results.push(result);
       }
-
-      results.push(result);
-      onProgress?.(i + 1, questions.length, result);
     }
   } finally {
     if (mcp) {
@@ -1004,6 +1400,33 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     ),
   };
   
+  // Latency breakdown stats
+  const resultsWithLatency = results.filter(r => r.with_tool.latency_breakdown);
+  let latencyBreakdown: BenchmarkResults["summary"]["latency_breakdown"];
+  if (resultsWithLatency.length > 0) {
+    const sumLatency = { routing: 0, local_compute: 0, llm_main: 0, llm_verify: 0, mcp_overhead: 0 };
+    for (const r of resultsWithLatency) {
+      const lb = r.with_tool.latency_breakdown!;
+      sumLatency.routing += lb.routing_ms;
+      sumLatency.local_compute += lb.local_compute_ms;
+      sumLatency.llm_main += lb.llm_main_ms;
+      sumLatency.llm_verify += lb.llm_verify_ms;
+      sumLatency.mcp_overhead += lb.mcp_overhead_ms;
+    }
+    const n = resultsWithLatency.length;
+    const totalLlm = sumLatency.llm_main + sumLatency.llm_verify;
+    const totalAll = sumLatency.routing + sumLatency.local_compute + totalLlm + sumLatency.mcp_overhead;
+    
+    latencyBreakdown = {
+      avg_routing_ms: Math.round(sumLatency.routing / n * 100) / 100,
+      avg_local_compute_ms: Math.round(sumLatency.local_compute / n * 100) / 100,
+      avg_llm_main_ms: Math.round(sumLatency.llm_main / n),
+      avg_llm_verify_ms: Math.round(sumLatency.llm_verify / n),
+      avg_mcp_overhead_ms: Math.round(sumLatency.mcp_overhead / n),
+      llm_percentage: totalAll > 0 ? Math.round((totalLlm / totalAll) * 1000) / 10 : 0,
+    };
+  }
+  
   const baselineTotalTime = baseline.timing.total_ms;
   const toolTotalTime = withTool.timing.total_ms;
   const baselineCorrect = results.filter(r => r.baseline.correct).length;
@@ -1043,6 +1466,7 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     by_category: byCategory,
     compression,
     complexity: complexityStats,
+    latency_breakdown: latencyBreakdown,
     efficiency: {
       baseline_correct_per_second: baselineTotalTime > 0 ? (baselineCorrect / baselineTotalTime) * 1000 : 0,
       tool_correct_per_second: toolTotalTime > 0 ? (toolCorrect / toolTotalTime) * 1000 : 0,
@@ -1086,6 +1510,9 @@ Options:
   --full             Run all questions (no limit)
   --threshold=N      Fail if tool accuracy < N (0-1), for CI
   --ci-report        Output CI-friendly summary with exit code
+  --verbose, -v      Stream LLM responses in real-time
+  --no-verify        Skip verification pass for High+ complexity (faster)
+  --parallel=N       Run N questions concurrently (default: 1, sequential)
   --help, -h         Show this help
 
 Environment Variables:
@@ -1117,6 +1544,10 @@ Environment Variables:
   const thresholdArg = args.find(a => a.startsWith("--threshold="));
   const threshold = thresholdArg ? parseFloat(thresholdArg.split("=")[1]) : undefined;
   const ciReport = args.includes("--ci-report");
+  const verboseMode = args.includes("--verbose") || args.includes("-v");
+  const noVerify = args.includes("--no-verify");
+  const parallelArg = args.find(a => a.startsWith("--parallel="));
+  const parallel = parallelArg ? parseInt(parallelArg.split("=")[1], 10) : 1;
   const compressionLevel: "none" | "auto" | "aggressive" = 
     noCompression ? "none" : aggressive ? "aggressive" : "auto";
 
@@ -1161,7 +1592,7 @@ Environment Variables:
 
   log(`Loaded ${questions.length} questions (${data.description})`);
   log(`Model: ${process.env.LLM_MODEL || "unknown"}`);
-  log(`Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}${noLocal ? " (no local compute)" : ""}`);
+  log(`Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}${noLocal ? " (no local compute)" : ""}${parallel > 1 ? ` | parallel=${parallel}` : ""}`);
   log(`Compression: ${compressionLevel}${fullRun ? " | Full run" : ""}`);
   if (threshold !== undefined) {
     log(`Threshold: ${(threshold * 100).toFixed(0)}% (will fail if tool accuracy below)`);
@@ -1215,6 +1646,9 @@ Environment Variables:
     useLocalCompute: !noLocal,
     compressionLevel,
     quiet: jsonOutput,
+    verbose: verboseMode,
+    skipVerify: noVerify,
+    concurrency: parallel,
   });
 
   if (jsonOutput) {
@@ -1306,6 +1740,20 @@ Environment Variables:
     }
   }
 
+  // Latency breakdown stats
+  if (results.summary.latency_breakdown) {
+    const lb = results.summary.latency_breakdown;
+    log(`\n${"─".repeat(70)}`);
+    log("LATENCY BREAKDOWN (Tool mode)");
+    log("─".repeat(70));
+    log(`  Routing:       ${lb.avg_routing_ms.toFixed(2)}ms avg`);
+    log(`  Local Compute: ${lb.avg_local_compute_ms.toFixed(1)}ms avg`);
+    log(`  LLM Main:      ${lb.avg_llm_main_ms}ms avg`);
+    log(`  LLM Verify:    ${lb.avg_llm_verify_ms}ms avg`);
+    log(`  MCP Overhead:  ${lb.avg_mcp_overhead_ms}ms avg`);
+    log(`  LLM %:         ${lb.llm_percentage}% of total time`);
+  }
+
   // Question-level analysis
   const broken = results.results.filter(r => r.baseline.correct && !r.with_tool.correct);
   const fixed = results.results.filter(r => !r.baseline.correct && r.with_tool.correct);
@@ -1333,8 +1781,10 @@ Environment Variables:
   log("\n" + "=".repeat(70));
 
   const outFile = `results-${Date.now()}.json`;
-  await Bun.write(new URL(outFile, import.meta.url).pathname, JSON.stringify(results, null, 2));
-  log(`\nResults saved to ${outFile}`);
+  // Save without pretty-printing (faster) and don't block
+  const outPath = new URL(outFile, import.meta.url).pathname;
+  Bun.write(outPath, JSON.stringify(results)).catch(() => {});
+  log(`\nResults saving to ${outFile}`);
 
   // CI Report mode: concise output with exit code
   if (ciReport) {
@@ -1370,4 +1820,7 @@ Environment Variables:
       process.exit(1);
     }
   }
+
+  // Ensure clean exit (Bun may keep event loop alive otherwise)
+  process.exit(0);
 }

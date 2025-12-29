@@ -33,11 +33,11 @@ export function getVerbosity(question: string): Verbosity {
 // =============================================================================
 
 export const SYSTEM_BASELINE =
-  "You are a helpful assistant. Answer questions directly and concisely.";
+  "You are a helpful assistant. Answer questions directly and concisely. Use plain text, not LaTeX.";
 export const SYSTEM_REASONING =
-  "You are a careful reasoning assistant. Show your reasoning, then give the final answer clearly.";
+  "You are a careful reasoning assistant. Show your reasoning, then give the final answer clearly. Use plain text math (e.g., x + 1 = 2), not LaTeX.";
 export const SYSTEM_VERIFICATION =
-  "You are a verification assistant. Double-check reasoning carefully.";
+  "You are a verification assistant. Double-check reasoning carefully. Use plain text, not LaTeX.";
 export const SYSTEM_ANSWER_ONLY = "Give only the answer, nothing else.";
 
 // =============================================================================

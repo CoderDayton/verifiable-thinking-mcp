@@ -12,7 +12,10 @@
  * - Intensity modifiers for quantifiers, impossibility, comparative language
  * - Negation correction ("not difficult" → lower score)
  * - Compositional semantics: no magic weights, principled formula
+ * - Domain detection now uses unified src/lib/domain.ts
  */
+
+import { getDomainWeight } from "../domain.ts";
 
 export interface ComplexityResult {
   score: number;
@@ -175,6 +178,37 @@ export function assessPromptComplexity(text: string): ComplexityResult {
     /\d+-chamber.*bullet/i, // Russian roulette style
     /revolver.*bullet/i, // Russian roulette variant
     /adjacent bullet/i, // Conditional probability setup
+    // Self-reference paradoxes
+    /this statement.*(true|false|itself)/i, // Liar paradox
+    /statement.*refer.*itself/i, // Self-reference
+    // Sample size / statistical reasoning
+    /which.*(more|less) reliable/i, // Sample size comparison
+    /survey of \d+/i, // Sample size context
+    /sample.*(size|of \d+)/i, // Sample size explicit
+    // Simpson's paradox
+    /(overall|aggregate|total).*compar/i, // Aggregation paradox
+    /hospital.*surviv/i, // Simpson's classic example
+    /(mild|severe).*(surviv|rate)/i, // Subgroup analysis
+    /better overall/i, // Simpson's phrasing
+    // Expected value / geometric distribution
+    /expected (number|value).*(flip|roll|toss|draw|trial)/i, // EV questions
+    /until you get (heads|tails|a \w+)/i, // Geometric distribution
+    /flip.*until/i, // Stopping time problems
+    // Logic meta-questions (validity judgments)
+    /\b(VALID|INVALID|UNSOUND|SOUND)\b/i, // Logic validity options
+    /valid.*argument|argument.*valid/i, // Validity question
+    // Sorites / vagueness paradoxes
+    /heap.*grain|grain.*heap/i, // Sorites paradox
+    /\d+ grain/i, // Sorites setup
+    // Counterintuitive probability problems (100 prisoners, Monty Hall style)
+    /\d+\s*prisoners?.*\d+\s*boxes/i, // 100 prisoners problem
+    /prisoners?.*boxes.*strategy/i, // Prisoners/boxes with strategy
+    /loop[\s-]*follow|cycle[\s-]*strategy/i, // Loop-following strategy
+    /survival.*probability.*strategy/i, // Strategy + survival
+    /strategy.*survival.*probability/i, // Strategy + survival alt
+    /monty hall/i, // Monty Hall problem
+    /switch.*doors?|doors?.*switch/i, // Monty Hall phrasing
+    /\d+\s*doors?.*goat/i, // Monty Hall variant
   ];
   const has_trap_pattern = trap_patterns.some((p) => p.test(text)); // Use original text for case
   const is_short_with_numbers = text.length < 350 && /\d/.test(text); // Increased threshold
@@ -196,360 +230,8 @@ export function assessPromptComplexity(text: string): ComplexityResult {
   verb_boosted = Math.min(0.99, verb_boosted); // cap at 0.99
 
   // ===== PHASE 3: DOMAIN DETECTION =====
-  // Extract semantic domain and assign weight
-  interface Domain {
-    keywords: string[];
-    weight: number;
-    name: string;
-  }
-
-  const domains: Domain[] = [
-    {
-      name: "quantum_computing",
-      keywords: ["quantum", "qubit", "superposition", "entanglement", "shor's algorithm"],
-      weight: 0.95,
-    },
-    {
-      name: "cryptography",
-      keywords: [
-        "cryptograph",
-        "rsa",
-        "lattice",
-        "zero-knowledge",
-        "discrete logarithm",
-        "public-key",
-        "security reduction",
-      ],
-      weight: 0.95,
-    },
-    {
-      name: "complexity_theory",
-      keywords: [
-        "p ≠ np",
-        "p vs np",
-        "np-complete",
-        "np-hard",
-        "polynomial-time",
-        "exponential time",
-        "sat solver",
-        "sat instance",
-        "halting problem",
-        "undecidable",
-        "computability",
-        "turing machine",
-      ],
-      weight: 0.9,
-    },
-    {
-      name: "distributed_systems",
-      keywords: [
-        "lock-free",
-        "consensus",
-        "distributed",
-        "byzantine",
-        "memory ordering",
-        "cache coherence",
-        "two-phase commit",
-        "paxos",
-        "raft",
-      ],
-      weight: 0.9,
-    },
-    {
-      name: "networking",
-      keywords: [
-        "tcp",
-        "udp",
-        "three-way handshake",
-        "protocol",
-        "packet",
-        "routing",
-        "dns",
-        "http",
-      ],
-      weight: 0.7,
-    },
-    {
-      name: "competitive_analysis",
-      keywords: ["competitive ratio", "online algorithm", "ski-rental", "adversarial"],
-      weight: 0.88,
-    },
-    {
-      name: "paradox",
-      keywords: [
-        "two envelopes",
-        "envelope paradox",
-        "sleeping beauty",
-        "halfers",
-        "thirders",
-        "monty hall",
-        "naive argument",
-        "symmetrically",
-        "prisoners",
-        "loop-following",
-        "survival probability",
-        "100 boxes",
-        "boy born on tuesday",
-        "born on",
-        "probability both are boys",
-        "both children",
-        "two children",
-      ],
-      weight: 0.92,
-    },
-    {
-      name: "probability_statistics",
-      keywords: [
-        "probability",
-        "bayesian",
-        "conditional probability",
-        "bayes",
-        "distribution",
-        "regression",
-        "statistical",
-        "expected value",
-        "variance",
-      ],
-      weight: 0.8,
-    },
-    {
-      name: "machine_learning",
-      keywords: [
-        "backpropagation",
-        "gradient",
-        "neural network",
-        "deep learning",
-        "optimization",
-        "loss function",
-        "transformer",
-        "attention mechanism",
-      ],
-      weight: 0.75,
-    },
-    {
-      name: "cognitive_reasoning",
-      keywords: [
-        "cognitive",
-        "psychology",
-        "logical fallacy",
-        "fallacy",
-        "inference",
-        "heuristic",
-        "bias",
-      ],
-      weight: 0.75,
-    },
-    {
-      name: "algorithms",
-      keywords: [
-        "algorithm",
-        "time complexity",
-        "space complexity",
-        "big-o",
-        "recursion",
-        "dynamic programming",
-        "graph traversal",
-      ],
-      weight: 0.7,
-    },
-    {
-      name: "calculus",
-      keywords: [
-        "derivative",
-        "integral",
-        "limit",
-        "differentiation",
-        "integration",
-        "calculus",
-        "d/dx",
-        "integral of",
-        "∫",
-      ],
-      weight: 0.72,
-    },
-    {
-      name: "linear_algebra",
-      keywords: [
-        "matrix",
-        "determinant",
-        "eigenvalue",
-        "eigenvector",
-        "inverse matrix",
-        "transpose",
-        "linear transformation",
-      ],
-      weight: 0.7,
-    },
-    // New domains for better coverage
-    {
-      name: "logic_puzzle",
-      keywords: [
-        "knight",
-        "knave",
-        "liar",
-        "truth-teller",
-        "truthteller",
-        "syllogism",
-        "valid argument",
-        "sound argument",
-        "premise",
-        "conclusion follows",
-        "logically",
-      ],
-      weight: 0.92,
-    },
-    {
-      name: "game_theory",
-      keywords: [
-        "prisoner's dilemma",
-        "nash equilibrium",
-        "payoff",
-        "dominant strategy",
-        "zero-sum",
-        "minimax",
-        "game theory",
-      ],
-      weight: 0.9,
-    },
-    {
-      name: "number_theory",
-      keywords: [
-        "prime",
-        "factorial",
-        "divisible",
-        "remainder",
-        "modulo",
-        "mod ",
-        "trailing zero",
-        "integer",
-        "divisor",
-        "gcd",
-        "lcm",
-        "last digit",
-        "^100",
-        "^10",
-      ],
-      weight: 0.85,
-    },
-    {
-      name: "combinatorics",
-      keywords: [
-        "arrange",
-        "permutation",
-        "combination",
-        "ways to",
-        "how many ways",
-        "choose",
-        "select",
-        "distribute",
-        "partition",
-        "letters in",
-        "anagram",
-        "mississippi",
-        "arrange the letters",
-      ],
-      weight: 0.85,
-    },
-    {
-      name: "constraint_reasoning",
-      keywords: [
-        "minimum number",
-        "guarantee",
-        "worst case",
-        "at least",
-        "at most",
-        "balance scale",
-        "weighing",
-        "pigeonhole",
-        "must draw",
-        "must flip",
-      ],
-      weight: 0.85,
-    },
-    {
-      name: "conditional_probability",
-      keywords: [
-        "given that",
-        "conditional",
-        "revolver",
-        "russian roulette",
-        "chamber",
-        "bullet",
-        "envelope",
-        "adjacent",
-        "spin",
-        "fire",
-      ],
-      weight: 0.9,
-    },
-    {
-      name: "lateral_thinking",
-      keywords: [
-        "trick",
-        "lateral",
-        "only enter once",
-        "can only",
-        "how do you",
-        "determine which",
-      ],
-      weight: 0.8,
-    },
-    {
-      name: "rate_problems",
-      keywords: [
-        "machines",
-        "widgets",
-        "workers",
-        "mph",
-        "speed",
-        "rate",
-        "per hour",
-        "per minute",
-        "round trip",
-        "average speed",
-      ],
-      weight: 0.75,
-    },
-    {
-      name: "clock_problems",
-      keywords: [
-        "clock hands",
-        "hour hand",
-        "minute hand",
-        "overlap",
-        "12 hours",
-        "24 hours",
-        "times.*overlap",
-      ],
-      weight: 0.85,
-    },
-    {
-      name: "common_knowledge",
-      keywords: [
-        "blue eyes",
-        "blue-eyed",
-        "islanders",
-        "leave at midnight",
-        "know your",
-        "common knowledge",
-        "induction",
-        "eye color",
-        "days until",
-      ],
-      weight: 0.95,
-    },
-  ];
-
-  let domain_name = "general";
-  let domain_weight = 0.5; // default
-
-  for (const domain of domains) {
-    if (domain.keywords.some((kw) => lower.includes(kw))) {
-      domain_name = domain.name;
-      domain_weight = domain.weight;
-      break;
-    }
-  }
+  // Use unified domain detector from src/lib/domain.ts
+  const { domain: domain_name, weight: domain_weight } = getDomainWeight(text);
 
   // ===== PHASE 4: INTENSITY MODIFIERS =====
   // Signals that increase reasoning depth without changing domain
