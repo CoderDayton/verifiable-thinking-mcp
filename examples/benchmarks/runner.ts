@@ -809,19 +809,19 @@ async function runBaseline(
 
   const time_ms = Date.now() - start;
   
-  // For open-ended questions, skip answer extraction - just use full response
+  // Strip thinking tags first (for display and judge comparison)
+  const cleanResponse = stripThinkingTags(response);
+  
+  // For open-ended questions, skip answer extraction - just use full response (cleaned)
   const isOpenEnded = question.expected_answer === null;
   let answer: string;
   if (isOpenEnded) {
-    answer = response;
+    answer = cleanResponse;
   } else {
     const expected = question.expected_answer as string | string[];
     const expectedAnswers = Array.isArray(expected) ? expected : [expected];
     answer = extractAnswer(response, expectedAnswers);
   }
-
-  // Strip thinking tags for cleaner output (and judge comparison)
-  const cleanResponse = stripThinkingTags(response);
   
   return {
     answer,
@@ -1034,11 +1034,14 @@ async function runWithTool(
       trackCompression(stepResult.meta);
     }
 
-    // For open-ended questions, skip answer extraction - just use full response
+    // Strip thinking tags first (for display and judge comparison)
+    const cleanResponse = stripThinkingTags(response);
+    
+    // For open-ended questions, skip answer extraction - just use full response (cleaned)
     const isOpenEnded = question.expected_answer === null;
     let answer: string;
     if (isOpenEnded) {
-      answer = response;
+      answer = cleanResponse;
     } else {
       const expected = question.expected_answer as string | string[];
       const expectedAnswers = Array.isArray(expected) ? expected : [expected];
@@ -1064,8 +1067,8 @@ async function runWithTool(
       final_confidence: confidence,
       complexity_tier: route.tier,
       complexity_path: route.path,
-      raw_response: stripThinkingTags(response),
-      response_length: stripThinkingTags(response).length,
+      raw_response: cleanResponse,
+      response_length: cleanResponse.length,
       latency_breakdown: latency,
     };
   } finally {
@@ -1171,14 +1174,13 @@ export async function runBenchmark(
     if (doBaseline) {
       if (concurrency === 1) log("  Running baseline (pure LLM)...");
       result.baseline = await runBaseline(llm, q);
-      if (concurrency === 1)
+      if (concurrency === 1) {
+        const correctMark = result.baseline.correct === null ? "○" : result.baseline.correct ? "✓" : "✗";
+        const preview = result.baseline.answer.split("\n")[0].slice(0, 60);
         log(
-          `  Baseline: ${
-            result.baseline.correct ? "✓" : "✗"
-          } (${result.baseline.time_ms.toFixed(
-            2
-          )}ms) → "${result.baseline.answer.slice(0, 30)}"`
+          `  Baseline: ${correctMark} (${result.baseline.time_ms.toFixed(2)}ms) → "${preview}${result.baseline.answer.length > 60 ? "..." : ""}"`
         );
+      }
     }
 
     if (doTool && mcp) {
@@ -1200,15 +1202,10 @@ export async function runBenchmark(
         const pathTag = result.with_tool.complexity_path
           ? ` via ${result.with_tool.complexity_path}`
           : "";
+        const correctMark = result.with_tool.correct === null ? "○" : result.with_tool.correct ? "✓" : "✗";
+        const preview = result.with_tool.answer.split("\n")[0].slice(0, 60);
         log(
-          `  Result: ${
-            result.with_tool.correct ? "✓" : "✗"
-          } (${result.with_tool.time_ms.toFixed(
-            0
-          )}ms)${pathTag}${methodTag}${compTag} → "${result.with_tool.answer.slice(
-            0,
-            40
-          )}"`
+          `  Result: ${correctMark} (${result.with_tool.time_ms.toFixed(0)}ms)${pathTag}${methodTag}${compTag} → "${preview}${result.with_tool.answer.length > 60 ? "..." : ""}"`
         );
       }
     }
