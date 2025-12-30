@@ -879,19 +879,22 @@ async function runWithTool(
     }
 
     // STEP 3: Record in MCP (CRASH-style scratchpad)
-    const mcpRecordStart = Date.now();
-    const stepResult = await mcp.think({
-      thought: response,
-      step: route.steps,
-      total: route.steps,
-      is_final: true,
-      guidance: false,
-      domain,
-      session_id: sessionId,
-      compression_level: compressionLevel,
-    });
-    latency.mcp_overhead_ms += Date.now() - mcpRecordStart;
-    trackCompression(stepResult.meta);
+    // Skip MCP recording for explanatory questions - no scratchpad benefit, adds overhead
+    if (!route.isExplanatory) {
+      const mcpRecordStart = Date.now();
+      const stepResult = await mcp.think({
+        thought: response,
+        step: route.steps,
+        total: route.steps,
+        is_final: true,
+        guidance: false,
+        domain,
+        session_id: sessionId,
+        compression_level: compressionLevel,
+      });
+      latency.mcp_overhead_ms += Date.now() - mcpRecordStart;
+      trackCompression(stepResult.meta);
+    }
 
     const expectedAnswers = Array.isArray(question.expected_answer) ? question.expected_answer : [question.expected_answer];
     const answer = extractAnswer(response, expectedAnswers);

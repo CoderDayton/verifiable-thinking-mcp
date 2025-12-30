@@ -14,6 +14,55 @@ import {
 import { getSystemPrompt, getUserPrompt, getVerbosity, type Verbosity } from "./prompts.ts";
 
 // =============================================================================
+// EXPLANATORY QUESTION DETECTION
+// =============================================================================
+
+/**
+ * Detect if a question is primarily explanatory/descriptive.
+ * These questions benefit from reasoning but NOT from spot-check verification,
+ * since verification is designed for factual/numeric answers, not open-ended explanations.
+ */
+export function isExplanatoryQuestion(question: string): boolean {
+  const lower = question.toLowerCase();
+
+  // Primary indicators: explicit explanation requests
+  const explanatoryVerbs = [
+    /^explain\b/,
+    /\bexplain\s+(why|how|what|the|step)/,
+    /^describe\b/,
+    /\bdescribe\s+(how|what|the)/,
+    /^compare\b/,
+    /\bcompare\s+(and\s+)?contrast/,
+    /^discuss\b/,
+    /\bdiscuss\s+(why|how|the)/,
+    /^outline\b/,
+    /^summarize\b/,
+    /\bwhat\s+is\s+the\s+difference/,
+    /\bwhat\s+are\s+the\s+differences/,
+    /\bwhy\s+is\s+this\s+important/,
+    /\bwhy\s+does\s+this\s+matter/,
+  ];
+
+  // Check if primary request is explanatory
+  const hasExplanatoryVerb = explanatoryVerbs.some((p) => p.test(lower));
+  if (!hasExplanatoryVerb) return false;
+
+  // Exclusions: questions that look explanatory but have factual answers
+  const factualIndicators = [
+    /\bwhat\s+is\s+the\s+(value|answer|result|sum|product|number)\b/,
+    /\bhow\s+many\b/,
+    /\bhow\s+much\b/,
+    /\bcalculate\b/,
+    /\bcompute\b/,
+    /\bsolve\b/,
+    /=\s*\?/, // equation to solve
+  ];
+
+  const isFactual = factualIndicators.some((p) => p.test(lower));
+  return !isFactual;
+}
+
+// =============================================================================
 // TYPES
 // =============================================================================
 
@@ -32,6 +81,8 @@ export interface RouteResult {
   steps: number;
   /** Whether this path includes verification */
   hasVerification: boolean;
+  /** Whether this is an explanatory question (skip verification) */
+  isExplanatory: boolean;
   /** Prompts to use for each step */
   prompts: RoutePrompts;
 }
@@ -66,8 +117,16 @@ export interface SpotCheckInput {
 export function routeQuestion(question: string, skipVerify = false): RouteResult {
   const complexity = assessPromptComplexity(question);
   const trivial = isTrivialQuestion(question);
+  const explanatory = isExplanatoryQuestion(question);
   const verbosity = getVerbosity(question);
   const tier = complexity.tier;
+
+  // Explanatory questions skip verification (it hurts quality for open-ended responses)
+  const effectiveSkipVerify = skipVerify || explanatory;
+
+  // Helper to get the right prompt type for explanatory vs non-explanatory
+  const promptType = explanatory ? "explanatory" : "reasoning";
+  const basePromptType = explanatory ? "explanatory" : "baseline";
 
   // === TRIVIAL: Direct answer, minimal prompt ===
   if (trivial) {
@@ -79,6 +138,7 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       verbosity,
       steps: 1,
       hasVerification: false,
+      isExplanatory: explanatory,
       prompts: {
         main: trivialPrompt,
       },
@@ -94,16 +154,17 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       verbosity,
       steps: 1,
       hasVerification: false,
+      isExplanatory: explanatory,
       prompts: {
         main: {
-          system: getSystemPrompt("baseline", verbosity),
-          user: getUserPrompt("baseline", question, verbosity),
+          system: getSystemPrompt(basePromptType, verbosity),
+          user: getUserPrompt(basePromptType, question, verbosity),
         },
       },
     };
   }
 
-  // === MODERATE: Reasoning prompt (step-by-step) ===
+  // === MODERATE: Reasoning prompt (step-by-step) or explanatory (concise) ===
   if (tier === "Moderate") {
     return {
       path: "reasoning",
@@ -112,10 +173,11 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       verbosity,
       steps: 1,
       hasVerification: false,
+      isExplanatory: explanatory,
       prompts: {
         main: {
-          system: getSystemPrompt("reasoning", verbosity),
-          user: getUserPrompt("reasoning", question, verbosity),
+          system: getSystemPrompt(promptType, verbosity),
+          user: getUserPrompt(promptType, question, verbosity),
         },
       },
     };
@@ -124,10 +186,11 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
   // === HIGH: Reasoning only, UNLESS trap pattern detected ===
   // Verification adds ~75% latency with marginal accuracy gain at this tier
   // Exception: Trap patterns (counterintuitive problems) benefit from verification
+  // Exception: Explanatory questions skip verification (hurts open-ended quality)
   if (tier === "High") {
     const hasTrapPattern = complexity.explanation.intensity_signals.includes("trap_pattern");
 
-    if (hasTrapPattern && !skipVerify) {
+    if (hasTrapPattern && !effectiveSkipVerify) {
       // Trap-detected High tier questions get verification
       // These are counterintuitive problems where LLM might fall into naive trap
       const mainPrompt = {
@@ -141,6 +204,7 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
         verbosity,
         steps: 2,
         hasVerification: true,
+        isExplanatory: explanatory,
         prompts: {
           main: mainPrompt,
           spotCheck: {
@@ -161,23 +225,24 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       verbosity,
       steps: 1,
       hasVerification: false,
+      isExplanatory: explanatory,
       prompts: {
         main: {
-          system: getSystemPrompt("reasoning", verbosity),
-          user: getUserPrompt("reasoning", question, verbosity),
+          system: getSystemPrompt(promptType, verbosity),
+          user: getUserPrompt(promptType, question, verbosity),
         },
       },
     };
   }
 
   // === VERY HARD / ALMOST IMPOSSIBLE ===
-  // These benefit most from spot-check verification
+  // These benefit most from spot-check verification (unless explanatory)
   const mainPrompt = {
-    system: getSystemPrompt("reasoning", verbosity),
-    user: getUserPrompt("reasoning", question, verbosity),
+    system: getSystemPrompt(promptType, verbosity),
+    user: getUserPrompt(promptType, question, verbosity),
   };
 
-  if (skipVerify) {
+  if (effectiveSkipVerify) {
     // Skip verification - single reasoning call
     return {
       path: "reasoning",
@@ -186,6 +251,7 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       verbosity,
       steps: 1,
       hasVerification: false,
+      isExplanatory: explanatory,
       prompts: { main: mainPrompt },
     };
   }
@@ -198,6 +264,7 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
     verbosity,
     steps: 2,
     hasVerification: true,
+    isExplanatory: explanatory,
     prompts: {
       main: mainPrompt,
       spotCheck: {

@@ -54,6 +54,7 @@ export {
   formatBaselinePromptTerse,
   formatCriticalCheckPrompt,
   formatCriticalCheckPromptTerse,
+  formatExplanatoryPrompt,
   formatReasoningPrompt,
   formatReasoningPromptTerse,
   formatVerificationPrompt,
@@ -67,6 +68,7 @@ export {
   // System prompts
   SYSTEM_BASELINE,
   SYSTEM_BASELINE_TERSE,
+  SYSTEM_EXPLANATORY,
   SYSTEM_REASONING,
   SYSTEM_REASONING_TERSE,
   SYSTEM_VERIFICATION,
@@ -78,6 +80,7 @@ export {
 export {
   buildSpotCheckPrompt,
   getComplexityInfo,
+  isExplanatoryQuestion,
   parseSpotCheckResponse,
   type RoutePrompts,
   type RouteResult,

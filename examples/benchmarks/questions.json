@@ -902,6 +902,126 @@
       "question": "Prove that the square root of 2 is irrational. Show your proof step by step.",
       "expected_answer": "contradiction",
       "verification_type": "contains"
+    },
+    {
+      "id": "open_explain_004",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Explain the difference between deductive and inductive reasoning. Give an example of each and describe when each is most useful.",
+      "expected_answer": "deductive",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_explain_005",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "Explain what a limit is in calculus and why it's fundamental to understanding derivatives and integrals.",
+      "expected_answer": "approach",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_explain_006",
+      "category": "code",
+      "difficulty": "medium",
+      "question": "Explain the difference between a stack and a queue. When would you use each data structure? Give real-world analogies.",
+      "expected_answer": "LIFO",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_explain_007",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Describe the trolley problem in ethics. What makes it philosophically interesting and what does it reveal about moral intuitions?",
+      "expected_answer": "utilitarian",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_analysis_003",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Explain Simpson's paradox with a concrete example. Why can aggregated data show the opposite trend from disaggregated data?",
+      "expected_answer": "aggregate",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_analysis_004",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Describe confirmation bias and explain three ways it can affect scientific research. How can researchers mitigate it?",
+      "expected_answer": "bias",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_analysis_005",
+      "category": "code",
+      "difficulty": "hard",
+      "question": "Compare time complexity and space complexity in algorithm analysis. When might you sacrifice one for the other? Give examples.",
+      "expected_answer": "trade",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_code_003",
+      "category": "code",
+      "difficulty": "medium",
+      "question": "Explain recursion with a simple example. What are the essential parts of a recursive function and what happens without a base case?",
+      "expected_answer": "base case",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_code_004",
+      "category": "code",
+      "difficulty": "hard",
+      "question": "Describe the difference between BFS and DFS graph traversal algorithms. When would you prefer one over the other?",
+      "expected_answer": "breadth",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_code_005",
+      "category": "code",
+      "difficulty": "hard",
+      "question": "Explain what Big O notation represents and why O(n log n) is considered efficient for sorting. Compare to O(n²).",
+      "expected_answer": "growth",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_math_002",
+      "category": "math",
+      "difficulty": "hard",
+      "question": "Explain the fundamental theorem of calculus and why it connects derivatives and integrals. What is its practical significance?",
+      "expected_answer": "antiderivative",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_math_003",
+      "category": "math",
+      "difficulty": "medium",
+      "question": "Explain why we cannot divide by zero. Use mathematical reasoning rather than just stating it's undefined.",
+      "expected_answer": "contradiction",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_reasoning_003",
+      "category": "reasoning",
+      "difficulty": "hard",
+      "question": "Explain the birthday paradox and why it surprises most people. What is the probability that two people share a birthday in a group of 23?",
+      "expected_answer": "50%",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_reasoning_004",
+      "category": "reasoning",
+      "difficulty": "medium",
+      "question": "Describe the difference between necessary and sufficient conditions. Give clear examples of each.",
+      "expected_answer": "necessary",
+      "verification_type": "contains"
+    },
+    {
+      "id": "open_reasoning_005",
+      "category": "logic",
+      "difficulty": "hard",
+      "question": "Explain what a logical fallacy is and describe three common informal fallacies. Why are they persuasive despite being invalid?",
+      "expected_answer": "fallacy",
+      "verification_type": "contains"
     }
   ]
 }

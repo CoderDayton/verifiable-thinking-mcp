@@ -40,6 +40,10 @@ export const SYSTEM_VERIFICATION =
   "You are a verification assistant. Double-check reasoning carefully. Use plain text, not LaTeX.";
 export const SYSTEM_ANSWER_ONLY = "Give only the answer, nothing else.";
 
+// System prompt for explanatory questions - emphasizes conciseness
+export const SYSTEM_EXPLANATORY =
+  "You are a clear, concise explainer. Explain concepts directly without unnecessary preamble or repetition. Use plain text.";
+
 // =============================================================================
 // SYSTEM PROMPTS - TERSE (~50% fewer tokens)
 // =============================================================================
@@ -95,6 +99,15 @@ Provide ONLY the numerical/factual answer, nothing else. Double-check before res
 Answer:`;
 }
 
+/**
+ * Format an explanatory prompt - concise explanations without padding
+ */
+export function formatExplanatoryPrompt(question: string): string {
+  return `${question}
+
+Be direct and concise. Focus on the key concepts without unnecessary repetition or filler phrases.`;
+}
+
 // =============================================================================
 // USER PROMPT TEMPLATES - TERSE (Chain-of-Draft style)
 // ~50% fewer tokens, uses fragments and minimal structure
@@ -137,7 +150,7 @@ Answer:`;
 // =============================================================================
 
 export function getSystemPrompt(
-  type: "baseline" | "reasoning" | "verification" | "answer_only",
+  type: "baseline" | "reasoning" | "verification" | "answer_only" | "explanatory",
   verbosity: Verbosity = "normal",
 ): string {
   if (verbosity === "terse") {
@@ -150,6 +163,8 @@ export function getSystemPrompt(
         return SYSTEM_VERIFICATION_TERSE;
       case "answer_only":
         return SYSTEM_ANSWER_ONLY_TERSE;
+      case "explanatory":
+        return SYSTEM_EXPLANATORY; // No terse version, use standard
     }
   }
   // Normal or verbose use standard prompts
@@ -162,11 +177,13 @@ export function getSystemPrompt(
       return SYSTEM_VERIFICATION;
     case "answer_only":
       return SYSTEM_ANSWER_ONLY;
+    case "explanatory":
+      return SYSTEM_EXPLANATORY;
   }
 }
 
 export function getUserPrompt(
-  type: "baseline" | "reasoning" | "verification" | "critical",
+  type: "baseline" | "reasoning" | "verification" | "critical" | "explanatory",
   question: string,
   verbosity: Verbosity = "normal",
   opts?: { initialReasoning?: string; patterns?: string[] },
@@ -185,6 +202,8 @@ export function getUserPrompt(
         );
       case "critical":
         return formatCriticalCheckPromptTerse(question);
+      case "explanatory":
+        return formatExplanatoryPrompt(question); // No terse version
     }
   }
   // Normal or verbose use standard prompts
@@ -197,5 +216,7 @@ export function getUserPrompt(
       return formatVerificationPrompt(question, opts?.initialReasoning || "", opts?.patterns || []);
     case "critical":
       return formatCriticalCheckPrompt(question);
+    case "explanatory":
+      return formatExplanatoryPrompt(question);
   }
 }
