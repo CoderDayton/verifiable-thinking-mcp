@@ -4,15 +4,44 @@
  * Based on HuggingFace Math-Verify patterns
  */
 
-/** Strip thinking tags from model responses (e.g., <think>...</think>) */
+/**
+ * Strip thinking/reasoning tags from model responses.
+ * Handles various model-specific formats:
+ * - DeepSeek/Qwen: <think>...</think>
+ * - Generic: <thinking>...</thinking>, <reasoning>...</reasoning>
+ * - Claude: <antithink>...</antithink>
+ * - Gemini: <thought>...</thought>, <thoughts>...</thoughts>
+ * - Llama: <reflection>...</reflection>
+ * - Mistral: <internal_monologue>...</internal_monologue>
+ * - GLM: <|begin_of_box|>...<|end_of_box|> (kept - this is answer boxing)
+ * - Tool tags: <tool_call>...</tool_call>, <tool_result>...</tool_result>
+ */
 export function stripThinkingTags(text: string): string {
-  // Match <think>...</think>, <thinking>...</thinking>, etc.
-  // Use non-greedy match and handle multiline
-  return text
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
-    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
-    .trim();
+  return (
+    text
+      // Standard thinking tags
+      .replace(/<think>[\s\S]*?<\/think>/gi, "")
+      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+      .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+      // Claude
+      .replace(/<antithink>[\s\S]*?<\/antithink>/gi, "")
+      // Gemini
+      .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
+      .replace(/<thoughts>[\s\S]*?<\/thoughts>/gi, "")
+      // Llama
+      .replace(/<reflection>[\s\S]*?<\/reflection>/gi, "")
+      // Mistral
+      .replace(/<internal_monologue>[\s\S]*?<\/internal_monologue>/gi, "")
+      // Tool invocation artifacts (not user-facing)
+      .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
+      .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
+      // Artifact containers
+      .replace(/<ARTIFACTS>[\s\S]*?<\/ARTIFACTS>/gi, "")
+      .replace(/<document_content>[\s\S]*?<\/document_content>/gi, "")
+      // Context tags (usually system/retrieval context, not answer)
+      .replace(/<context>[\s\S]*?<\/context>/gi, "")
+      .trim()
+  );
 }
 
 /** Strip markdown formatting from text */
