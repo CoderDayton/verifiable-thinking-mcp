@@ -8,7 +8,11 @@ export { verificationCache } from "./cache";
 // Compression utilities
 export {
   calculateEntropy,
+  cleanFillers,
   compress,
+  computeNCD,
+  isMetaSentence,
+  jaccardSimilarity,
   needsCompression,
   quickCompress,
 } from "./compression";

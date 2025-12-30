@@ -1,10 +1,24 @@
 /**
- * CPC-style Prompt Compression - Sentence-level compression with relevance scoring
- * Based on: "Prompt Compression with Context-Aware Sentence Encoding" (arXiv:2409.01227)
+ * Enhanced Prompt Compression - CPC-style sentence-level compression with:
+ * - TF-IDF relevance scoring
+ * - NCD (Normalized Compression Distance) for query relevance
+ * - Coreference constraint enforcement
+ * - Causal chain preservation
+ * - Filler/meta-cognition removal
+ * - Repetition detection
  *
- * Lightweight implementation without ML model - uses TF-IDF-like heuristics
- * ~10x faster than token-level methods
+ * Research basis:
+ * - CPC: "Prompt Compression with Context-Aware Sentence Encoding" (arXiv:2409.01227)
+ * - CompactPrompt (2025): N-gram abbreviation
+ * - Selective Context (2023): Entropy-based pruning
+ * - Information Bottleneck methods: Preserve task-relevant info
  */
+
+import { gzipSync } from "node:zlib";
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export interface CompressionResult {
   compressed: string;
@@ -13,19 +27,86 @@ export interface CompressionResult {
   ratio: number;
   kept_sentences: number;
   dropped_sentences: string[];
+  /** Enhancement metrics (only present when enhanced features used) */
+  enhancements?: {
+    fillers_removed: number;
+    coref_constraints_applied: number;
+    causal_constraints_applied: number;
+    repetitions_penalized: number;
+    ncd_boost_applied: boolean;
+  };
 }
 
 export interface CompressionOptions {
-  target_ratio?: number; // 0.1-1.0, default 0.5 (keep 50%)
-  min_sentences?: number; // Minimum sentences to keep, default 1
-  boost_reasoning?: boolean; // Boost logical connectives, default true
+  /** Target compression ratio 0.1-1.0, default 0.5 (keep 50%) */
+  target_ratio?: number;
+  /** Minimum sentences to keep, default 1 */
+  min_sentences?: number;
+  /** Boost logical connectives, default true */
+  boost_reasoning?: boolean;
+  /** Use NCD for query relevance scoring (default: true) */
+  useNCD?: boolean;
+  /** Enforce coreference constraints - keep antecedents for pronouns (default: true) */
+  enforceCoref?: boolean;
+  /** Enforce causal chain constraints - keep premises for conclusions (default: true) */
+  enforceCausalChains?: boolean;
+  /** Remove filler phrases before scoring (default: true) */
+  removeFillers?: boolean;
+  /** Jaccard threshold for repetition detection (default: 0.8) */
+  repeatThreshold?: number;
 }
+
+interface SentenceMetadata {
+  index: number;
+  original: string;
+  cleaned: string;
+  score: number;
+  ncdScore: number;
+  startsWithPronoun: boolean;
+  hasCausalConnective: boolean;
+  repeatSimilarity: number;
+  requiredBy: number | null;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
 
 const DEFAULT_OPTIONS: Required<CompressionOptions> = {
   target_ratio: 0.5,
   min_sentences: 1,
   boost_reasoning: true,
+  useNCD: true,
+  enforceCoref: true,
+  enforceCausalChains: true,
+  removeFillers: true,
+  repeatThreshold: 0.8,
 };
+
+// Filler phrases to remove (research-backed)
+const FILLER_PATTERNS = [
+  // Meta-cognition starters
+  /^(let's see|let me (think|check|see)|i think that|i believe that|okay so|well,?)\s*/gi,
+  // Inline fillers
+  /\b(basically|literally|actually|you know|i mean)\b/gi,
+  // Hedging (keep for nuance in some cases, lighter penalty)
+  /\b(really|very|quite|rather|somewhat)\b/gi,
+];
+
+// Full meta-sentences to remove entirely
+const META_SENTENCE_PATTERNS = [
+  /^(let me think about this|hmm+|okay|alright|so)[.!?]?$/i,
+  /^(that's a good question|interesting question)[.!?]?$/i,
+];
+
+// Pronoun starters that indicate coreference dependency
+const PRONOUN_START = /^(he|she|it|they|this|that|these|those|such)\b/i;
+
+// Causal connectives that indicate dependency on previous sentence
+const CAUSAL_CONNECTIVES = /^(therefore|thus|hence|consequently|as a result|so,|accordingly)/i;
+
+// Contrastive connectives
+const CONTRASTIVE_CONNECTIVES = /^(however|but|although|yet|nevertheless|on the other hand)/i;
 
 // Reasoning keywords to boost (from Self-Correction Bench research)
 const REASONING_KEYWORDS =
@@ -34,140 +115,6 @@ const REASONING_KEYWORDS =
 // High-value sentence starters
 const VALUE_STARTERS =
   /^(the key|importantly|note that|crucially|specifically|in summary|to summarize|finally|first|second|third)/i;
-
-/**
- * Compress context by keeping sentences most relevant to the query
- */
-export function compress(
-  context: string,
-  query: string,
-  options: CompressionOptions = {},
-): CompressionResult {
-  const opts = { ...DEFAULT_OPTIONS, ...options };
-
-  // Split into sentences
-  const sentences = splitSentences(context);
-
-  if (sentences.length <= opts.min_sentences) {
-    return {
-      compressed: context,
-      original_tokens: estimateTokens(context),
-      compressed_tokens: estimateTokens(context),
-      ratio: 1.0,
-      kept_sentences: sentences.length,
-      dropped_sentences: [],
-    };
-  }
-
-  // Score each sentence by relevance
-  const scored = sentences.map((sentence, index) => ({
-    sentence,
-    index,
-    score: relevanceScore(sentence, query, index, sentences.length, opts.boost_reasoning),
-  }));
-
-  // Determine how many to keep
-  const keepCount = Math.max(opts.min_sentences, Math.ceil(sentences.length * opts.target_ratio));
-
-  // Sort by score, keep top N
-  const sorted = [...scored].sort((a, b) => b.score - a.score);
-  const keptIndices = new Set(sorted.slice(0, keepCount).map((s) => s.index));
-
-  // Reconstruct in original order for coherence
-  const kept = sentences.filter((_, i) => keptIndices.has(i));
-  const dropped = sentences.filter((_, i) => !keptIndices.has(i));
-  const compressed = kept.join(" ");
-
-  return {
-    compressed,
-    original_tokens: estimateTokens(context),
-    compressed_tokens: estimateTokens(compressed),
-    ratio: compressed.length / Math.max(context.length, 1),
-    kept_sentences: kept.length,
-    dropped_sentences: dropped,
-  };
-}
-
-/**
- * Calculate relevance score for a sentence
- */
-function relevanceScore(
-  sentence: string,
-  query: string,
-  position: number,
-  totalSentences: number,
-  boostReasoning: boolean,
-): number {
-  let score = 0;
-
-  // 1. Term overlap with query (TF-IDF-like)
-  const queryTerms = tokenize(query);
-  const sentenceTerms = tokenize(sentence);
-  const sentenceTermSet = new Set(sentenceTerms);
-
-  for (const term of queryTerms) {
-    if (sentenceTermSet.has(term)) {
-      // IDF-like: rarer terms in sentence = higher weight
-      const termFreq = sentenceTerms.filter((t) => t === term).length;
-      score += 1 / Math.log(1 + termFreq);
-    }
-  }
-
-  // 2. Position bias (first and last sentences often important)
-  const positionScore = position === 0 ? 0.3 : position === totalSentences - 1 ? 0.2 : 0;
-  score += positionScore;
-
-  // 3. Reasoning keyword boost
-  if (boostReasoning && REASONING_KEYWORDS.test(sentence)) {
-    score *= 1.5;
-  }
-
-  // 4. High-value starter boost
-  if (VALUE_STARTERS.test(sentence.trim())) {
-    score *= 1.3;
-  }
-
-  // 5. Length penalty for very short sentences (likely not informative)
-  if (sentence.length < 20) {
-    score *= 0.5;
-  }
-
-  // 6. Penalty for filler phrases
-  if (/^(um|uh|well|so|okay|basically|actually|like)\b/i.test(sentence.trim())) {
-    score *= 0.3;
-  }
-
-  return score;
-}
-
-/**
- * Split text into sentences
- */
-function splitSentences(text: string): string[] {
-  // Split on sentence boundaries, preserving the delimiter
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-/**
- * Tokenize text for term comparison
- */
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
-}
-
-/**
- * Estimate token count (rough: ~4 chars per token for English)
- */
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
 
 // Common stop words to filter out
 const STOP_WORDS = new Set([
@@ -259,6 +206,385 @@ const STOP_WORDS = new Set([
   "there",
   "then",
 ]);
+
+// ============================================================================
+// Core Functions
+// ============================================================================
+
+/**
+ * Split text into sentences
+ */
+function splitSentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Simple tokenizer for Jaccard similarity
+ */
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2);
+}
+
+/**
+ * Tokenize text for term comparison (filters stop words)
+ */
+function tokenizeForTfIdf(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+}
+
+/**
+ * Estimate token count (rough: ~4 chars per token for English)
+ */
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 4);
+}
+
+/**
+ * Calculate TF-IDF-like relevance score for a sentence
+ */
+function relevanceScore(
+  sentence: string,
+  query: string,
+  position: number,
+  totalSentences: number,
+  boostReasoning: boolean,
+): number {
+  let score = 0;
+
+  // 1. Term overlap with query (TF-IDF-like)
+  const queryTerms = tokenizeForTfIdf(query);
+  const sentenceTerms = tokenizeForTfIdf(sentence);
+  const sentenceTermSet = new Set(sentenceTerms);
+
+  for (const term of queryTerms) {
+    if (sentenceTermSet.has(term)) {
+      // IDF-like: rarer terms in sentence = higher weight
+      const termFreq = sentenceTerms.filter((t) => t === term).length;
+      score += 1 / Math.log(1 + termFreq);
+    }
+  }
+
+  // 2. Position bias (first and last sentences often important)
+  const positionScore = position === 0 ? 0.3 : position === totalSentences - 1 ? 0.2 : 0;
+  score += positionScore;
+
+  // 3. Reasoning keyword boost
+  if (boostReasoning && REASONING_KEYWORDS.test(sentence)) {
+    score *= 1.5;
+  }
+
+  // 4. High-value starter boost
+  if (VALUE_STARTERS.test(sentence.trim())) {
+    score *= 1.3;
+  }
+
+  // 5. Length penalty for very short sentences (likely not informative)
+  if (sentence.length < 20) {
+    score *= 0.5;
+  }
+
+  // 6. Penalty for filler phrases
+  if (/^(um|uh|well|so|okay|basically|actually|like)\b/i.test(sentence.trim())) {
+    score *= 0.3;
+  }
+
+  return score;
+}
+
+/**
+ * Remove filler phrases from text
+ */
+function cleanFillers(sentence: string): { cleaned: string; removedCount: number } {
+  let cleaned = sentence;
+  let removedCount = 0;
+
+  for (const pattern of FILLER_PATTERNS) {
+    const before = cleaned;
+    cleaned = cleaned.replace(pattern, " ");
+    if (cleaned !== before) removedCount++;
+  }
+
+  // Normalize whitespace
+  cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+  return { cleaned, removedCount };
+}
+
+/**
+ * Check if sentence is pure meta-cognition (should be removed entirely)
+ */
+function isMetaSentence(sentence: string): boolean {
+  const trimmed = sentence.trim();
+  return META_SENTENCE_PATTERNS.some((p) => p.test(trimmed));
+}
+
+/**
+ * Compute Normalized Compression Distance between two strings
+ * NCD(x,y) = (C(xy) - min(C(x), C(y))) / max(C(x), C(y))
+ *
+ * Lower NCD = more similar (0 = identical, 1 = unrelated)
+ */
+export function computeNCD(a: string, b: string): number {
+  if (a.length === 0 || b.length === 0) return 1;
+
+  try {
+    const Ca = gzipSync(Buffer.from(a)).length;
+    const Cb = gzipSync(Buffer.from(b)).length;
+    const Cab = gzipSync(Buffer.from(a + " " + b)).length;
+
+    const ncd = (Cab - Math.min(Ca, Cb)) / Math.max(Ca, Cb);
+    return Math.min(1, Math.max(0, ncd)); // Clamp to [0, 1]
+  } catch {
+    return 0.5; // Default on error
+  }
+}
+
+/**
+ * Compute Jaccard similarity between two token sets
+ */
+export function jaccardSimilarity(a: string, b: string): number {
+  const tokensA = new Set(tokenize(a));
+  const tokensB = new Set(tokenize(b));
+
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+
+  const intersection = [...tokensA].filter((t) => tokensB.has(t)).length;
+  const union = new Set([...tokensA, ...tokensB]).size;
+
+  return intersection / union;
+}
+
+/**
+ * Compress context by keeping sentences most relevant to the query
+ *
+ * Features:
+ * - TF-IDF relevance scoring
+ * - NCD (gzip-based) query similarity
+ * - Coreference constraint enforcement
+ * - Causal chain preservation
+ * - Filler/meta-cognition removal
+ * - Repetition detection
+ */
+export function compress(
+  context: string,
+  query: string,
+  options: CompressionOptions = {},
+): CompressionResult {
+  const opts = { ...DEFAULT_OPTIONS, ...options };
+
+  // Split into sentences
+  const rawSentences = splitSentences(context);
+
+  // Early exit for short text
+  if (rawSentences.length <= opts.min_sentences) {
+    return {
+      compressed: context,
+      original_tokens: estimateTokens(context),
+      compressed_tokens: estimateTokens(context),
+      ratio: 1.0,
+      kept_sentences: rawSentences.length,
+      dropped_sentences: [],
+      enhancements: {
+        fillers_removed: 0,
+        coref_constraints_applied: 0,
+        causal_constraints_applied: 0,
+        repetitions_penalized: 0,
+        ncd_boost_applied: false,
+      },
+    };
+  }
+
+  // Phase 1: Pre-processing - Build metadata
+  let fillersRemoved = 0;
+  let repetitionsPenalized = 0;
+
+  const metadata: SentenceMetadata[] = rawSentences.map((sentence, index) => {
+    // Check for pure meta-sentences
+    if (opts.removeFillers && isMetaSentence(sentence)) {
+      fillersRemoved++;
+      return {
+        index,
+        original: sentence,
+        cleaned: "",
+        score: -1000, // Effectively remove
+        ncdScore: 1,
+        startsWithPronoun: false,
+        hasCausalConnective: false,
+        repeatSimilarity: 0,
+        requiredBy: null,
+      };
+    }
+
+    // Clean fillers
+    const { cleaned, removedCount } = opts.removeFillers
+      ? cleanFillers(sentence)
+      : { cleaned: sentence, removedCount: 0 };
+    fillersRemoved += removedCount;
+
+    // Compute NCD score (lower = more relevant to query)
+    const ncdScore = opts.useNCD ? computeNCD(cleaned, query) : 0.5;
+
+    // Check for coreference markers
+    const startsWithPronoun = PRONOUN_START.test(cleaned);
+
+    // Check for causal/contrastive connectives
+    const hasCausalConnective =
+      CAUSAL_CONNECTIVES.test(cleaned) || CONTRASTIVE_CONNECTIVES.test(cleaned);
+
+    return {
+      index,
+      original: sentence,
+      cleaned,
+      score: 0, // Will be computed below
+      ncdScore,
+      startsWithPronoun,
+      hasCausalConnective,
+      repeatSimilarity: 0,
+      requiredBy: null,
+    };
+  });
+
+  // Compute repetition similarity (compared to previous sentence)
+  for (let i = 1; i < metadata.length; i++) {
+    const current = metadata[i];
+    const previous = metadata[i - 1];
+    if (current && previous) {
+      const sim = jaccardSimilarity(current.cleaned, previous.cleaned);
+      current.repeatSimilarity = sim;
+      if (sim > opts.repeatThreshold) {
+        repetitionsPenalized++;
+      }
+    }
+  }
+
+  // Mark coreference dependencies
+  for (let i = 1; i < metadata.length; i++) {
+    const current = metadata[i];
+    const previous = metadata[i - 1];
+    if (current && previous && current.startsWithPronoun) {
+      previous.requiredBy = i;
+    }
+  }
+
+  // Mark causal chain dependencies
+  for (let i = 1; i < metadata.length; i++) {
+    const current = metadata[i];
+    const previous = metadata[i - 1];
+    if (current && previous && current.hasCausalConnective) {
+      previous.requiredBy = i;
+    }
+  }
+
+  // Phase 2: Compute scores
+  const totalSentences = metadata.filter((m) => m.cleaned.length > 0).length;
+
+  for (const m of metadata) {
+    if (m.cleaned.length === 0) continue;
+
+    // Base score from TF-IDF relevance
+    let score = relevanceScore(m.cleaned, query, m.index, totalSentences, opts.boost_reasoning);
+
+    // NCD boost: lower NCD = higher relevance (adds up to 0.5)
+    if (opts.useNCD) {
+      score += (1 - m.ncdScore) * 0.5;
+    }
+
+    // Repetition penalty
+    if (m.repeatSimilarity > opts.repeatThreshold) {
+      score *= 0.3;
+    }
+
+    // Boost sentences that are required by others (important context)
+    if (m.requiredBy !== null) {
+      score *= 1.2;
+    }
+
+    m.score = score;
+  }
+
+  // Phase 3: Select sentences
+  const keepCount = Math.max(
+    opts.min_sentences,
+    Math.ceil(rawSentences.length * opts.target_ratio),
+  );
+
+  // Sort by score and select top-k
+  const validMetadata = metadata.filter((m) => m.cleaned.length > 0);
+  const sorted = [...validMetadata].sort((a, b) => b.score - a.score);
+  const selected = new Set(sorted.slice(0, keepCount).map((m) => m.index));
+
+  // Phase 4: Enforce constraints
+  let corefConstraints = 0;
+  let causalConstraints = 0;
+
+  if (opts.enforceCoref || opts.enforceCausalChains) {
+    // Iteratively add required sentences
+    let changed = true;
+    let iterations = 0;
+    const maxIterations = 10;
+
+    while (changed && iterations < maxIterations) {
+      changed = false;
+      iterations++;
+
+      for (const m of metadata) {
+        if (!selected.has(m.index)) continue;
+
+        // Check coreference constraint
+        if (opts.enforceCoref && m.startsWithPronoun && m.index > 0) {
+          const antecedent = m.index - 1;
+          if (!selected.has(antecedent)) {
+            selected.add(antecedent);
+            corefConstraints++;
+            changed = true;
+          }
+        }
+
+        // Check causal chain constraint
+        if (opts.enforceCausalChains && m.hasCausalConnective && m.index > 0) {
+          const premise = m.index - 1;
+          if (!selected.has(premise)) {
+            selected.add(premise);
+            causalConstraints++;
+            changed = true;
+          }
+        }
+      }
+    }
+  }
+
+  // Reconstruct in original order
+  const kept = rawSentences.filter((_, i) => selected.has(i));
+  const dropped = rawSentences.filter((_, i) => !selected.has(i));
+  const compressed = kept.join(" ");
+
+  return {
+    compressed,
+    original_tokens: estimateTokens(context),
+    compressed_tokens: estimateTokens(compressed),
+    ratio: compressed.length / Math.max(context.length, 1),
+    kept_sentences: kept.length,
+    dropped_sentences: dropped,
+    enhancements: {
+      fillers_removed: fillersRemoved,
+      coref_constraints_applied: corefConstraints,
+      causal_constraints_applied: causalConstraints,
+      repetitions_penalized: repetitionsPenalized,
+      ncd_boost_applied: opts.useNCD,
+    },
+  };
+}
 
 /**
  * Quick compression for context before adding to prompt
@@ -431,8 +757,8 @@ export function needsCompression(text: string, query?: string): CompressionAnaly
 
   // Query relevance boost: if query provided, check if compression preserves key terms
   if (query && shouldCompress) {
-    const queryTerms = tokenize(query);
-    const textTerms = new Set(tokenize(text));
+    const queryTerms = tokenizeForTfIdf(query);
+    const textTerms = new Set(tokenizeForTfIdf(text));
     const overlap = queryTerms.filter((t) => textTerms.has(t)).length;
     const overlapRatio = queryTerms.length > 0 ? overlap / queryTerms.length : 0;
 
@@ -454,3 +780,9 @@ export function needsCompression(text: string, query?: string): CompressionAnaly
     reasons,
   };
 }
+
+// ============================================================================
+// Utility Exports
+// ============================================================================
+
+export { cleanFillers, isMetaSentence };

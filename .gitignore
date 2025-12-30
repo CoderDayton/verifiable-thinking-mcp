@@ -96,6 +96,8 @@ desktop.ini
 # =============================================================================
 examples/benchmarks/results-*.json
 examples/benchmarks/judge-*.json
+examples/benchmarks/compression-results-*.json
+examples/benchmarks/compression-comparison-*.json
 
 # =============================================================================
 # Reference materials (research, drafts, not part of the codebase)
