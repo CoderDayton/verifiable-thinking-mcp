@@ -4,6 +4,17 @@
  * Based on HuggingFace Math-Verify patterns
  */
 
+/** Strip thinking tags from model responses (e.g., <think>...</think>) */
+export function stripThinkingTags(text: string): string {
+  // Match <think>...</think>, <thinking>...</thinking>, etc.
+  // Use non-greedy match and handle multiline
+  return text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
+    .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
+    .trim();
+}
+
 /** Strip markdown formatting from text */
 export function stripMarkdown(text: string): string {
   return (
@@ -140,7 +151,9 @@ function extractLastMeaningfulWord(text: string): string {
  * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
  */
 export function extractAnswer(response: string, expectedAnswers?: string[]): string {
-  const cleaned = stripMarkdown(response);
+  // Strip thinking tags first (e.g., <think>...</think>)
+  const withoutThinking = stripThinkingTags(response);
+  const cleaned = stripMarkdown(withoutThinking);
 
   // Priority 0: If we know expected answers, look for them directly in the response
   // This is the most reliable method when we have ground truth

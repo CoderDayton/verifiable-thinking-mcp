@@ -49,16 +49,20 @@ export {
 
 // Prompts (verbosity-aware templates)
 export {
+  // Domain-aware prompts
+  DOMAIN_PROMPTS,
   // User prompts
   formatBaselinePrompt,
   formatBaselinePromptTerse,
   formatCriticalCheckPrompt,
   formatCriticalCheckPromptTerse,
+  formatDomainExplanatoryPrompt,
   formatExplanatoryPrompt,
   formatReasoningPrompt,
   formatReasoningPromptTerse,
   formatVerificationPrompt,
   formatVerificationPromptTerse,
+  getDomainSystemPrompt,
   // Unified getters
   getSystemPrompt,
   getUserPrompt,

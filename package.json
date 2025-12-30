@@ -5,6 +5,7 @@
   "type": "module",
   "private": true,
   "dependencies": {
+    "dotenv": "^17.2.3",
     "fastmcp": "latest",
     "zod": "latest"
   },

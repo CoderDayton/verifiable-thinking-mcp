@@ -1,16 +1,31 @@
 /**
  * Benchmark runner for verifiable-thinking-mcp
  * Compares baseline LLM vs MCP-guided structured reasoning
- * 
+ *
  * Architecture: Option A (Single Direct Call)
  * - Local compute for math/logic (100% accuracy, ~3ms)
  * - Direct LLM call for everything else (no phase rewrites)
  * - MCP tool records reasoning (CRASH-style scratchpad)
  */
 
+// Load .env from project root BEFORE any other imports
+import { config } from "dotenv";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRoot = resolve(__dirname, "../..");
+config({ path: resolve(projectRoot, ".env") });
+
 import { spawn, type Subprocess } from "bun";
-import { LLMClient, type LLMConfig, type ToolDefinition, type ChatMessageWithTools, type ToolCall } from "./llm-client";
-import { extractAnswer } from "../../src/lib/extraction";
+import {
+  LLMClient,
+  type LLMConfig,
+  type ToolDefinition,
+  type ChatMessageWithTools,
+  type ToolCall,
+} from "./llm-client";
+import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
 import {
   routeQuestion,
   buildSpotCheckPrompt,
@@ -23,7 +38,7 @@ export interface Question {
   category: "math" | "logic" | "code" | "reasoning";
   difficulty: "easy" | "medium" | "hard" | "trap" | "impossible" | "sota";
   question: string;
-  expected_answer: string | string[];
+  expected_answer: string | string[] | null; // null for open-ended (judge-only)
   verification_type: "exact" | "contains" | "regex" | "numeric" | "code_exec";
   tolerance?: number;
 }
@@ -40,7 +55,7 @@ export interface RunResult {
   category: string;
   baseline: {
     answer: string;
-    correct: boolean;
+    correct: boolean | null; // null for open-ended (judge-only)
     time_ms: number;
     tokens_estimate: number;
     method?: string;
@@ -49,7 +64,7 @@ export interface RunResult {
   };
   with_tool: {
     answer: string;
-    correct: boolean;
+    correct: boolean | null; // null for open-ended (judge-only)
     time_ms: number;
     tokens_estimate: number;
     steps: number;
@@ -171,22 +186,28 @@ export interface BenchmarkResults {
         significant_at_01: boolean;
       };
     };
-    by_difficulty: Record<string, {
-      baseline_accuracy: number;
-      tool_accuracy: number;
-      delta: number;
-      count: number;
-      baseline_avg_time: number;
-      tool_avg_time: number;
-    }>;
-    by_category: Record<string, {
-      baseline_accuracy: number;
-      tool_accuracy: number;
-      delta: number;
-      count: number;
-      baseline_avg_time: number;
-      tool_avg_time: number;
-    }>;
+    by_difficulty: Record<
+      string,
+      {
+        baseline_accuracy: number;
+        tool_accuracy: number;
+        delta: number;
+        count: number;
+        baseline_avg_time: number;
+        tool_avg_time: number;
+      }
+    >;
+    by_category: Record<
+      string,
+      {
+        baseline_accuracy: number;
+        tool_accuracy: number;
+        delta: number;
+        count: number;
+        baseline_avg_time: number;
+        tool_avg_time: number;
+      }
+    >;
     compression?: {
       total_bytes_saved: number;
       steps_compressed: number;
@@ -194,8 +215,14 @@ export interface BenchmarkResults {
       compression_rate: number;
     };
     complexity?: {
-      by_tier: Record<string, { count: number; accuracy: number; avg_time_ms: number }>;
-      by_path: Record<string, { count: number; accuracy: number; avg_time_ms: number }>;
+      by_tier: Record<
+        string,
+        { count: number; accuracy: number; avg_time_ms: number }
+      >;
+      by_path: Record<
+        string,
+        { count: number; accuracy: number; avg_time_ms: number }
+      >;
     };
     latency_breakdown?: {
       avg_routing_ms: number;
@@ -259,7 +286,10 @@ interface ThinkResult {
 class MCPClient {
   private proc: Subprocess | null = null;
   private requestId = 0;
-  private pendingRequests = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pendingRequests = new Map<
+    number,
+    { resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
   private buffer = "";
 
   async init(): Promise<void> {
@@ -283,22 +313,22 @@ class MCPClient {
   }
 
   private async readLoop(): Promise<void> {
-    if (!this.proc?.stdout) return;
+    if (!this.proc?.stdout || typeof this.proc.stdout === "number") return;
     const reader = this.proc.stdout.getReader();
     const decoder = new TextDecoder();
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      
+
       this.buffer += decoder.decode(value, { stream: true });
-      
+
       // Process complete messages
       let newlineIdx: number;
-      while ((newlineIdx = this.buffer.indexOf('\n')) !== -1) {
+      while ((newlineIdx = this.buffer.indexOf("\n")) !== -1) {
         const line = this.buffer.slice(0, newlineIdx);
         this.buffer = this.buffer.slice(newlineIdx + 1);
-        
+
         if (line.trim()) {
           try {
             const msg = JSON.parse(line);
@@ -321,13 +351,18 @@ class MCPClient {
 
   private async send(method: string, params: unknown): Promise<unknown> {
     if (!this.proc?.stdin) throw new Error("MCP not initialized");
-    
+
     const id = ++this.requestId;
     const msg = JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n";
-    
+    const stdin = this.proc.stdin;
+
     return new Promise((resolve, reject) => {
       this.pendingRequests.set(id, { resolve, reject });
-      this.proc!.stdin!.write(msg);
+      if (typeof stdin === "number") {
+        throw new Error("stdin is a file descriptor, not a writable stream");
+      }
+      stdin.write(msg);
+      stdin.flush();
     });
   }
 
@@ -340,7 +375,8 @@ class MCPClient {
       context: args.context || "Benchmark evaluation",
       thought: args.thought,
       outcome: args.outcome || "Reasoning recorded",
-      next_action: args.next_action || (args.is_final ? "Complete" : "Continue reasoning"),
+      next_action:
+        args.next_action || (args.is_final ? "Complete" : "Continue reasoning"),
       rationale: args.rationale || "Systematic benchmark evaluation",
       is_final_step: args.is_final ?? false,
       guidance: args.guidance ?? false,
@@ -350,37 +386,37 @@ class MCPClient {
       compression_level: args.compression_level,
       local_compute: args.local_compute ?? false,
     };
-    
+
     // Add revision support
     if (args.revises_step !== undefined) {
       fullArgs.revises_step = args.revises_step;
       fullArgs.revision_reason = args.revision_reason;
     }
-    
+
     // Add branching support
     if (args.branch_from !== undefined) {
       fullArgs.branch_from = args.branch_from;
       fullArgs.branch_id = args.branch_id;
       fullArgs.branch_name = args.branch_name;
     }
-    
+
     // Add confidence if provided
     if (args.confidence !== undefined) {
       fullArgs.confidence = args.confidence;
     }
-    
-    const result = await this.send("tools/call", {
+
+    const result = (await this.send("tools/call", {
       name: "think",
       arguments: fullArgs,
-    }) as { content: Array<{ type: string; text: string }> };
-    
+    })) as { content: Array<{ type: string; text: string }> };
+
     const text = result.content?.[0]?.text || "";
-    
+
     // Parse meta from JSON code block response
     let meta: Record<string, unknown> = {};
     let guidance: string[] = [];
     let verification: { passed: boolean; evidence: string } | undefined;
-    
+
     try {
       const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
@@ -401,7 +437,7 @@ class MCPClient {
     } catch {
       // Ignore meta parse errors
     }
-    
+
     return { raw: text, meta, guidance, verification };
   }
 
@@ -424,35 +460,45 @@ class MCPClient {
 // ANSWER VERIFICATION
 // ============================================================================
 
-function verifyAnswer(question: Question, answer: string): boolean {
-  const expected = Array.isArray(question.expected_answer) 
-    ? question.expected_answer 
+/**
+ * Verify answer against expected. Returns null for open-ended questions (judge-only).
+ */
+function verifyAnswer(question: Question, answer: string): boolean | null {
+  // Open-ended questions have no expected answer - use judge instead
+  if (question.expected_answer === null) {
+    return null;
+  }
+
+  const expected = Array.isArray(question.expected_answer)
+    ? question.expected_answer
     : [question.expected_answer];
-  
+
   // Normalize answer
-  const normalized = answer.trim().toLowerCase()
+  const normalized = answer
+    .trim()
+    .toLowerCase()
     .replace(/^["']|["']$/g, "")
     .replace(/\.$/, "");
 
   switch (question.verification_type) {
     case "exact":
-      return expected.some(e => normalized === e.toLowerCase());
-    
+      return expected.some((e) => normalized === e.toLowerCase());
+
     case "contains":
-      return expected.some(e => normalized.includes(e.toLowerCase()));
-    
+      return expected.some((e) => normalized.includes(e.toLowerCase()));
+
     case "regex":
-      return expected.some(e => new RegExp(e, "i").test(answer));
-    
+      return expected.some((e) => new RegExp(e, "i").test(answer));
+
     case "numeric": {
       const num = parseFloat(answer.replace(/[^0-9.-]/g, ""));
       const tolerance = question.tolerance || 0.001;
-      return expected.some(e => Math.abs(num - parseFloat(e)) <= tolerance);
+      return expected.some((e) => Math.abs(num - parseFloat(e)) <= tolerance);
     }
-    
+
     case "code_exec":
-      return expected.some(e => normalized.includes(e.toLowerCase()));
-    
+      return expected.some((e) => normalized.includes(e.toLowerCase()));
+
     default:
       return false;
   }
@@ -494,19 +540,54 @@ Return your final answer in the last step with is_final_step=true.`,
     parameters: {
       type: "object",
       properties: {
-        step_number: { type: "number", description: "Sequential step number (start at 1)" },
-        estimated_total: { type: "number", description: "Estimated total steps needed" },
+        step_number: {
+          type: "number",
+          description: "Sequential step number (start at 1)",
+        },
+        estimated_total: {
+          type: "number",
+          description: "Estimated total steps needed",
+        },
         thought: { type: "string", description: "Your current reasoning" },
-        outcome: { type: "string", description: "What you concluded or learned" },
+        outcome: {
+          type: "string",
+          description: "What you concluded or learned",
+        },
         next_action: { type: "string", description: "What to do next" },
-        is_final_step: { type: "boolean", description: "True if this is the final answer" },
-        confidence: { type: "number", description: "Your confidence 0-1 (optional)" },
-        revises_step: { type: "number", description: "Step number to revise if correcting an error (optional)" },
-        revision_reason: { type: "string", description: "Why revising (optional)" },
-        branch_from: { type: "number", description: "Step to branch from for alternative approach (optional)" },
-        branch_id: { type: "string", description: "Unique ID for this branch (optional)" },
+        is_final_step: {
+          type: "boolean",
+          description: "True if this is the final answer",
+        },
+        confidence: {
+          type: "number",
+          description: "Your confidence 0-1 (optional)",
+        },
+        revises_step: {
+          type: "number",
+          description:
+            "Step number to revise if correcting an error (optional)",
+        },
+        revision_reason: {
+          type: "string",
+          description: "Why revising (optional)",
+        },
+        branch_from: {
+          type: "number",
+          description:
+            "Step to branch from for alternative approach (optional)",
+        },
+        branch_id: {
+          type: "string",
+          description: "Unique ID for this branch (optional)",
+        },
       },
-      required: ["step_number", "estimated_total", "thought", "outcome", "next_action"],
+      required: [
+        "step_number",
+        "estimated_total",
+        "thought",
+        "outcome",
+        "next_action",
+      ],
     },
   },
 };
@@ -536,7 +617,7 @@ async function runAgentMode(
   mcp: MCPClient,
   question: string,
   domain: string,
-  sessionId: string,
+  sessionId: string
 ): Promise<AgentResult> {
   const systemPrompt = `You are a careful problem solver with access to a "think" tool for structured reasoning.
 
@@ -552,7 +633,10 @@ Domain hint: ${domain}`;
 
   const messages: ChatMessageWithTools[] = [
     { role: "system", content: systemPrompt },
-    { role: "user", content: `${question}\n\nThink through this carefully. Use the think tool to structure your reasoning if needed. Provide your final answer clearly.` },
+    {
+      role: "user",
+      content: `${question}\n\nThink through this carefully. Use the think tool to structure your reasoning if needed. Provide your final answer clearly.`,
+    },
   ];
 
   const thoughts: AgentResult["thoughts"] = [];
@@ -563,8 +647,12 @@ Domain hint: ${domain}`;
   let maxIterations = 10; // Safety limit
 
   while (maxIterations-- > 0) {
-    const response = await llm.askWithTools(messages, [THINK_TOOL], { temperature: 0.1 });
-    totalTokens += estimateTokens(JSON.stringify(messages) + JSON.stringify(response));
+    const response = await llm.askWithTools(messages, [THINK_TOOL], {
+      temperature: 0.1,
+    });
+    totalTokens += estimateTokens(
+      JSON.stringify(messages) + JSON.stringify(response)
+    );
 
     // Check if LLM wants to use tools
     if (response.tool_calls && response.tool_calls.length > 0) {
@@ -580,7 +668,7 @@ Domain hint: ${domain}`;
         if (toolCall.function.name === "think") {
           try {
             const args = JSON.parse(toolCall.function.arguments);
-            
+
             // Track the thought
             thoughts.push({
               step: args.step_number,
@@ -615,7 +703,8 @@ Domain hint: ${domain}`;
               toolResponse += ` Guidance: ${mcpResult.guidance.join("; ")}`;
             }
             if (args.is_final_step) {
-              toolResponse += " This is the final step - provide your answer now.";
+              toolResponse +=
+                " This is the final step - provide your answer now.";
             }
 
             messages.push({
@@ -628,7 +717,8 @@ Domain hint: ${domain}`;
             if (args.is_final_step) {
               messages.push({
                 role: "user",
-                content: "Based on your reasoning, what is the final answer? State it clearly and concisely.",
+                content:
+                  "Based on your reasoning, what is the final answer? State it clearly and concisely.",
               });
             }
           } catch (e) {
@@ -670,13 +760,17 @@ async function askWithStreaming(
   llm: LLMClient,
   prompt: string,
   system: string,
-  label: string,
+  label: string
 ): Promise<string> {
   process.stdout.write(`\n  ${label}:\n  `);
   let fullResponse = "";
   let lineLength = 2; // "  " prefix
-  
-  for await (const chunk of llm.stream(prompt, { system, temperature: 0.1, maxTokens: 1024 })) {
+
+  for await (const chunk of llm.stream(prompt, {
+    system,
+    temperature: 0.1,
+    maxTokens: 1024,
+  })) {
     fullResponse += chunk;
     // Word-wrap at ~78 chars, handle newlines
     for (const char of chunk) {
@@ -699,28 +793,44 @@ async function askWithStreaming(
 }
 
 // Baseline: Direct LLM call, no guidance, no local compute
-async function runBaseline(llm: LLMClient, question: Question): Promise<RunResult["baseline"]> {
+async function runBaseline(
+  llm: LLMClient,
+  question: Question
+): Promise<RunResult["baseline"]> {
   const start = Date.now();
-  
+
   const prompt = `${question.question}\n\nProvide your answer clearly. If it's a number, state just the number. If it's a choice, state just the choice.`;
-  
+
   const response = await llm.ask(prompt, {
-    system: "You are a helpful assistant. Answer questions directly and concisely.",
+    system:
+      "You are a helpful assistant. Answer questions directly and concisely.",
     temperature: 0.1,
   });
 
   const time_ms = Date.now() - start;
-  const expectedAnswers = Array.isArray(question.expected_answer) ? question.expected_answer : [question.expected_answer];
-  const answer = extractAnswer(response, expectedAnswers);
+  
+  // For open-ended questions, skip answer extraction - just use full response
+  const isOpenEnded = question.expected_answer === null;
+  let answer: string;
+  if (isOpenEnded) {
+    answer = response;
+  } else {
+    const expected = question.expected_answer as string | string[];
+    const expectedAnswers = Array.isArray(expected) ? expected : [expected];
+    answer = extractAnswer(response, expectedAnswers);
+  }
 
+  // Strip thinking tags for cleaner output (and judge comparison)
+  const cleanResponse = stripThinkingTags(response);
+  
   return {
     answer,
     correct: verifyAnswer(question, answer),
     time_ms,
     tokens_estimate: estimateTokens(prompt + response),
     method: "llm",
-    raw_response: response,
-    response_length: response.length,
+    raw_response: cleanResponse,
+    response_length: cleanResponse.length,
   };
 }
 
@@ -730,13 +840,13 @@ async function runBaseline(llm: LLMClient, question: Question): Promise<RunResul
 // 2. Route question using src/lib/think/route.ts
 // 3. Record in MCP (CRASH-style scratchpad)
 async function runWithTool(
-  llm: LLMClient, 
-  mcp: MCPClient, 
+  llm: LLMClient,
+  mcp: MCPClient,
   question: Question,
   useLocal = true,
   compressionLevel: "none" | "auto" | "aggressive" = "auto",
   verbose = false,
-  skipVerify = false,
+  skipVerify = false
 ): Promise<RunResult["with_tool"]> {
   const start = Date.now();
   const sessionId = `bench_${question.id}_${Date.now()}`;
@@ -758,12 +868,14 @@ async function runWithTool(
   let contextCompressed = false;
 
   const trackCompression = (meta: Record<string, unknown>) => {
-    const compression = meta.compression as {
-      input?: boolean;
-      output?: boolean;
-      context?: boolean;
-      bytes_saved?: number;
-    } | undefined;
+    const compression = meta.compression as
+      | {
+          input?: boolean;
+          output?: boolean;
+          context?: boolean;
+          bytes_saved?: number;
+        }
+      | undefined;
     if (compression) {
       totalBytesSaved += compression.bytes_saved || 0;
       if (compression.input) inputCompressed = true;
@@ -772,17 +884,24 @@ async function runWithTool(
     }
   };
 
-  const buildCompression = () => totalBytesSaved > 0 ? {
-    bytes_saved: totalBytesSaved,
-    input_compressed: inputCompressed,
-    output_compressed: outputCompressed,
-    context_compressed: contextCompressed,
-  } : undefined;
+  const buildCompression = () =>
+    totalBytesSaved > 0
+      ? {
+          bytes_saved: totalBytesSaved,
+          input_compressed: inputCompressed,
+          output_compressed: outputCompressed,
+          context_compressed: contextCompressed,
+        }
+      : undefined;
 
-  const domain = question.category === "math" ? "math" 
-    : question.category === "logic" ? "logic"
-    : question.category === "code" ? "code" 
-    : "general";
+  const domain =
+    question.category === "math"
+      ? "math"
+      : question.category === "logic"
+      ? "logic"
+      : question.category === "code"
+      ? "code"
+      : "general";
 
   // === ROUTING: Use centralized logic from src/lib/think/route.ts ===
   const routeStart = Date.now();
@@ -805,8 +924,10 @@ async function runWithTool(
         local_compute: true,
       });
       latency.local_compute_ms = Date.now() - localStart;
-      
-      const localResult = localStep.meta.local_compute as { solved?: boolean; result?: unknown } | undefined;
+
+      const localResult = localStep.meta.local_compute as
+        | { solved?: boolean; result?: unknown }
+        | undefined;
       if (localResult?.solved && localResult.result !== undefined) {
         const answer = String(localResult.result);
         return {
@@ -835,44 +956,61 @@ async function runWithTool(
     // STEP 2: Execute routed path
     let response: string;
     let confidence: number;
-    
+
     // Step 2a: Main reasoning/answer call
     const { system, user } = route.prompts.main;
     const llmMainStart = Date.now();
     if (verbose) {
-      response = await askWithStreaming(llm, user, system, `[${route.tier}] ${route.path}`);
+      response = await askWithStreaming(
+        llm,
+        user,
+        system,
+        `[${route.tier}] ${route.path}`
+      );
     } else {
       response = await llm.ask(user, { system, temperature: 0.1 });
     }
     latency.llm_main_ms = Date.now() - llmMainStart;
     totalTokens += estimateTokens(user + response);
     confidence = route.hasVerification ? 0.8 : 0.9;
-    
+
     // Step 2b: Spot-check verification (if path includes it)
     // NOTE: We use spot-check for confidence adjustment only, NOT for answer replacement.
     // Replacing response with "NO, the correct answer is..." led to extraction bugs
     // (e.g., extracting "2" from "2^(n+1)" in medium_math_007)
-    if (route.hasVerification && route.prompts.spotCheck) {
-      const expectedAnswers = Array.isArray(question.expected_answer) 
-        ? question.expected_answer 
+    // Skip for open-ended questions (no expected answer to verify against)
+    if (route.hasVerification && route.prompts.spotCheck && question.expected_answer !== null) {
+      const expectedAnswers: string[] = Array.isArray(question.expected_answer)
+        ? question.expected_answer
         : [question.expected_answer];
       const proposedAnswer = extractAnswer(response, expectedAnswers);
-      
-      const spotPrompt = buildSpotCheckPrompt(route.prompts.spotCheck.userTemplate, {
-        question: question.question,
-        proposedAnswer,
-      });
-      
+
+      const spotPrompt = buildSpotCheckPrompt(
+        route.prompts.spotCheck.userTemplate,
+        {
+          question: question.question,
+          proposedAnswer,
+        }
+      );
+
       const llmVerifyStart = Date.now();
       let spotCheck: string;
       if (verbose) {
-        spotCheck = await askWithStreaming(llm, spotPrompt, route.prompts.spotCheck.system, `[${route.tier}] Spot-check`);
+        spotCheck = await askWithStreaming(
+          llm,
+          spotPrompt,
+          route.prompts.spotCheck.system,
+          `[${route.tier}] Spot-check`
+        );
       } else {
-        spotCheck = await llm.ask(spotPrompt, { system: route.prompts.spotCheck.system, temperature: 0 });
+        spotCheck = await llm.ask(spotPrompt, {
+          system: route.prompts.spotCheck.system,
+          temperature: 0,
+        });
       }
       latency.llm_verify_ms = Date.now() - llmVerifyStart;
       totalTokens += estimateTokens(spotPrompt + spotCheck);
-      
+
       // Spot-check adjusts confidence only - don't replace response with rejection text
       const isCorrect = parseSpotCheckResponse(spotCheck);
       confidence = isCorrect ? 0.9 : 0.7;
@@ -896,8 +1034,16 @@ async function runWithTool(
       trackCompression(stepResult.meta);
     }
 
-    const expectedAnswers = Array.isArray(question.expected_answer) ? question.expected_answer : [question.expected_answer];
-    const answer = extractAnswer(response, expectedAnswers);
+    // For open-ended questions, skip answer extraction - just use full response
+    const isOpenEnded = question.expected_answer === null;
+    let answer: string;
+    if (isOpenEnded) {
+      answer = response;
+    } else {
+      const expected = question.expected_answer as string | string[];
+      const expectedAnswers = Array.isArray(expected) ? expected : [expected];
+      answer = extractAnswer(response, expectedAnswers);
+    }
 
     return {
       answer,
@@ -909,15 +1055,19 @@ async function runWithTool(
       risk_flags: [],
       method: "llm",
       compression: buildCompression(),
-      risk_level: route.tier === "Low" ? "low" : route.tier === "Moderate" ? "medium" : "high",
+      risk_level:
+        route.tier === "Low"
+          ? "low"
+          : route.tier === "Moderate"
+          ? "medium"
+          : "high",
       final_confidence: confidence,
       complexity_tier: route.tier,
       complexity_path: route.path,
-      raw_response: response,
-      response_length: response.length,
+      raw_response: stripThinkingTags(response),
+      response_length: stripThinkingTags(response).length,
       latency_breakdown: latency,
     };
-
   } finally {
     await mcp.clearSession(sessionId);
   }
@@ -929,7 +1079,7 @@ async function runWithTool(
 
 export async function runBenchmark(
   questions: Question[],
-  options: { 
+  options: {
     llmConfig?: Partial<LLMConfig>;
     runBaseline?: boolean;
     runTool?: boolean;
@@ -942,21 +1092,21 @@ export async function runBenchmark(
     onProgress?: (completed: number, total: number, result: RunResult) => void;
   } = {}
 ): Promise<BenchmarkResults> {
-  const { 
-    runBaseline: doBaseline = true, 
-    runTool: doTool = true, 
-    useLocalCompute = true, 
-    compressionLevel = "auto", 
+  const {
+    runBaseline: doBaseline = true,
+    runTool: doTool = true,
+    useLocalCompute = true,
+    compressionLevel = "auto",
     quiet = false,
     verbose = false,
     skipVerify = false,
     concurrency = 1,
-    onProgress 
+    onProgress,
   } = options;
-  
+
   const log = quiet ? () => {} : console.log.bind(console);
   const llm = new LLMClient(options.llmConfig);
-  
+
   let mcp: MCPClient | null = null;
   if (doTool) {
     mcp = new MCPClient();
@@ -967,17 +1117,31 @@ export async function runBenchmark(
   let completed = 0;
 
   // Helper to run a single question
-  const runQuestion = async (q: Question, index: number): Promise<RunResult> => {
+  const runQuestion = async (
+    q: Question,
+    index: number
+  ): Promise<RunResult> => {
     const questionNum = `[${index + 1}/${questions.length}]`;
-    
+
     // In parallel mode, use concise logging
     if (concurrency > 1) {
       log(`${questionNum} Starting: ${q.id}`);
     } else {
-      log(`\n${questionNum} ${q.difficulty}/${q.category}: ${q.question.slice(0, 50)}...`);
+      log(
+        `\n${questionNum} ${q.difficulty}/${q.category}: ${q.question.slice(
+          0,
+          50
+        )}...`
+      );
       if (verbose) {
         log(`  Question: ${q.question}`);
-        log(`  Expected: ${Array.isArray(q.expected_answer) ? q.expected_answer.join(" or ") : q.expected_answer}`);
+        log(
+          `  Expected: ${
+            Array.isArray(q.expected_answer)
+              ? q.expected_answer.join(" or ")
+              : q.expected_answer
+          }`
+        );
       }
     }
 
@@ -985,24 +1149,67 @@ export async function runBenchmark(
       question_id: q.id,
       difficulty: q.difficulty,
       category: q.category,
-      baseline: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, method: "llm" },
-      with_tool: { answer: "", correct: false, time_ms: 0, tokens_estimate: 0, steps: 0, checkpoints: 0, risk_flags: [], method: "llm" },
+      baseline: {
+        answer: "",
+        correct: false,
+        time_ms: 0,
+        tokens_estimate: 0,
+        method: "llm",
+      },
+      with_tool: {
+        answer: "",
+        correct: false,
+        time_ms: 0,
+        tokens_estimate: 0,
+        steps: 0,
+        checkpoints: 0,
+        risk_flags: [],
+        method: "llm",
+      },
     };
 
     if (doBaseline) {
       if (concurrency === 1) log("  Running baseline (pure LLM)...");
       result.baseline = await runBaseline(llm, q);
-      if (concurrency === 1) log(`  Baseline: ${result.baseline.correct ? "✓" : "✗"} (${result.baseline.time_ms.toFixed(2)}ms) → "${result.baseline.answer.slice(0, 30)}"`);
+      if (concurrency === 1)
+        log(
+          `  Baseline: ${
+            result.baseline.correct ? "✓" : "✗"
+          } (${result.baseline.time_ms.toFixed(
+            2
+          )}ms) → "${result.baseline.answer.slice(0, 30)}"`
+        );
     }
 
     if (doTool && mcp) {
       if (concurrency === 1 && !verbose) log("  Running with MCP tool...");
-      result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel, verbose && concurrency === 1, skipVerify);
+      result.with_tool = await runWithTool(
+        llm,
+        mcp,
+        q,
+        useLocalCompute,
+        compressionLevel,
+        verbose && concurrency === 1,
+        skipVerify
+      );
       if (concurrency === 1) {
         const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
-        const compTag = result.with_tool.compression ? ` [scratchpad: ${result.with_tool.compression.bytes_saved}B saved]` : "";
-        const pathTag = result.with_tool.complexity_path ? ` via ${result.with_tool.complexity_path}` : "";
-        log(`  Result: ${result.with_tool.correct ? "✓" : "✗"} (${result.with_tool.time_ms.toFixed(0)}ms)${pathTag}${methodTag}${compTag} → "${result.with_tool.answer.slice(0, 40)}"`);
+        const compTag = result.with_tool.compression
+          ? ` [scratchpad: ${result.with_tool.compression.bytes_saved}B saved]`
+          : "";
+        const pathTag = result.with_tool.complexity_path
+          ? ` via ${result.with_tool.complexity_path}`
+          : "";
+        log(
+          `  Result: ${
+            result.with_tool.correct ? "✓" : "✗"
+          } (${result.with_tool.time_ms.toFixed(
+            0
+          )}ms)${pathTag}${methodTag}${compTag} → "${result.with_tool.answer.slice(
+            0,
+            40
+          )}"`
+        );
       }
     }
 
@@ -1010,7 +1217,13 @@ export async function runBenchmark(
     if (concurrency > 1) {
       const toolMark = result.with_tool.correct ? "✓" : "✗";
       const baseMark = result.baseline.correct ? "✓" : "✗";
-      log(`${questionNum} Done: ${q.id} | base=${baseMark} tool=${toolMark} | ${result.with_tool.time_ms.toFixed(0)}ms`);
+      log(
+        `${questionNum} Done: ${
+          q.id
+        } | base=${baseMark} tool=${toolMark} | ${result.with_tool.time_ms.toFixed(
+          0
+        )}ms`
+      );
     }
 
     completed++;
@@ -1021,8 +1234,10 @@ export async function runBenchmark(
   try {
     if (concurrency > 1) {
       // Parallel execution with batching
-      log(`\nRunning ${questions.length} questions with concurrency=${concurrency}...`);
-      
+      log(
+        `\nRunning ${questions.length} questions with concurrency=${concurrency}...`
+      );
+
       for (let i = 0; i < questions.length; i += concurrency) {
         const batch = questions.slice(i, i + concurrency);
         const batchResults = await Promise.all(
@@ -1069,38 +1284,50 @@ function calculatePercentile(sorted: number[], p: number): number {
 
 function calculateStdDev(values: number[], mean: number): number {
   if (values.length === 0) return 0;
-  const squaredDiffs = values.map(v => (v - mean) ** 2);
+  const squaredDiffs = values.map((v) => (v - mean) ** 2);
   return Math.sqrt(squaredDiffs.reduce((a, b) => a + b, 0) / values.length);
 }
 
-function calculateWilsonInterval(successes: number, total: number, z = 1.96): { lower: number; upper: number } {
+function calculateWilsonInterval(
+  successes: number,
+  total: number,
+  z = 1.96
+): { lower: number; upper: number } {
   if (total === 0) return { lower: 0, upper: 0 };
   const p = successes / total;
-  const denominator = 1 + z * z / total;
-  const center = p + z * z / (2 * total);
-  const spread = z * Math.sqrt((p * (1 - p) + z * z / (4 * total)) / total);
+  const denominator = 1 + (z * z) / total;
+  const center = p + (z * z) / (2 * total);
+  const spread = z * Math.sqrt((p * (1 - p) + (z * z) / (4 * total)) / total);
   return {
     lower: Math.max(0, (center - spread) / denominator),
     upper: Math.min(1, (center + spread) / denominator),
   };
 }
 
-function calculateMcNemarTest(b: number, c: number): { chi2: number; p_value: number } {
+function calculateMcNemarTest(
+  b: number,
+  c: number
+): { chi2: number; p_value: number } {
   if (b + c === 0) return { chi2: 0, p_value: 1 };
-  const chi2 = ((Math.abs(b - c) - 1) ** 2) / (b + c);
+  const chi2 = (Math.abs(b - c) - 1) ** 2 / (b + c);
   const p_value = Math.exp(-chi2 / 2);
   return { chi2, p_value };
 }
 
-function calculateCohenKappa(both_correct: number, both_wrong: number, only_a: number, only_b: number): number {
+function calculateCohenKappa(
+  both_correct: number,
+  both_wrong: number,
+  only_a: number,
+  only_b: number
+): number {
   const total = both_correct + both_wrong + only_a + only_b;
   if (total === 0) return 0;
-  
+
   const po = (both_correct + both_wrong) / total;
   const pa = (both_correct + only_a) / total;
   const pb = (both_correct + only_b) / total;
   const pe = pa * pb + (1 - pa) * (1 - pb);
-  
+
   if (pe === 1) return 1;
   return (po - pe) / (1 - pe);
 }
@@ -1114,36 +1341,44 @@ function calculateEnhancedMetrics(
   field: "baseline" | "with_tool"
 ): EnhancedMetrics {
   const total = results.length;
-  const correct = results.filter(r => r[field].correct).length;
-  
-  const times = results.map(r => r[field].time_ms);
+  const correct = results.filter((r) => r[field].correct).length;
+
+  const times = results.map((r) => r[field].time_ms);
   const sortedTimes = [...times].sort((a, b) => a - b);
   const avgTime = times.reduce((a, b) => a + b, 0) / total;
-  
-  const tokens = results.map(r => r[field].tokens_estimate);
+
+  const tokens = results.map((r) => r[field].tokens_estimate);
   const totalTokens = tokens.reduce((a, b) => a + b, 0);
-  const correctResults = results.filter(r => r[field].correct);
-  const tokensForCorrect = correctResults.reduce((sum, r) => sum + r[field].tokens_estimate, 0);
-  
-  const lengths = results.map(r => r[field].response_length || r[field].answer.length);
+  const correctResults = results.filter((r) => r[field].correct);
+  const tokensForCorrect = correctResults.reduce(
+    (sum, r) => sum + r[field].tokens_estimate,
+    0
+  );
+
+  const lengths = results.map(
+    (r) => r[field].response_length || r[field].answer.length
+  );
   const sortedLengths = [...lengths].sort((a, b) => a - b);
-  const numericAnswers = results.filter(r => /^-?\d+(\.\d+)?$/.test(r[field].answer.trim())).length;
-  
+  const numericAnswers = results.filter((r) =>
+    /^-?\d+(\.\d+)?$/.test(r[field].answer.trim())
+  ).length;
+
   const byDifficulty: Record<string, number> = {};
   const byCat: Record<string, number> = {};
-  
-  for (const diff of [...new Set(results.map(r => r.difficulty))]) {
-    const subset = results.filter(r => r.difficulty === diff);
-    byDifficulty[diff] = subset.filter(r => r[field].correct).length / subset.length;
+
+  for (const diff of [...new Set(results.map((r) => r.difficulty))]) {
+    const subset = results.filter((r) => r.difficulty === diff);
+    byDifficulty[diff] =
+      subset.filter((r) => r[field].correct).length / subset.length;
   }
-  
-  for (const cat of [...new Set(results.map(r => r.category))]) {
-    const subset = results.filter(r => r.category === cat);
-    byCat[cat] = subset.filter(r => r[field].correct).length / subset.length;
+
+  for (const cat of [...new Set(results.map((r) => r.category))]) {
+    const subset = results.filter((r) => r.category === cat);
+    byCat[cat] = subset.filter((r) => r[field].correct).length / subset.length;
   }
-  
+
   const ci = calculateWilsonInterval(correct, total);
-  
+
   const metrics: EnhancedMetrics = {
     accuracy: {
       overall: correct / total,
@@ -1179,64 +1414,79 @@ function calculateEnhancedMetrics(
     responses: {
       avg_length: lengths.reduce((a, b) => a + b, 0) / total,
       median_length: calculatePercentile(sortedLengths, 50),
-      empty_count: results.filter(r => r[field].answer.trim() === "").length,
+      empty_count: results.filter((r) => r[field].answer.trim() === "").length,
       numeric_answer_rate: numericAnswers / total,
     },
   };
-  
+
   // Tool-specific metrics
   if (field === "with_tool") {
-    const steps = results.map(r => r.with_tool.steps);
+    const steps = results.map((r) => r.with_tool.steps);
     const totalSteps = steps.reduce((a, b) => a + b, 0);
     const stepDist: Record<number, number> = {};
     for (const s of steps) {
       stepDist[s] = (stepDist[s] || 0) + 1;
     }
-    
-    const stepsForCorrect = correctResults.reduce((sum, r) => sum + r.with_tool.steps, 0);
-    
+
+    const stepsForCorrect = correctResults.reduce(
+      (sum, r) => sum + r.with_tool.steps,
+      0
+    );
+
     metrics.steps = {
       total: totalSteps,
       avg_per_question: totalSteps / total,
       avg_per_correct: correct > 0 ? stepsForCorrect / correct : 0,
       distribution: stepDist,
     };
-    
+
     // Risk flags analysis
-    const allFlags = results.flatMap(r => r.with_tool.risk_flags);
+    const allFlags = results.flatMap((r) => r.with_tool.risk_flags);
     const flagCounts: Record<string, number> = {};
     for (const f of allFlags) {
       flagCounts[f] = (flagCounts[f] || 0) + 1;
     }
-    
-    const flaggedResults = results.filter(r => r.with_tool.risk_flags.length > 0);
-    const unflaggedResults = results.filter(r => r.with_tool.risk_flags.length === 0);
-    
+
+    const flaggedResults = results.filter(
+      (r) => r.with_tool.risk_flags.length > 0
+    );
+    const unflaggedResults = results.filter(
+      (r) => r.with_tool.risk_flags.length === 0
+    );
+
     metrics.risks = {
       total_flags: allFlags.length,
       by_type: flagCounts,
-      flagged_accuracy: flaggedResults.length > 0 
-        ? flaggedResults.filter(r => r.with_tool.correct).length / flaggedResults.length 
-        : 0,
-      unflagged_accuracy: unflaggedResults.length > 0
-        ? unflaggedResults.filter(r => r.with_tool.correct).length / unflaggedResults.length
-        : 0,
+      flagged_accuracy:
+        flaggedResults.length > 0
+          ? flaggedResults.filter((r) => r.with_tool.correct).length /
+            flaggedResults.length
+          : 0,
+      unflagged_accuracy:
+        unflaggedResults.length > 0
+          ? unflaggedResults.filter((r) => r.with_tool.correct).length /
+            unflaggedResults.length
+          : 0,
     };
-    
+
     // Confidence calibration
-    const resultsWithConf = results.filter(r => r.with_tool.final_confidence !== undefined);
+    const resultsWithConf = results.filter(
+      (r) => r.with_tool.final_confidence !== undefined
+    );
     if (resultsWithConf.length > 0) {
-      const byRiskLevel: Record<string, { count: number; accuracy: number }> = {};
+      const byRiskLevel: Record<string, { count: number; accuracy: number }> =
+        {};
       for (const level of ["low", "medium", "high"]) {
-        const subset = results.filter(r => r.with_tool.risk_level === level);
+        const subset = results.filter((r) => r.with_tool.risk_level === level);
         if (subset.length > 0) {
           byRiskLevel[level] = {
             count: subset.length,
-            accuracy: subset.filter(r => r.with_tool.correct).length / subset.length,
+            accuracy:
+              subset.filter((r) => r.with_tool.correct).length / subset.length,
           };
         }
       }
-      
+
       const buckets = [
         { min: 0.0, max: 0.2, label: "0.0-0.2" },
         { min: 0.2, max: 0.4, label: "0.2-0.4" },
@@ -1244,7 +1494,7 @@ function calculateEnhancedMetrics(
         { min: 0.6, max: 0.8, label: "0.6-0.8" },
         { min: 0.8, max: 1.0, label: "0.8-1.0" },
       ];
-      
+
       const byConfidenceBucket: Array<{
         range: string;
         count: number;
@@ -1252,21 +1502,25 @@ function calculateEnhancedMetrics(
         expected_accuracy: number;
         calibration_error: number;
       }> = [];
-      
+
       let totalCalibrationError = 0;
       let totalWithConf = 0;
-      
+
       for (const bucket of buckets) {
-        const subset = resultsWithConf.filter(r => {
+        const subset = resultsWithConf.filter((r) => {
           const conf = r.with_tool.final_confidence!;
-          return conf >= bucket.min && (bucket.max === 1.0 ? conf <= bucket.max : conf < bucket.max);
+          return (
+            conf >= bucket.min &&
+            (bucket.max === 1.0 ? conf <= bucket.max : conf < bucket.max)
+          );
         });
-        
+
         if (subset.length > 0) {
-          const accuracy = subset.filter(r => r.with_tool.correct).length / subset.length;
+          const accuracy =
+            subset.filter((r) => r.with_tool.correct).length / subset.length;
           const expected = (bucket.min + bucket.max) / 2;
           const error = Math.abs(accuracy - expected);
-          
+
           byConfidenceBucket.push({
             range: bucket.label,
             count: subset.length,
@@ -1274,14 +1528,15 @@ function calculateEnhancedMetrics(
             expected_accuracy: expected,
             calibration_error: error,
           });
-          
+
           totalCalibrationError += error * subset.length;
           totalWithConf += subset.length;
         }
       }
-      
-      const meanCalibrationError = totalWithConf > 0 ? totalCalibrationError / totalWithConf : 0;
-      
+
+      const meanCalibrationError =
+        totalWithConf > 0 ? totalCalibrationError / totalWithConf : 0;
+
       metrics.calibration = {
         by_risk_level: byRiskLevel,
         by_confidence_bucket: byConfidenceBucket,
@@ -1290,29 +1545,43 @@ function calculateEnhancedMetrics(
       };
     }
   }
-  
+
   return metrics;
 }
 
 function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
   const total = results.length;
-  
+
   const baseline = calculateEnhancedMetrics(results, "baseline");
   const withTool = calculateEnhancedMetrics(results, "with_tool");
-  
-  const bothCorrect = results.filter(r => r.baseline.correct && r.with_tool.correct).length;
-  const bothWrong = results.filter(r => !r.baseline.correct && !r.with_tool.correct).length;
-  const onlyBaselineCorrect = results.filter(r => r.baseline.correct && !r.with_tool.correct).length;
-  const onlyToolCorrect = results.filter(r => !r.baseline.correct && r.with_tool.correct).length;
-  
+
+  const bothCorrect = results.filter(
+    (r) => r.baseline.correct && r.with_tool.correct
+  ).length;
+  const bothWrong = results.filter(
+    (r) => !r.baseline.correct && !r.with_tool.correct
+  ).length;
+  const onlyBaselineCorrect = results.filter(
+    (r) => r.baseline.correct && !r.with_tool.correct
+  ).length;
+  const onlyToolCorrect = results.filter(
+    (r) => !r.baseline.correct && r.with_tool.correct
+  ).length;
+
   const mcnemar = calculateMcNemarTest(onlyBaselineCorrect, onlyToolCorrect);
-  const kappa = calculateCohenKappa(bothCorrect, bothWrong, onlyBaselineCorrect, onlyToolCorrect);
-  
+  const kappa = calculateCohenKappa(
+    bothCorrect,
+    bothWrong,
+    onlyBaselineCorrect,
+    onlyToolCorrect
+  );
+
   const accuracyDelta = withTool.accuracy.overall - baseline.accuracy.overall;
-  const accuracyLift = baseline.accuracy.overall > 0 
-    ? (accuracyDelta / baseline.accuracy.overall) * 100 
-    : 0;
-  
+  const accuracyLift =
+    baseline.accuracy.overall > 0
+      ? (accuracyDelta / baseline.accuracy.overall) * 100
+      : 0;
+
   baseline.comparison = withTool.comparison = {
     accuracy_delta: accuracyDelta,
     accuracy_lift_percent: accuracyLift,
@@ -1322,92 +1591,119 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     agreement_rate: (bothCorrect + bothWrong) / total,
     cohen_kappa: kappa,
   };
-  
+
   const byDifficulty: BenchmarkResults["summary"]["by_difficulty"] = {};
-  for (const diff of [...new Set(results.map(r => r.difficulty))]) {
-    const subset = results.filter(r => r.difficulty === diff);
-    const baseAcc = subset.filter(r => r.baseline.correct).length / subset.length;
-    const toolAcc = subset.filter(r => r.with_tool.correct).length / subset.length;
+  for (const diff of [...new Set(results.map((r) => r.difficulty))]) {
+    const subset = results.filter((r) => r.difficulty === diff);
+    const baseAcc =
+      subset.filter((r) => r.baseline.correct).length / subset.length;
+    const toolAcc =
+      subset.filter((r) => r.with_tool.correct).length / subset.length;
     byDifficulty[diff] = {
       baseline_accuracy: baseAcc,
       tool_accuracy: toolAcc,
       delta: toolAcc - baseAcc,
       count: subset.length,
-      baseline_avg_time: subset.reduce((s, r) => s + r.baseline.time_ms, 0) / subset.length,
-      tool_avg_time: subset.reduce((s, r) => s + r.with_tool.time_ms, 0) / subset.length,
+      baseline_avg_time:
+        subset.reduce((s, r) => s + r.baseline.time_ms, 0) / subset.length,
+      tool_avg_time:
+        subset.reduce((s, r) => s + r.with_tool.time_ms, 0) / subset.length,
     };
   }
-  
+
   const byCategory: BenchmarkResults["summary"]["by_category"] = {};
-  for (const cat of [...new Set(results.map(r => r.category))]) {
-    const subset = results.filter(r => r.category === cat);
-    const baseAcc = subset.filter(r => r.baseline.correct).length / subset.length;
-    const toolAcc = subset.filter(r => r.with_tool.correct).length / subset.length;
+  for (const cat of [...new Set(results.map((r) => r.category))]) {
+    const subset = results.filter((r) => r.category === cat);
+    const baseAcc =
+      subset.filter((r) => r.baseline.correct).length / subset.length;
+    const toolAcc =
+      subset.filter((r) => r.with_tool.correct).length / subset.length;
     byCategory[cat] = {
       baseline_accuracy: baseAcc,
       tool_accuracy: toolAcc,
       delta: toolAcc - baseAcc,
       count: subset.length,
-      baseline_avg_time: subset.reduce((s, r) => s + r.baseline.time_ms, 0) / subset.length,
-      tool_avg_time: subset.reduce((s, r) => s + r.with_tool.time_ms, 0) / subset.length,
+      baseline_avg_time:
+        subset.reduce((s, r) => s + r.baseline.time_ms, 0) / subset.length,
+      tool_avg_time:
+        subset.reduce((s, r) => s + r.with_tool.time_ms, 0) / subset.length,
     };
   }
-  
+
   // Compression stats
   let compression: BenchmarkResults["summary"]["compression"] | undefined;
-  const compressedResults = results.filter(r => r.with_tool.compression);
+  const compressedResults = results.filter((r) => r.with_tool.compression);
   if (compressedResults.length > 0) {
-    const totalBytesSaved = compressedResults.reduce((s, r) => s + (r.with_tool.compression?.bytes_saved || 0), 0);
+    const totalBytesSaved = compressedResults.reduce(
+      (s, r) => s + (r.with_tool.compression?.bytes_saved || 0),
+      0
+    );
     compression = {
       total_bytes_saved: totalBytesSaved,
       steps_compressed: compressedResults.length,
-      avg_bytes_per_step: Math.round(totalBytesSaved / compressedResults.length),
+      avg_bytes_per_step: Math.round(
+        totalBytesSaved / compressedResults.length
+      ),
       compression_rate: compressedResults.length / total,
     };
   }
-  
+
   // Complexity routing stats
   type ComplexityStats = { count: number; correct: number; total_time: number };
   const byTier: Record<string, ComplexityStats> = {};
   const byPath: Record<string, ComplexityStats> = {};
-  
+
   for (const r of results) {
     const tier = r.with_tool.complexity_tier || "Unknown";
     const path = r.with_tool.complexity_path || "unknown";
-    
+
     if (!byTier[tier]) byTier[tier] = { count: 0, correct: 0, total_time: 0 };
     byTier[tier].count++;
     if (r.with_tool.correct) byTier[tier].correct++;
     byTier[tier].total_time += r.with_tool.time_ms;
-    
+
     if (!byPath[path]) byPath[path] = { count: 0, correct: 0, total_time: 0 };
     byPath[path].count++;
     if (r.with_tool.correct) byPath[path].correct++;
     byPath[path].total_time += r.with_tool.time_ms;
   }
-  
+
   const complexityStats: BenchmarkResults["summary"]["complexity"] = {
     by_tier: Object.fromEntries(
-      Object.entries(byTier).map(([k, v]) => [k, {
-        count: v.count,
-        accuracy: v.count > 0 ? v.correct / v.count : 0,
-        avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
-      }])
+      Object.entries(byTier).map(([k, v]) => [
+        k,
+        {
+          count: v.count,
+          accuracy: v.count > 0 ? v.correct / v.count : 0,
+          avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
+        },
+      ])
     ),
     by_path: Object.fromEntries(
-      Object.entries(byPath).map(([k, v]) => [k, {
-        count: v.count,
-        accuracy: v.count > 0 ? v.correct / v.count : 0,
-        avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
-      }])
+      Object.entries(byPath).map(([k, v]) => [
+        k,
+        {
+          count: v.count,
+          accuracy: v.count > 0 ? v.correct / v.count : 0,
+          avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
+        },
+      ])
     ),
   };
-  
+
   // Latency breakdown stats
-  const resultsWithLatency = results.filter(r => r.with_tool.latency_breakdown);
+  const resultsWithLatency = results.filter(
+    (r) => r.with_tool.latency_breakdown
+  );
   let latencyBreakdown: BenchmarkResults["summary"]["latency_breakdown"];
   if (resultsWithLatency.length > 0) {
-    const sumLatency = { routing: 0, local_compute: 0, llm_main: 0, llm_verify: 0, mcp_overhead: 0 };
+    const sumLatency = {
+      routing: 0,
+      local_compute: 0,
+      llm_main: 0,
+      llm_verify: 0,
+      mcp_overhead: 0,
+    };
     for (const r of resultsWithLatency) {
       const lb = r.with_tool.latency_breakdown!;
       sumLatency.routing += lb.routing_ms;
@@ -1418,30 +1714,40 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     }
     const n = resultsWithLatency.length;
     const totalLlm = sumLatency.llm_main + sumLatency.llm_verify;
-    const totalAll = sumLatency.routing + sumLatency.local_compute + totalLlm + sumLatency.mcp_overhead;
-    
+    const totalAll =
+      sumLatency.routing +
+      sumLatency.local_compute +
+      totalLlm +
+      sumLatency.mcp_overhead;
+
     latencyBreakdown = {
-      avg_routing_ms: Math.round(sumLatency.routing / n * 100) / 100,
-      avg_local_compute_ms: Math.round(sumLatency.local_compute / n * 100) / 100,
+      avg_routing_ms: Math.round((sumLatency.routing / n) * 100) / 100,
+      avg_local_compute_ms:
+        Math.round((sumLatency.local_compute / n) * 100) / 100,
       avg_llm_main_ms: Math.round(sumLatency.llm_main / n),
       avg_llm_verify_ms: Math.round(sumLatency.llm_verify / n),
       avg_mcp_overhead_ms: Math.round(sumLatency.mcp_overhead / n),
-      llm_percentage: totalAll > 0 ? Math.round((totalLlm / totalAll) * 1000) / 10 : 0,
+      llm_percentage:
+        totalAll > 0 ? Math.round((totalLlm / totalAll) * 1000) / 10 : 0,
     };
   }
-  
+
   const baselineTotalTime = baseline.timing.total_ms;
   const toolTotalTime = withTool.timing.total_ms;
-  const baselineCorrect = results.filter(r => r.baseline.correct).length;
-  const toolCorrect = results.filter(r => r.with_tool.correct).length;
-  
-  const timeOverhead = baseline.timing.avg_ms > 0 ? withTool.timing.avg_ms / baseline.timing.avg_ms : 1;
-  const tokenOverhead = baseline.tokens.avg_per_question > 0 
-    ? withTool.tokens.avg_per_question / baseline.tokens.avg_per_question 
-    : 1;
-  
+  const baselineCorrect = results.filter((r) => r.baseline.correct).length;
+  const toolCorrect = results.filter((r) => r.with_tool.correct).length;
+
+  const timeOverhead =
+    baseline.timing.avg_ms > 0
+      ? withTool.timing.avg_ms / baseline.timing.avg_ms
+      : 1;
+  const tokenOverhead =
+    baseline.tokens.avg_per_question > 0
+      ? withTool.tokens.avg_per_question / baseline.tokens.avg_per_question
+      : 1;
+
   const breakEvenAccuracy = baseline.accuracy.overall * timeOverhead;
-  
+
   return {
     baseline,
     with_tool: withTool,
@@ -1471,14 +1777,20 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     complexity: complexityStats,
     latency_breakdown: latencyBreakdown,
     efficiency: {
-      baseline_correct_per_second: baselineTotalTime > 0 ? (baselineCorrect / baselineTotalTime) * 1000 : 0,
-      tool_correct_per_second: toolTotalTime > 0 ? (toolCorrect / toolTotalTime) * 1000 : 0,
-      baseline_correct_per_1k_tokens: baseline.tokens.total > 0 
-        ? (baselineCorrect / baseline.tokens.total) * 1000 
-        : 0,
-      tool_correct_per_1k_tokens: withTool.tokens.total > 0 
-        ? (toolCorrect / withTool.tokens.total) * 1000 
-        : 0,
+      baseline_correct_per_second:
+        baselineTotalTime > 0
+          ? (baselineCorrect / baselineTotalTime) * 1000
+          : 0,
+      tool_correct_per_second:
+        toolTotalTime > 0 ? (toolCorrect / toolTotalTime) * 1000 : 0,
+      baseline_correct_per_1k_tokens:
+        baseline.tokens.total > 0
+          ? (baselineCorrect / baseline.tokens.total) * 1000
+          : 0,
+      tool_correct_per_1k_tokens:
+        withTool.tokens.total > 0
+          ? (toolCorrect / withTool.tokens.total) * 1000
+          : 0,
       break_even_accuracy: Math.min(1, breakEvenAccuracy),
     },
   };
@@ -1490,7 +1802,7 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
 
 if (import.meta.main) {
   const args = process.argv.slice(2);
-  
+
   if (args.includes("--help") || args.includes("-h")) {
     console.log(`
 Benchmark Runner for Verifiable Thinking MCP
@@ -1524,17 +1836,18 @@ Environment Variables:
     `);
     process.exit(0);
   }
-  
-  const questionsFile = args.find(a => !a.startsWith("--")) || "questions.json";
-  const limitArg = args.find(a => a.startsWith("--limit="));
+
+  const questionsFile =
+    args.find((a) => !a.startsWith("--")) || "questions.json";
+  const limitArg = args.find((a) => a.startsWith("--limit="));
   const limit = limitArg ? parseInt(limitArg.split("=")[1], 10) : undefined;
-  const filterArg = args.find(a => a.startsWith("--filter="));
+  const filterArg = args.find((a) => a.startsWith("--filter="));
   const filter = filterArg ? filterArg.split("=")[1] : undefined;
-  const idsArg = args.find(a => a.startsWith("--ids="));
+  const idsArg = args.find((a) => a.startsWith("--ids="));
   const ids = idsArg ? idsArg.split("=")[1].split(",") : undefined;
-  const categoryArg = args.find(a => a.startsWith("--category="));
+  const categoryArg = args.find((a) => a.startsWith("--category="));
   const category = categoryArg ? categoryArg.split("=")[1] : undefined;
-  const difficultyArg = args.find(a => a.startsWith("--difficulty="));
+  const difficultyArg = args.find((a) => a.startsWith("--difficulty="));
   const difficulty = difficultyArg ? difficultyArg.split("=")[1] : undefined;
   const baselineOnly = args.includes("--baseline-only");
   const toolOnly = args.includes("--tool-only");
@@ -1544,50 +1857,57 @@ Environment Variables:
   const jsonOutput = args.includes("--json-output");
   const dryRun = args.includes("--dry-run");
   const fullRun = args.includes("--full");
-  const thresholdArg = args.find(a => a.startsWith("--threshold="));
-  const threshold = thresholdArg ? parseFloat(thresholdArg.split("=")[1]) : undefined;
+  const thresholdArg = args.find((a) => a.startsWith("--threshold="));
+  const threshold = thresholdArg
+    ? parseFloat(thresholdArg.split("=")[1])
+    : undefined;
   const ciReport = args.includes("--ci-report");
   const verboseMode = args.includes("--verbose") || args.includes("-v");
   const noVerify = args.includes("--no-verify");
-  const parallelArg = args.find(a => a.startsWith("--parallel="));
+  const parallelArg = args.find((a) => a.startsWith("--parallel="));
   const parallel = parallelArg ? parseInt(parallelArg.split("=")[1], 10) : 1;
-  const compressionLevel: "none" | "auto" | "aggressive" = 
-    noCompression ? "none" : aggressive ? "aggressive" : "auto";
+  const compressionLevel: "none" | "auto" | "aggressive" = noCompression
+    ? "none"
+    : aggressive
+    ? "aggressive"
+    : "auto";
 
   const log = jsonOutput ? () => {} : console.log.bind(console);
 
   log(`Loading questions from ${questionsFile}...`);
   const file = Bun.file(new URL(questionsFile, import.meta.url).pathname);
-  
-  if (!await file.exists()) {
+
+  if (!(await file.exists())) {
     if (jsonOutput) {
-      console.log(JSON.stringify({ error: `Questions file not found: ${questionsFile}` }));
+      console.log(
+        JSON.stringify({ error: `Questions file not found: ${questionsFile}` })
+      );
     } else {
       console.error(`Questions file not found: ${questionsFile}`);
     }
     process.exit(1);
   }
 
-  const data = await file.json() as QuestionSet;
+  const data = (await file.json()) as QuestionSet;
   let questions = data.questions;
-  
+
   if (ids) {
-    questions = questions.filter(q => ids.includes(q.id));
+    questions = questions.filter((q) => ids.includes(q.id));
   }
-  
+
   if (filter) {
     const regex = new RegExp(filter, "i");
-    questions = questions.filter(q => regex.test(q.id));
+    questions = questions.filter((q) => regex.test(q.id));
   }
-  
+
   if (category) {
-    questions = questions.filter(q => q.category === category);
+    questions = questions.filter((q) => q.category === category);
   }
-  
+
   if (difficulty) {
-    questions = questions.filter(q => q.difficulty === difficulty);
+    questions = questions.filter((q) => q.difficulty === difficulty);
   }
-  
+
   // --full overrides --limit
   if (!fullRun && limit) {
     questions = questions.slice(0, limit);
@@ -1595,28 +1915,36 @@ Environment Variables:
 
   log(`Loaded ${questions.length} questions (${data.description})`);
   log(`Model: ${process.env.LLM_MODEL || "unknown"}`);
-  log(`Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}${noLocal ? " (no local compute)" : ""}${parallel > 1 ? ` | parallel=${parallel}` : ""}`);
+  log(
+    `Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}${
+      noLocal ? " (no local compute)" : ""
+    }${parallel > 1 ? ` | parallel=${parallel}` : ""}`
+  );
   log(`Compression: ${compressionLevel}${fullRun ? " | Full run" : ""}`);
   if (threshold !== undefined) {
-    log(`Threshold: ${(threshold * 100).toFixed(0)}% (will fail if tool accuracy below)`);
+    log(
+      `Threshold: ${(threshold * 100).toFixed(
+        0
+      )}% (will fail if tool accuracy below)`
+    );
   }
 
   if (dryRun) {
     log("\n--- DRY RUN MODE ---");
     log("Validating setup...\n");
-    
-    const categories = new Set(questions.map(q => q.category));
-    const difficulties = new Set(questions.map(q => q.difficulty));
+
+    const categories = new Set(questions.map((q) => q.category));
+    const difficulties = new Set(questions.map((q) => q.difficulty));
     log(`✓ Questions: ${questions.length} loaded`);
     log(`  Categories: ${Array.from(categories).join(", ")}`);
     log(`  Difficulties: ${Array.from(difficulties).join(", ")}`);
-    
+
     log("\nValidating MCP server...");
     try {
       const mcp = new MCPClient();
       await mcp.init();
       log("✓ MCP server: initialized successfully");
-      
+
       const testResult = await mcp.think({
         thought: "Dry run validation test",
         step: 1,
@@ -1628,7 +1956,7 @@ Environment Variables:
       });
       log(`✓ MCP think tool: responsive`);
       log(`  Sample response length: ${testResult.raw.length} chars`);
-      
+
       await mcp.close();
       log("✓ MCP server: closed cleanly");
     } catch (err) {
@@ -1636,7 +1964,7 @@ Environment Variables:
       console.error(`✗ MCP server error: ${errMsg}`);
       process.exit(1);
     }
-    
+
     log("\n--- DRY RUN COMPLETE ---");
     log("Setup is valid. Ready to run benchmarks.");
     log(`Run without --dry-run to execute ${questions.length} questions.`);
@@ -1676,34 +2004,78 @@ Environment Variables:
   log("=".repeat(70));
   log(`\nModel: ${results.model}`);
   log(`Questions: ${results.total_questions}`);
-  
-  const baselineCorrect = Math.round(results.summary.baseline.accuracy.overall * results.total_questions);
-  const toolCorrect = Math.round(results.summary.with_tool.accuracy.overall * results.total_questions);
-  
+
+  const baselineCorrect = Math.round(
+    results.summary.baseline.accuracy.overall * results.total_questions
+  );
+  const toolCorrect = Math.round(
+    results.summary.with_tool.accuracy.overall * results.total_questions
+  );
+
   log(`\n${"─".repeat(70)}`);
   log("ACCURACY");
   log("─".repeat(70));
-  log(`  Baseline:  ${(results.summary.baseline.accuracy.overall * 100).toFixed(1)}% (${baselineCorrect}/${results.total_questions})`);
-  log(`  With Tool: ${(results.summary.with_tool.accuracy.overall * 100).toFixed(1)}% (${toolCorrect}/${results.total_questions})`);
-  log(`  Delta:     ${results.summary.comparison.accuracy_delta >= 0 ? "+" : ""}${(results.summary.comparison.accuracy_delta * 100).toFixed(1)}% (${results.summary.comparison.accuracy_lift_percent >= 0 ? "+" : ""}${results.summary.comparison.accuracy_lift_percent.toFixed(1)}% lift)`);
-  log(`  95% CI:    [${(results.summary.with_tool.accuracy.confidence_interval_95.lower * 100).toFixed(1)}%, ${(results.summary.with_tool.accuracy.confidence_interval_95.upper * 100).toFixed(1)}%]`);
+  log(
+    `  Baseline:  ${(results.summary.baseline.accuracy.overall * 100).toFixed(
+      1
+    )}% (${baselineCorrect}/${results.total_questions})`
+  );
+  log(
+    `  With Tool: ${(results.summary.with_tool.accuracy.overall * 100).toFixed(
+      1
+    )}% (${toolCorrect}/${results.total_questions})`
+  );
+  log(
+    `  Delta:     ${
+      results.summary.comparison.accuracy_delta >= 0 ? "+" : ""
+    }${(results.summary.comparison.accuracy_delta * 100).toFixed(1)}% (${
+      results.summary.comparison.accuracy_lift_percent >= 0 ? "+" : ""
+    }${results.summary.comparison.accuracy_lift_percent.toFixed(1)}% lift)`
+  );
+  log(
+    `  95% CI:    [${(
+      results.summary.with_tool.accuracy.confidence_interval_95.lower * 100
+    ).toFixed(1)}%, ${(
+      results.summary.with_tool.accuracy.confidence_interval_95.upper * 100
+    ).toFixed(1)}%]`
+  );
 
   log(`\n${"─".repeat(70)}`);
   log("COMPARISON (2x2 Contingency)");
   log("─".repeat(70));
   log(`  Both Correct:         ${results.summary.comparison.both_correct}`);
   log(`  Both Wrong:           ${results.summary.comparison.both_wrong}`);
-  log(`  Only Baseline Correct: ${results.summary.comparison.only_baseline_correct} (broken)`);
-  log(`  Only Tool Correct:     ${results.summary.comparison.only_tool_correct} (fixed)`);
-  log(`  Net Improvement:       ${results.summary.comparison.net_improvement >= 0 ? "+" : ""}${results.summary.comparison.net_improvement}`);
-  log(`  Agreement Rate:        ${(results.summary.comparison.agreement_rate * 100).toFixed(1)}%`);
+  log(
+    `  Only Baseline Correct: ${results.summary.comparison.only_baseline_correct} (broken)`
+  );
+  log(
+    `  Only Tool Correct:     ${results.summary.comparison.only_tool_correct} (fixed)`
+  );
+  log(
+    `  Net Improvement:       ${
+      results.summary.comparison.net_improvement >= 0 ? "+" : ""
+    }${results.summary.comparison.net_improvement}`
+  );
+  log(
+    `  Agreement Rate:        ${(
+      results.summary.comparison.agreement_rate * 100
+    ).toFixed(1)}%`
+  );
 
   log(`\n${"─".repeat(70)}`);
   log("BY DIFFICULTY");
   log("─".repeat(70));
   for (const [diff, stats] of Object.entries(results.summary.by_difficulty)) {
     const arrow = stats.delta >= 0 ? "↑" : "↓";
-    log(`  ${diff.padEnd(12)} ${(stats.baseline_accuracy * 100).toFixed(0).padStart(3)}% → ${(stats.tool_accuracy * 100).toFixed(0).padStart(3)}% (${stats.delta >= 0 ? "+" : ""}${(stats.delta * 100).toFixed(0)}% ${arrow}) n=${stats.count}`);
+    log(
+      `  ${diff.padEnd(12)} ${(stats.baseline_accuracy * 100)
+        .toFixed(0)
+        .padStart(3)}% → ${(stats.tool_accuracy * 100)
+        .toFixed(0)
+        .padStart(3)}% (${stats.delta >= 0 ? "+" : ""}${(
+        stats.delta * 100
+      ).toFixed(0)}% ${arrow}) n=${stats.count}`
+    );
   }
 
   log(`\n${"─".repeat(70)}`);
@@ -1711,23 +2083,57 @@ Environment Variables:
   log("─".repeat(70));
   for (const [cat, stats] of Object.entries(results.summary.by_category)) {
     const arrow = stats.delta >= 0 ? "↑" : "↓";
-    log(`  ${cat.padEnd(12)} ${(stats.baseline_accuracy * 100).toFixed(0).padStart(3)}% → ${(stats.tool_accuracy * 100).toFixed(0).padStart(3)}% (${stats.delta >= 0 ? "+" : ""}${(stats.delta * 100).toFixed(0)}% ${arrow}) n=${stats.count}`);
+    log(
+      `  ${cat.padEnd(12)} ${(stats.baseline_accuracy * 100)
+        .toFixed(0)
+        .padStart(3)}% → ${(stats.tool_accuracy * 100)
+        .toFixed(0)
+        .padStart(3)}% (${stats.delta >= 0 ? "+" : ""}${(
+        stats.delta * 100
+      ).toFixed(0)}% ${arrow}) n=${stats.count}`
+    );
   }
 
   log(`\n${"─".repeat(70)}`);
   log("TIMING");
   log("─".repeat(70));
   log(`  Baseline:`);
-  log(`    Avg: ${results.summary.baseline.timing.avg_ms.toFixed(0)}ms | Median: ${results.summary.baseline.timing.median_ms.toFixed(0)}ms | P95: ${results.summary.baseline.timing.p95_ms.toFixed(0)}ms`);
+  log(
+    `    Avg: ${results.summary.baseline.timing.avg_ms.toFixed(
+      0
+    )}ms | Median: ${results.summary.baseline.timing.median_ms.toFixed(
+      0
+    )}ms | P95: ${results.summary.baseline.timing.p95_ms.toFixed(0)}ms`
+  );
   log(`  With Tool:`);
-  log(`    Avg: ${results.summary.with_tool.timing.avg_ms.toFixed(0)}ms | Median: ${results.summary.with_tool.timing.median_ms.toFixed(0)}ms | P95: ${results.summary.with_tool.timing.p95_ms.toFixed(0)}ms`);
-  log(`  Overhead: ${results.summary.comparison.time_overhead_factor.toFixed(1)}x`);
+  log(
+    `    Avg: ${results.summary.with_tool.timing.avg_ms.toFixed(
+      0
+    )}ms | Median: ${results.summary.with_tool.timing.median_ms.toFixed(
+      0
+    )}ms | P95: ${results.summary.with_tool.timing.p95_ms.toFixed(0)}ms`
+  );
+  log(
+    `  Overhead: ${results.summary.comparison.time_overhead_factor.toFixed(1)}x`
+  );
 
   log(`\n${"─".repeat(70)}`);
   log("TOKENS");
   log("─".repeat(70));
-  log(`  Baseline:  ${results.summary.baseline.tokens.total} total | ${results.summary.baseline.tokens.avg_per_question.toFixed(0)}/question`);
-  log(`  With Tool: ${results.summary.with_tool.tokens.total} total | ${results.summary.with_tool.tokens.avg_per_question.toFixed(0)}/question`);
+  log(
+    `  Baseline:  ${
+      results.summary.baseline.tokens.total
+    } total | ${results.summary.baseline.tokens.avg_per_question.toFixed(
+      0
+    )}/question`
+  );
+  log(
+    `  With Tool: ${
+      results.summary.with_tool.tokens.total
+    } total | ${results.summary.with_tool.tokens.avg_per_question.toFixed(
+      0
+    )}/question`
+  );
 
   // Complexity routing stats
   if (results.summary.complexity) {
@@ -1735,11 +2141,17 @@ Environment Variables:
     log(`\n${"─".repeat(70)}`);
     log("COMPLEXITY ROUTING");
     log("─".repeat(70));
-    
+
     log("  By Path:");
-    for (const [path, data] of Object.entries(cx.by_path).sort((a, b) => b[1].count - a[1].count)) {
+    for (const [path, data] of Object.entries(cx.by_path).sort(
+      (a, b) => b[1].count - a[1].count
+    )) {
       const pct = (data.accuracy * 100).toFixed(0);
-      log(`    ${path.padEnd(10)} ${String(data.count).padStart(3)} questions | ${pct}% accuracy | ${data.avg_time_ms}ms avg`);
+      log(
+        `    ${path.padEnd(10)} ${String(data.count).padStart(
+          3
+        )} questions | ${pct}% accuracy | ${data.avg_time_ms}ms avg`
+      );
     }
   }
 
@@ -1758,25 +2170,33 @@ Environment Variables:
   }
 
   // Question-level analysis
-  const broken = results.results.filter(r => r.baseline.correct && !r.with_tool.correct);
-  const fixed = results.results.filter(r => !r.baseline.correct && r.with_tool.correct);
-  
+  const broken = results.results.filter(
+    (r) => r.baseline.correct && !r.with_tool.correct
+  );
+  const fixed = results.results.filter(
+    (r) => !r.baseline.correct && r.with_tool.correct
+  );
+
   if (broken.length > 0 || fixed.length > 0) {
     log(`\n${"─".repeat(70)}`);
     log("QUESTION-LEVEL ANALYSIS");
     log("─".repeat(70));
-    
+
     if (broken.length > 0) {
       log(`\n  ⚠️ BROKEN (${broken.length}):`);
       for (const r of broken) {
-        log(`    • ${r.question_id}: "${r.baseline.answer}" ✓ → "${r.with_tool.answer}" ✗`);
+        log(
+          `    • ${r.question_id}: "${r.baseline.answer}" ✓ → "${r.with_tool.answer}" ✗`
+        );
       }
     }
-    
+
     if (fixed.length > 0) {
       log(`\n  ✅ FIXED (${fixed.length}):`);
       for (const r of fixed) {
-        log(`    • ${r.question_id}: "${r.baseline.answer}" ✗ → "${r.with_tool.answer}" ✓`);
+        log(
+          `    • ${r.question_id}: "${r.baseline.answer}" ✗ → "${r.with_tool.answer}" ✓`
+        );
       }
     }
   }
@@ -1795,21 +2215,37 @@ Environment Variables:
     const baseAcc = results.summary.baseline.accuracy.overall;
     const delta = results.summary.comparison.accuracy_delta;
     const ci = results.summary.with_tool.accuracy.confidence_interval_95;
-    
+
     console.log("\n--- CI REPORT ---");
     console.log(`Questions: ${results.total_questions}`);
     console.log(`Baseline:  ${(baseAcc * 100).toFixed(1)}%`);
     console.log(`Tool:      ${(toolAcc * 100).toFixed(1)}%`);
-    console.log(`Delta:     ${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%`);
-    console.log(`95% CI:    [${(ci.lower * 100).toFixed(1)}%, ${(ci.upper * 100).toFixed(1)}%]`);
+    console.log(
+      `Delta:     ${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}%`
+    );
+    console.log(
+      `95% CI:    [${(ci.lower * 100).toFixed(1)}%, ${(ci.upper * 100).toFixed(
+        1
+      )}%]`
+    );
     console.log(`Fixed:     ${results.summary.comparison.only_tool_correct}`);
-    console.log(`Broken:    ${results.summary.comparison.only_baseline_correct}`);
-    
+    console.log(
+      `Broken:    ${results.summary.comparison.only_baseline_correct}`
+    );
+
     if (threshold !== undefined) {
       if (toolAcc >= threshold) {
-        console.log(`\n✓ PASS: Tool accuracy ${(toolAcc * 100).toFixed(1)}% >= threshold ${(threshold * 100).toFixed(0)}%`);
+        console.log(
+          `\n✓ PASS: Tool accuracy ${(toolAcc * 100).toFixed(
+            1
+          )}% >= threshold ${(threshold * 100).toFixed(0)}%`
+        );
       } else {
-        console.log(`\n✗ FAIL: Tool accuracy ${(toolAcc * 100).toFixed(1)}% < threshold ${(threshold * 100).toFixed(0)}%`);
+        console.log(
+          `\n✗ FAIL: Tool accuracy ${(toolAcc * 100).toFixed(
+            1
+          )}% < threshold ${(threshold * 100).toFixed(0)}%`
+        );
         process.exit(1);
       }
     }
@@ -1819,7 +2255,11 @@ Environment Variables:
   if (threshold !== undefined && !ciReport) {
     const toolAcc = results.summary.with_tool.accuracy.overall;
     if (toolAcc < threshold) {
-      console.error(`\n✗ THRESHOLD FAILED: Tool accuracy ${(toolAcc * 100).toFixed(1)}% < ${(threshold * 100).toFixed(0)}%`);
+      console.error(
+        `\n✗ THRESHOLD FAILED: Tool accuracy ${(toolAcc * 100).toFixed(
+          1
+        )}% < ${(threshold * 100).toFixed(0)}%`
+      );
       process.exit(1);
     }
   }

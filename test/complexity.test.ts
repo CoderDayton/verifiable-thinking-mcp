@@ -464,7 +464,7 @@ describe("routeQuestion", () => {
       const route = routeQuestion("Prove P ≠ NP rigorously with a formal proof.");
       expect(route.hasVerification).toBe(true);
       expect(route.prompts.spotCheck).toBeDefined();
-      expect(route.prompts.spotCheck?.userTemplate).toContain("CORRECT");
+      expect(route.prompts.spotCheck?.userTemplate).toContain("Correct?");
     });
 
     test("skipVerify=true forces reasoning path even for Very Hard", () => {

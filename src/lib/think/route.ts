@@ -5,13 +5,21 @@
  * The runner should just call routeQuestion() and follow the instructions.
  */
 
+import { detectMetaDomain } from "../domain.ts";
 import {
   assessPromptComplexity,
   type ComplexityResult,
   getTrivialPrompt,
   isTrivialQuestion,
 } from "./complexity.ts";
-import { getSystemPrompt, getUserPrompt, getVerbosity, type Verbosity } from "./prompts.ts";
+import {
+  formatDomainExplanatoryPrompt,
+  getDomainSystemPrompt,
+  getSystemPrompt,
+  getUserPrompt,
+  getVerbosity,
+  type Verbosity,
+} from "./prompts.ts";
 
 // =============================================================================
 // EXPLANATORY QUESTION DETECTION
@@ -83,6 +91,8 @@ export interface RouteResult {
   hasVerification: boolean;
   /** Whether this is an explanatory question (skip verification) */
   isExplanatory: boolean;
+  /** Detected meta-domain (coding, scientific, educational, financial, general) */
+  metaDomain: string;
   /** Prompts to use for each step */
   prompts: RoutePrompts;
 }
@@ -120,13 +130,22 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
   const explanatory = isExplanatoryQuestion(question);
   const verbosity = getVerbosity(question);
   const tier = complexity.tier;
+  const metaDomain = detectMetaDomain(question);
 
   // Explanatory questions skip verification (it hurts quality for open-ended responses)
   const effectiveSkipVerify = skipVerify || explanatory;
 
-  // Helper to get the right prompt type for explanatory vs non-explanatory
-  const promptType = explanatory ? "explanatory" : "reasoning";
-  const basePromptType = explanatory ? "explanatory" : "baseline";
+  // Domain-aware prompts for explanatory questions (token-light steering)
+  const getExplanatoryPrompts = () => ({
+    system: getDomainSystemPrompt(metaDomain),
+    user: formatDomainExplanatoryPrompt(question, metaDomain),
+  });
+
+  // Standard prompts for non-explanatory questions
+  const getStandardPrompts = (type: "baseline" | "reasoning") => ({
+    system: getSystemPrompt(type, verbosity),
+    user: getUserPrompt(type, question, verbosity),
+  });
 
   // === TRIVIAL: Direct answer, minimal prompt ===
   if (trivial) {
@@ -139,6 +158,7 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       steps: 1,
       hasVerification: false,
       isExplanatory: explanatory,
+      metaDomain,
       prompts: {
         main: trivialPrompt,
       },
@@ -155,16 +175,14 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       steps: 1,
       hasVerification: false,
       isExplanatory: explanatory,
+      metaDomain,
       prompts: {
-        main: {
-          system: getSystemPrompt(basePromptType, verbosity),
-          user: getUserPrompt(basePromptType, question, verbosity),
-        },
+        main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("baseline"),
       },
     };
   }
 
-  // === MODERATE: Reasoning prompt (step-by-step) or explanatory (concise) ===
+  // === MODERATE: Reasoning prompt (step-by-step) or explanatory (domain-aware) ===
   if (tier === "Moderate") {
     return {
       path: "reasoning",
@@ -174,11 +192,9 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       steps: 1,
       hasVerification: false,
       isExplanatory: explanatory,
+      metaDomain,
       prompts: {
-        main: {
-          system: getSystemPrompt(promptType, verbosity),
-          user: getUserPrompt(promptType, question, verbosity),
-        },
+        main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning"),
       },
     };
   }
@@ -193,10 +209,6 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
     if (hasTrapPattern && !effectiveSkipVerify) {
       // Trap-detected High tier questions get verification
       // These are counterintuitive problems where LLM might fall into naive trap
-      const mainPrompt = {
-        system: getSystemPrompt("reasoning", verbosity),
-        user: getUserPrompt("reasoning", question, verbosity),
-      };
       return {
         path: "reasoning+spot",
         tier,
@@ -204,14 +216,13 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
         verbosity,
         steps: 2,
         hasVerification: true,
-        isExplanatory: explanatory,
+        isExplanatory: false, // Trap patterns with verification are never explanatory
+        metaDomain,
         prompts: {
-          main: mainPrompt,
+          main: getStandardPrompts("reasoning"),
           spotCheck: {
-            system:
-              "You verify answers concisely. Be especially careful with counterintuitive problems.",
-            userTemplate:
-              "Q: {{question}}\nProposed answer: {{answer}}\nIs this CORRECT? YES or NO, then 1 sentence why.",
+            system: "Verify. Watch for traps.",
+            userTemplate: "Q: {{question}}\nA: {{answer}}\nCorrect? YES/NO + why.",
           },
         },
       };
@@ -226,21 +237,16 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       steps: 1,
       hasVerification: false,
       isExplanatory: explanatory,
+      metaDomain,
       prompts: {
-        main: {
-          system: getSystemPrompt(promptType, verbosity),
-          user: getUserPrompt(promptType, question, verbosity),
-        },
+        main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning"),
       },
     };
   }
 
   // === VERY HARD / ALMOST IMPOSSIBLE ===
   // These benefit most from spot-check verification (unless explanatory)
-  const mainPrompt = {
-    system: getSystemPrompt(promptType, verbosity),
-    user: getUserPrompt(promptType, question, verbosity),
-  };
+  const mainPrompt = explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning");
 
   if (effectiveSkipVerify) {
     // Skip verification - single reasoning call
@@ -252,6 +258,7 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       steps: 1,
       hasVerification: false,
       isExplanatory: explanatory,
+      metaDomain,
       prompts: { main: mainPrompt },
     };
   }
@@ -264,13 +271,13 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
     verbosity,
     steps: 2,
     hasVerification: true,
-    isExplanatory: explanatory,
+    isExplanatory: false, // Verification path is never explanatory
+    metaDomain,
     prompts: {
       main: mainPrompt,
       spotCheck: {
-        system: "You verify answers concisely.",
-        userTemplate:
-          "Q: {{question}}\nProposed answer: {{answer}}\nIs this CORRECT? YES or NO, then 1 sentence why.",
+        system: "Verify concisely.",
+        userTemplate: "Q: {{question}}\nA: {{answer}}\nCorrect? YES/NO + why.",
       },
     },
   };

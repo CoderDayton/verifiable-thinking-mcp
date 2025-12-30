@@ -45,6 +45,41 @@ export const SYSTEM_EXPLANATORY =
   "You are a clear, concise explainer. Explain concepts directly without unnecessary preamble or repetition. Use plain text.";
 
 // =============================================================================
+// DOMAIN-SPECIFIC PROMPTS (token-light steering)
+// =============================================================================
+
+/**
+ * Domain-specific system prompts - concise but effective steering.
+ * ~15-25 tokens each, optimized for explanation quality.
+ */
+export const DOMAIN_PROMPTS: Record<string, { system: string; style: string }> = {
+  // Technical domains
+  coding: {
+    system: "Explain clearly. Use code examples when they clarify.",
+    style: "technical",
+  },
+  scientific: {
+    system: "Explain precisely. Use correct terminology and show derivations.",
+    style: "precise",
+  },
+  // Educational - clarity focus
+  educational: {
+    system: "Explain clearly. Start with intuition, then details.",
+    style: "pedagogical",
+  },
+  // Financial - accuracy focus
+  financial: {
+    system: "Explain clearly. State assumptions and show calculations.",
+    style: "careful",
+  },
+  // General - balanced
+  general: {
+    system: "Explain clearly and directly.",
+    style: "balanced",
+  },
+};
+
+// =============================================================================
 // SYSTEM PROMPTS - TERSE (~50% fewer tokens)
 // =============================================================================
 
@@ -106,6 +141,21 @@ export function formatExplanatoryPrompt(question: string): string {
   return `${question}
 
 Be direct and concise. Focus on the key concepts without unnecessary repetition or filler phrases.`;
+}
+
+/**
+ * Format a domain-aware explanatory prompt (token-light)
+ * Just the question - system prompt provides domain steering
+ */
+export function formatDomainExplanatoryPrompt(question: string, _metaDomain: string): string {
+  return question;
+}
+
+/**
+ * Get domain-aware system prompt for explanatory questions
+ */
+export function getDomainSystemPrompt(metaDomain: string): string {
+  return DOMAIN_PROMPTS[metaDomain]?.system ?? "Direct answer.";
 }
 
 // =============================================================================

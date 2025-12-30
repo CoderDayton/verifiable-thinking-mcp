@@ -379,7 +379,12 @@
       "category": "logic",
       "difficulty": "hard",
       "question": "Cards show: A, K, 4, 7. Rule: \"If vowel on one side, even number on other.\" Which cards must you flip to test the rule? Answer the LETTERS/NUMBERS separated by comma.",
-      "expected_answer": ["A,7", "A, 7", "7,A", "7, A"],
+      "expected_answer": [
+        "A,7",
+        "A, 7",
+        "7,A",
+        "7, A"
+      ],
       "verification_type": "exact"
     },
     {
@@ -828,7 +833,7 @@
       "category": "reasoning",
       "difficulty": "medium",
       "question": "Explain why the Monty Hall problem has a counterintuitive solution. What makes people initially guess wrong?",
-      "expected_answer": "switching gives 2/3 probability",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -836,7 +841,7 @@
       "category": "math",
       "difficulty": "medium",
       "question": "Explain step by step how to find the derivative of f(x) = x³ + 2x² - 5x + 3. Show your work.",
-      "expected_answer": "3x² + 4x - 5",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -844,7 +849,7 @@
       "category": "logic",
       "difficulty": "medium",
       "question": "Explain the difference between modus ponens and modus tollens. Give an example of each.",
-      "expected_answer": "modus ponens",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -852,7 +857,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "A company's revenue grew 20% but profits fell 10%. What are three possible explanations for this? Analyze each.",
-      "expected_answer": "costs",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -860,7 +865,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "Compare and contrast correlation vs causation. Why is this distinction important in scientific research? Give examples.",
-      "expected_answer": "causation",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -868,7 +873,7 @@
       "category": "code",
       "difficulty": "medium",
       "question": "Write a function to check if a string is a palindrome. Explain your approach and handle edge cases.",
-      "expected_answer": "reverse",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -876,7 +881,7 @@
       "category": "code",
       "difficulty": "hard",
       "question": "Explain how a hash table works. What is collision resolution? Compare chaining vs open addressing.",
-      "expected_answer": "collision",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -884,7 +889,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "You have 8 balls, one is slightly heavier. Using a balance scale, what's the minimum number of weighings to find it? Explain your strategy.",
-      "expected_answer": "2",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -892,7 +897,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "A bat and ball cost $1.10 together. The bat costs $1 more than the ball. How much does the ball cost? Explain why many people get this wrong.",
-      "expected_answer": "0.05",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -900,7 +905,7 @@
       "category": "math",
       "difficulty": "hard",
       "question": "Prove that the square root of 2 is irrational. Show your proof step by step.",
-      "expected_answer": "contradiction",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -908,7 +913,7 @@
       "category": "reasoning",
       "difficulty": "medium",
       "question": "Explain the difference between deductive and inductive reasoning. Give an example of each and describe when each is most useful.",
-      "expected_answer": "deductive",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -916,7 +921,7 @@
       "category": "math",
       "difficulty": "medium",
       "question": "Explain what a limit is in calculus and why it's fundamental to understanding derivatives and integrals.",
-      "expected_answer": "approach",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -924,7 +929,7 @@
       "category": "code",
       "difficulty": "medium",
       "question": "Explain the difference between a stack and a queue. When would you use each data structure? Give real-world analogies.",
-      "expected_answer": "LIFO",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -932,7 +937,7 @@
       "category": "reasoning",
       "difficulty": "medium",
       "question": "Describe the trolley problem in ethics. What makes it philosophically interesting and what does it reveal about moral intuitions?",
-      "expected_answer": "utilitarian",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -940,7 +945,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "Explain Simpson's paradox with a concrete example. Why can aggregated data show the opposite trend from disaggregated data?",
-      "expected_answer": "aggregate",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -948,7 +953,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "Describe confirmation bias and explain three ways it can affect scientific research. How can researchers mitigate it?",
-      "expected_answer": "bias",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -956,7 +961,7 @@
       "category": "code",
       "difficulty": "hard",
       "question": "Compare time complexity and space complexity in algorithm analysis. When might you sacrifice one for the other? Give examples.",
-      "expected_answer": "trade",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -964,7 +969,7 @@
       "category": "code",
       "difficulty": "medium",
       "question": "Explain recursion with a simple example. What are the essential parts of a recursive function and what happens without a base case?",
-      "expected_answer": "base case",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -972,7 +977,7 @@
       "category": "code",
       "difficulty": "hard",
       "question": "Describe the difference between BFS and DFS graph traversal algorithms. When would you prefer one over the other?",
-      "expected_answer": "breadth",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -980,7 +985,7 @@
       "category": "code",
       "difficulty": "hard",
       "question": "Explain what Big O notation represents and why O(n log n) is considered efficient for sorting. Compare to O(n²).",
-      "expected_answer": "growth",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -988,7 +993,7 @@
       "category": "math",
       "difficulty": "hard",
       "question": "Explain the fundamental theorem of calculus and why it connects derivatives and integrals. What is its practical significance?",
-      "expected_answer": "antiderivative",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -996,7 +1001,7 @@
       "category": "math",
       "difficulty": "medium",
       "question": "Explain why we cannot divide by zero. Use mathematical reasoning rather than just stating it's undefined.",
-      "expected_answer": "contradiction",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -1004,7 +1009,7 @@
       "category": "reasoning",
       "difficulty": "hard",
       "question": "Explain the birthday paradox and why it surprises most people. What is the probability that two people share a birthday in a group of 23?",
-      "expected_answer": "50%",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -1012,7 +1017,7 @@
       "category": "reasoning",
       "difficulty": "medium",
       "question": "Describe the difference between necessary and sufficient conditions. Give clear examples of each.",
-      "expected_answer": "necessary",
+      "expected_answer": null,
       "verification_type": "contains"
     },
     {
@@ -1020,7 +1025,7 @@
       "category": "logic",
       "difficulty": "hard",
       "question": "Explain what a logical fallacy is and describe three common informal fallacies. Why are they persuasive despite being invalid?",
-      "expected_answer": "fallacy",
+      "expected_answer": null,
       "verification_type": "contains"
     }
   ]
