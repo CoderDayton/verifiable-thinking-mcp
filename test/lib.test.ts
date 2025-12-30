@@ -2353,7 +2353,7 @@ describe("AnswerExtraction - stripMarkdown", () => {
   });
 
   test("removes images", () => {
-    expect(stripMarkdown("Here ![alt text](image.png) is image")).toBe("Here  is image");
+    expect(stripMarkdown("Here ![alt text](image.png) is image")).toBe("Here is image");
   });
 
   test("removes blockquotes", () => {

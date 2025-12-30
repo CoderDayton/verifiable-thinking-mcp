@@ -5,21 +5,20 @@
  */
 
 /**
- * Strip thinking/reasoning tags from model responses.
- * Handles various model-specific formats:
- * - DeepSeek/Qwen: <think>...</think>
- * - Generic: <thinking>...</thinking>, <reasoning>...</reasoning>
- * - Claude: <antithink>...</antithink>
- * - Gemini: <thought>...</thought>, <thoughts>...</thoughts>
- * - Llama: <reflection>...</reflection>
- * - Mistral: <internal_monologue>...</internal_monologue>
- * - GLM: <|begin_of_box|>...<|end_of_box|> (kept - this is answer boxing)
- * - Tool tags: <tool_call>...</tool_call>, <tool_result>...</tool_result>
+ * Strip all LLM output artifacts for clean display/comparison.
+ * Handles:
+ * - Thinking/reasoning tags (DeepSeek, Claude, Gemini, Llama, Mistral)
+ * - Model-specific tokens (GLM, etc.)
+ * - Tool invocation artifacts
+ * - Markdown formatting
+ * - HTML entities
+ * - Excess whitespace
  */
-export function stripThinkingTags(text: string): string {
+export function stripLLMOutput(text: string): string {
   return (
     text
-      // Standard thinking tags
+      // === THINKING/REASONING TAGS ===
+      // Standard
       .replace(/<think>[\s\S]*?<\/think>/gi, "")
       .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
       .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
@@ -32,42 +31,39 @@ export function stripThinkingTags(text: string): string {
       .replace(/<reflection>[\s\S]*?<\/reflection>/gi, "")
       // Mistral
       .replace(/<internal_monologue>[\s\S]*?<\/internal_monologue>/gi, "")
-      // Tool invocation artifacts (not user-facing)
+
+      // === TOOL/ARTIFACT CONTAINERS ===
       .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
       .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
-      // Artifact containers
       .replace(/<ARTIFACTS>[\s\S]*?<\/ARTIFACTS>/gi, "")
       .replace(/<document_content>[\s\S]*?<\/document_content>/gi, "")
-      // Context tags (usually system/retrieval context, not answer)
       .replace(/<context>[\s\S]*?<\/context>/gi, "")
-      .trim()
-  );
-}
 
-/** Strip markdown formatting from text */
-export function stripMarkdown(text: string): string {
-  return (
-    text
-      // Code blocks (must come before inline code)
+      // === MODEL-SPECIFIC TOKENS ===
+      // GLM box tokens (answer markers)
+      .replace(/<\|begin_of_box\|>/gi, "")
+      .replace(/<\|end_of_box\|>/gi, "")
+      // Common special tokens
+      .replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/gi, "")
+      .replace(/<\|endoftext\|>/gi, "")
+      .replace(/<\|pad\|>/gi, "")
+
+      // === MARKDOWN ===
+      // Code blocks (remove entirely - not useful for answer extraction)
       .replace(/```[\s\S]*?```/g, "")
-      // Bold **text** or __text__
+      // Bold **text** or __text__ -> text
       .replace(/\*\*([^*]+)\*\*/g, "$1")
       .replace(/__([^_]+)__/g, "$1")
-      // Italic *text* or _text_
+      // Italic *text* or _text_ -> text
       .replace(/\*([^*]+)\*/g, "$1")
       .replace(/_([^_]+)_/g, "$1")
-      // Inline code `text`
+      // Inline code `text` -> text
       .replace(/`([^`]+)`/g, "$1")
-      // LaTeX boxed: $\boxed{...}$ or \boxed{...}
-      .replace(/\$\\boxed\{([^}]+)\}\$/g, "$1")
-      .replace(/\\boxed\{([^}]+)\}/g, "$1")
-      // Other common LaTeX: $...$ inline math
-      .replace(/\$([^$]+)\$/g, "$1")
-      // Headings: # ## ### etc
+      // Headings: # ## ### etc -> remove marker
       .replace(/^#{1,6}\s*/gm, "")
-      // Strikethrough ~~text~~
+      // Strikethrough ~~text~~ -> text
       .replace(/~~([^~]+)~~/g, "$1")
-      // Images ![alt](url) -> remove (MUST come before links)
+      // Images ![alt](url) -> remove
       .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
       // Links [text](url) -> text
       .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
@@ -75,12 +71,44 @@ export function stripMarkdown(text: string): string {
       .replace(/^>\s*/gm, "")
       // Horizontal rules
       .replace(/^[-*_]{3,}\s*$/gm, "")
-      // List markers - * + or numbered
+      // List markers - * + or numbered -> remove marker
       .replace(/^[\s]*[-*+]\s+/gm, "")
       .replace(/^[\s]*\d+\.\s+/gm, "")
+
+      // === LATEX (extract content) ===
+      // $\boxed{...}$ or \boxed{...} -> content
+      .replace(/\$\\boxed\{([^}]+)\}\$/g, "$1")
+      .replace(/\\boxed\{([^}]+)\}/g, "$1")
+      // $...$ inline math -> content (simple cases)
+      .replace(/\$([^$]+)\$/g, "$1")
+
+      // === HTML ===
+      // Common entities
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      // Generic HTML tags (careful - only simple cases)
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/?(?:p|div|span|b|i|u|em|strong)>/gi, "")
+
+      // === WHITESPACE CLEANUP ===
+      // Multiple newlines -> double newline
+      .replace(/\n{3,}/g, "\n\n")
+      // Trailing whitespace per line
+      .replace(/[ \t]+$/gm, "")
+      // Multiple spaces -> single
+      .replace(/[ \t]{2,}/g, " ")
+
       .trim()
   );
 }
+
+// Keep legacy function names as aliases for backward compatibility
+export const stripThinkingTags = stripLLMOutput;
+export const stripMarkdown = stripLLMOutput;
 
 /** Clean number: remove commas, trim whitespace */
 function cleanNumber(s: string): string {
@@ -180,9 +208,8 @@ function extractLastMeaningfulWord(text: string): string {
  * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
  */
 export function extractAnswer(response: string, expectedAnswers?: string[]): string {
-  // Strip thinking tags first (e.g., <think>...</think>)
-  const withoutThinking = stripThinkingTags(response);
-  const cleaned = stripMarkdown(withoutThinking);
+  // Strip all LLM artifacts (thinking tags, markdown, model tokens, etc.)
+  const cleaned = stripLLMOutput(response);
 
   // Priority 0: If we know expected answers, look for them directly in the response
   // This is the most reliable method when we have ground truth
