@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Cognitive trap questions - tests structural trap detection across 10 categories",
+  "description": "Cognitive trap questions - tests structural trap detection across 13 categories",
   "questions": [
     {
       "id": "trap_additive_001",
@@ -308,6 +308,68 @@
       "tolerance": 5,
       "trap_type": "birthday_paradox",
       "intuitive_wrong_answer": "6"
+    },
+    {
+      "id": "trap_conjunction_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Linda is 31, single, outspoken, very bright. She majored in philosophy and was deeply concerned with discrimination and social justice. Which is MORE LIKELY? (A) Linda is a bank teller. (B) Linda is a bank teller and active in the feminist movement. Answer A or B.",
+      "expected_answer": "A",
+      "verification_type": "exact",
+      "trap_type": "conjunction_fallacy",
+      "intuitive_wrong_answer": "B"
+    },
+    {
+      "id": "trap_conjunction_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Tom is athletic, 6'2\", and competitive. Which is more probable? (A) Tom plays sports. (B) Tom plays basketball and is on a professional team. Answer A or B.",
+      "expected_answer": "A",
+      "verification_type": "exact",
+      "trap_type": "conjunction_fallacy",
+      "intuitive_wrong_answer": "B"
+    },
+    {
+      "id": "trap_conjunction_003",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A die is rolled 6 times. Which sequence is MORE LIKELY? (A) 3-1-4-1-5-9 (B) 6-6-6-6-6-6. Answer A or B or EQUAL.",
+      "expected_answer": "EQUAL",
+      "verification_type": "exact",
+      "trap_type": "representativeness",
+      "intuitive_wrong_answer": "A"
+    },
+    {
+      "id": "trap_monty_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Monty Hall: 3 doors, 1 car, 2 goats. You pick door 1. Host (who knows what's behind doors) opens door 3 showing a goat. What's the probability of winning if you SWITCH to door 2? Answer as fraction or percentage.",
+      "expected_answer": "67",
+      "verification_type": "numeric",
+      "tolerance": 5,
+      "trap_type": "monty_hall",
+      "intuitive_wrong_answer": "50"
+    },
+    {
+      "id": "trap_monty_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Monty Hall: 3 doors, 1 prize. You pick door 1. Host opens door 2 (no prize). Is SWITCHING to door 3 better, is STAYING with door 1 better, or are they EQUAL?",
+      "expected_answer": "SWITCHING",
+      "verification_type": "exact",
+      "trap_type": "monty_hall",
+      "intuitive_wrong_answer": "EQUAL"
+    },
+    {
+      "id": "trap_monty_003",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Three cards: one red on both sides, one blue on both sides, one red/blue. You pick a card randomly and see red. What's the probability (as a percentage, round to nearest whole number) the other side is also red?",
+      "expected_answer": "67",
+      "verification_type": "numeric",
+      "tolerance": 5,
+      "trap_type": "monty_hall",
+      "intuitive_wrong_answer": "50"
     }
   ]
 }

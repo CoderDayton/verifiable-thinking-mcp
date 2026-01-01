@@ -1086,18 +1086,29 @@ async function handleComplete(
         confidence: number;
       }
     | undefined;
+  let needsReconsideration = false;
+
   if (args.question && args.final_answer) {
     spotCheckResult = spotCheck(args.question, args.final_answer);
     if (!spotCheckResult.passed) {
+      needsReconsideration = true;
       await streamContent({
         type: "text",
         text:
           `\n⚠️ **Spot-check warning:** ${spotCheckResult.trapType}\n` +
           (spotCheckResult.warning ? `   ${spotCheckResult.warning}\n` : "") +
-          (spotCheckResult.hint ? `   💡 ${spotCheckResult.hint}\n` : ""),
+          (spotCheckResult.hint ? `   💡 ${spotCheckResult.hint}\n` : "") +
+          `\n🔄 **Reconsideration recommended:** Your answer may have fallen for a cognitive trap.\n` +
+          `   Call \`revise\` with target_step=${thoughts.length} to reconsider your final reasoning.\n`,
       });
     }
   }
+
+  // Determine final status - "review" if spot-check failed, otherwise "complete"
+  const finalStatus = needsReconsideration ? "review" : "complete";
+  const suggestedAction = needsReconsideration
+    ? `Potential ${spotCheckResult?.trapType} trap detected. Call revise(target_step=${thoughts.length}, reason="${spotCheckResult?.hint || "Reconsider approach"}") to fix.`
+    : "Reasoning chain finalized.";
 
   const response: ScratchpadResponse = {
     session_id: sessionId,
@@ -1107,8 +1118,8 @@ async function handleComplete(
     chain_confidence: confState.chainConfidence,
     confidence_threshold: threshold,
     steps_with_confidence: confState.stepsWithConfidence,
-    status: "complete",
-    suggested_action: "Reasoning chain finalized.",
+    status: finalStatus,
+    suggested_action: suggestedAction,
     final_summary: args.summary,
     total_steps: thoughts.length,
   };
@@ -1122,6 +1133,18 @@ async function handleComplete(
       hint: spotCheckResult.hint,
       confidence: spotCheckResult.confidence,
     };
+
+    // Add reconsideration prompt if trap detected
+    if (needsReconsideration && spotCheckResult.trapType && spotCheckResult.hint) {
+      response.reconsideration = {
+        trap_type: spotCheckResult.trapType,
+        hint: spotCheckResult.hint,
+        suggested_revise: {
+          target_step: thoughts.length,
+          reason: `Potential ${spotCheckResult.trapType} trap: ${spotCheckResult.hint}`,
+        },
+      };
+    }
   }
 
   // Add compression stats if any compression occurred
@@ -1637,18 +1660,21 @@ OPERATIONS:
 - step: Add a thought (auto-increments step number). Verification auto-enables after 3 steps.
 - navigate: View history, branches, specific step, or path
 - branch: Start alternative reasoning path (useful after verification failures)
-- revise: Correct an earlier step (useful to fix verification failures)
-- complete: Finalize reasoning chain
+- revise: Correct an earlier step (useful to fix verification failures or trap warnings)
+- complete: Finalize reasoning chain (auto spot-checks if question provided)
 - augment: Extract math expressions, compute locally, inject results
 - override: Force-commit a step that failed verification (use sparingly)
 - hint: Get progressive simplification hints for math expressions (session-stateful)
 - mistakes: Proactively check text for common algebraic errors (without needing verification to fail)
 - spot_check: Check if your answer may have fallen for a cognitive trap (bat-ball, lily pad, etc.)
 
-SPOT-CHECK (use before finalizing tricky answers):
-- Detects structural trap patterns: additive systems, exponential growth, rate problems, etc.
-- Call with operation="spot_check", question="<original question>", answer="<your answer>"
-- If warning returned, reconsider your reasoning
+SPOT-CHECK & RECONSIDERATION:
+- Detects 13 structural trap patterns: additive systems, exponential growth, rate problems, 
+  harmonic mean, independence, pigeonhole, base rate, factorial, clock overlap, 
+  conditional probability, conjunction fallacy, Monty Hall, anchoring
+- Auto-runs during complete if question + final_answer provided
+- If trap detected: status="review", reconsideration.suggested_revise guides you to fix
+- Call revise with the suggested target_step and reason to reconsider your answer
 
 AUTO-VERIFICATION:
 - Verification is AUTO-ENABLED for chains with >3 steps (errors compound)
@@ -1672,8 +1698,9 @@ CONFIDENCE TRACKING:
 WORKFLOW:
 1. Call with operation="step", verify=true for important steps
 2. If verification fails, use revise/branch/override to recover
-3. When threshold reached, call operation="complete"
-4. Use navigate to view history, branches, paths at any time`,
+3. When threshold reached, call operation="complete" with question + final_answer
+4. If status="review" (trap detected), call revise with suggested_revise params
+5. Use navigate to view history, branches, paths at any time`,
 
   parameters: ScratchpadSchema,
 

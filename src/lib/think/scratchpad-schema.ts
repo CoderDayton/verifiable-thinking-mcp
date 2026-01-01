@@ -473,4 +473,14 @@ export interface ScratchpadResponse {
     hint: string | null;
     confidence: number;
   };
+
+  // Reconsideration prompt (when spot-check fails during complete)
+  reconsideration?: {
+    trap_type: string;
+    hint: string;
+    suggested_revise: {
+      target_step: number;
+      reason: string;
+    };
+  };
 }

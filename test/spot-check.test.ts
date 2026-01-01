@@ -450,6 +450,24 @@ describe("Complete operation spot-check integration", () => {
     const checkResult = spotCheck(simpleQuestion, "4");
     expect(checkResult.passed).toBe(true);
   });
+
+  test("reconsideration data structure is correct for failed spot-check", () => {
+    const question =
+      "A bat and ball cost $1.10 total. The bat costs $1.00 more than the ball. How much does the ball cost?";
+    const wrongAnswer = "10";
+
+    const result = spotCheck(question, wrongAnswer);
+
+    // Verify we have all the data needed for reconsideration prompt
+    expect(result.passed).toBe(false);
+    expect(result.trapType).toBeTruthy();
+    expect(result.hint).toBeTruthy();
+
+    // This is what would be used for reconsideration.suggested_revise
+    const suggestedReason = `Potential ${result.trapType} trap: ${result.hint}`;
+    expect(suggestedReason).toContain("additive_system");
+    expect(suggestedReason).toContain("system");
+  });
 });
 
 // =============================================================================
