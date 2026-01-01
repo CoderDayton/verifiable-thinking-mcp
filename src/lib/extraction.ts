@@ -69,6 +69,15 @@ const RE_MULTI_NEWLINE = /\n{3,}/g;
 const RE_TRAILING_WHITESPACE = /[ \t]+$/gm;
 const RE_MULTI_SPACE = /[ \t]{2,}/g;
 
+// Word fractions (pre-compiled for performance)
+const RE_WORD_FRACTION =
+  /\b(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/gi;
+const RE_WORD_FRACTION_START =
+  /^(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/i;
+
+// Percentage pattern (captures number with %)
+const RE_PERCENTAGE = /(-?[\d,]+(?:\.\d+)?)\s*%/g;
+
 /**
  * Strip all LLM output artifacts for clean display/comparison.
  * Handles:
@@ -396,13 +405,11 @@ function extractFromPhrase(phrase: string): string | null {
   const trimmed = phrase.trim();
 
   // Priority 0: Word fractions at the start ("two-thirds", "one half", "a third")
-  const wordFracMatch = trimmed.match(
-    /^(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/i,
-  );
+  const wordFracMatch = trimmed.match(RE_WORD_FRACTION_START);
   if (wordFracMatch?.[0]) return wordFracMatch[0];
 
-  // Priority 1: Leading number (with optional comma separators, decimals, fractions)
-  const numMatch = trimmed.match(/^(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)/);
+  // Priority 1: Leading number with optional percent (75%, 3.14, 2/3)
+  const numMatch = trimmed.match(/^(-?[\d,]+(?:\.\d+)?(?:\/\d+)?%?)/);
   if (numMatch?.[1]) return cleanNumber(numMatch[1]);
 
   // Priority 2: Capitalized short answer (YES, NO, A, B, TRUE, FALSE, etc.)
@@ -442,6 +449,31 @@ function extractLastMeaningfulWord(text: string): string {
 }
 
 /**
+ * Try to match expected answers directly in the response.
+ * This is Priority 0 - the fastest path when we have ground truth.
+ * @returns The matched expected answer, or null if no match found
+ */
+function matchExpectedAnswer(cleaned: string, expectedAnswers: string[]): string | null {
+  // Try exact word boundary match first
+  for (const expected of expectedAnswers) {
+    const escapedExpected = expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`\\b${escapedExpected}\\b`, "i");
+    if (pattern.test(cleaned)) {
+      return expected;
+    }
+  }
+  // Try normalized versions (e.g., "A, 7" vs "A,7")
+  const normalizedResponse = cleaned.replace(/\s+/g, "").toLowerCase();
+  for (const expected of expectedAnswers) {
+    const normalizedExpected = expected.replace(/\s+/g, "").toLowerCase();
+    if (normalizedResponse.includes(normalizedExpected)) {
+      return expected;
+    }
+  }
+  return null;
+}
+
+/**
  * Extract answer from LLM response using priority-based pattern matching
  *
  * Priority order:
@@ -455,7 +487,8 @@ function extractLastMeaningfulWord(text: string): string {
  * 5. "Result: X"
  * 6. Last equation result "= X"
  * 7. Standalone numbers in last lines
- * 8. Last number in response
+ * 8. Last number/percentage in response
+ * 8b. Word fractions
  * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
  */
 export function extractAnswer(response: string, expectedAnswers?: string[]): string {
@@ -463,24 +496,9 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
   const cleaned = stripLLMOutput(response);
 
   // Priority 0: If we know expected answers, look for them directly in the response
-  // This is the most reliable method when we have ground truth
   if (expectedAnswers && expectedAnswers.length > 0) {
-    for (const expected of expectedAnswers) {
-      // Look for the expected answer as a standalone value (not part of another word)
-      const escapedExpected = expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const pattern = new RegExp(`\\b${escapedExpected}\\b`, "i");
-      if (pattern.test(cleaned)) {
-        return expected;
-      }
-    }
-    // Also try normalized versions (e.g., "A, 7" vs "A,7")
-    const normalizedResponse = cleaned.replace(/\s+/g, "").toLowerCase();
-    for (const expected of expectedAnswers) {
-      const normalizedExpected = expected.replace(/\s+/g, "").toLowerCase();
-      if (normalizedResponse.includes(normalizedExpected)) {
-        return expected;
-      }
-    }
+    const matched = matchExpectedAnswer(cleaned, expectedAnswers);
+    if (matched) return matched;
   }
 
   // Priority 1: LaTeX boxed (highest confidence - LLM explicitly marked answer)
@@ -562,16 +580,24 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
   // Priority 7: Look for standalone numbers (including fractions) in the last few lines
   const lines = cleaned.trim().split("\n").slice(-5);
   for (const line of lines.reverse()) {
-    // "is NUMBER" pattern (including fractions)
-    const isNumMatch = line.match(/is\s+(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)\b/i);
+    // "is NUMBER" pattern (including fractions and percentages)
+    // Note: Can't use \b after %? because % is not a word char - use lookahead instead
+    const isNumMatch = line.match(/is\s+(-?[\d,]+(?:\.\d+)?(?:\/\d+)?%?)(?=\s|$|[.,;:!?)])/i);
     if (isNumMatch?.[1]) return cleanNumber(isNumMatch[1]);
 
-    // Standalone number/fraction on a line
-    const standaloneNum = line.match(/^\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)\s*$/);
+    // Standalone number/fraction/percentage on a line
+    const standaloneNum = line.match(/^\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?%?)\s*$/);
     if (standaloneNum?.[1]) return cleanNumber(standaloneNum[1]);
   }
 
-  // Priority 8: Last number/fraction in the entire response
+  // Priority 8: Last percentage in response (check before plain numbers)
+  const percentMatches = [...cleaned.matchAll(RE_PERCENTAGE)];
+  if (percentMatches.length > 0) {
+    const lastMatch = percentMatches[percentMatches.length - 1];
+    if (lastMatch?.[1]) return `${cleanNumber(lastMatch[1])}%`;
+  }
+
+  // Priority 8a: Last number/fraction in the entire response
   const allNumbers = cleaned.match(/-?[\d,]+(?:\.\d+)?(?:\/\d+)?/g);
   if (allNumbers && allNumbers.length > 0) {
     const lastNum = allNumbers[allNumbers.length - 1];
@@ -579,10 +605,9 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
   }
 
   // Priority 8b: Word fractions ("two-thirds", "one-half", "three-quarters")
-  // Pattern: (a|one|two|...|twelve)[-\s](half|third|quarter|...)
-  const wordFractionMatch = cleaned.match(
-    /\b(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/gi,
-  );
+  // Reset lastIndex since RE_WORD_FRACTION has 'g' flag
+  RE_WORD_FRACTION.lastIndex = 0;
+  const wordFractionMatch = cleaned.match(RE_WORD_FRACTION);
   if (wordFractionMatch && wordFractionMatch.length > 0) {
     // Return last word fraction found (most likely the answer)
     return wordFractionMatch[wordFractionMatch.length - 1]!;

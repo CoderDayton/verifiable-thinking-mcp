@@ -3939,6 +3939,22 @@ describe("AnswerExtraction - extractAnswer", () => {
     test("handles mixed markdown and answer", () => {
       expect(extractAnswer("**Final Answer**: 99")).toBe("99");
     });
+
+    test("handles percentage in 'is X' pattern", () => {
+      expect(extractAnswer("The probability is 75%")).toBe("75%");
+    });
+
+    test("handles percentage in 'Answer:' pattern", () => {
+      expect(extractAnswer("Answer: 50%")).toBe("50%");
+    });
+
+    test("handles percentage as last value", () => {
+      expect(extractAnswer("Rate of 33.3% observed")).toBe("33.3%");
+    });
+
+    test("handles standalone percentage on line", () => {
+      expect(extractAnswer("The result:\n95%")).toBe("95%");
+    });
   });
 });
 
