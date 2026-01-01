@@ -194,6 +194,26 @@ export function needsSpotCheck(question: string): NeedsSpotCheckResult {
     categories.push("anchoring");
   }
 
+  // 14. SUNK COST: already invested + should continue?
+  // Structure: past investment + decision about future action
+  if (
+    /(?:already|spent|invested|paid|cost)/i.test(lower) &&
+    /(?:should|continue|keep|stop|quit|abandon|walk away)/i.test(lower)
+  ) {
+    score += 0.75;
+    categories.push("sunk_cost");
+  }
+
+  // 15. FRAMING EFFECT: same outcome with gain/loss framing
+  // Structure: presents options as "X will be saved" vs "Y will die"
+  if (
+    (/(?:save|saved|survive|lives?)/i.test(lower) || /(?:die|death|lost|killed)/i.test(lower)) &&
+    /(?:program|option|choice|treatment|plan) [ab]/i.test(lower)
+  ) {
+    score += 0.7;
+    categories.push("framing_effect");
+  }
+
   return {
     required: score >= 0.6,
     score: Math.min(1, score),
@@ -215,7 +235,11 @@ export function spotCheck(question: string, answer: string): SpotCheckResult {
   const lower = question.toLowerCase();
 
   // Text-based checks (don't require numbers in answer)
-  const textCheck = checkConjunctionFallacy(lower, answer) || checkMontyHall(lower, aNum, answer);
+  const textCheck =
+    checkConjunctionFallacy(lower, answer) ||
+    checkMontyHall(lower, aNum, answer) ||
+    checkSunkCost(lower, answer) ||
+    checkFramingEffect(lower, answer);
 
   if (textCheck) return textCheck;
 
@@ -642,6 +666,99 @@ function checkMontyHall(q: string, ans: number | null, answer: string): SpotChec
         `Switching wins 2/3 of the time. The host's reveal changes the odds.`,
         0.85,
       );
+    }
+  }
+
+  return null;
+}
+
+/**
+ * SUNK COST FALLACY: decision influenced by past investment
+ * Trap: continuing based on what was already spent, not future value
+ */
+function checkSunkCost(q: string, answer: string): SpotCheckResult | null {
+  // Detect sunk cost structure: past investment + decision about future
+  if (!/(?:already|spent|invested|paid|cost)/i.test(q)) return null;
+  if (!/(?:should|continue|keep|stop|quit|abandon|walk away|finish)/i.test(q)) return null;
+
+  const ansLower = answer.toLowerCase();
+
+  // Check if answer references past investment as justification
+  const referencesPastInvestment =
+    /(?:already spent|already invested|can't waste|too much invested|come this far|so much into)/i.test(
+      ansLower,
+    ) ||
+    // Or explicitly says "continue because of" past spending
+    /(?:continue|keep going|finish).*(?:because|since).*(?:spent|invested|paid)/i.test(ansLower);
+
+  // Also detect the common trap answers
+  const commonTrapAnswers =
+    // "Yes, continue" without proper justification
+    (/^(?:yes|continue|keep|finish)/i.test(ansLower.trim()) &&
+      !/(?:future value|expected return|profitable going forward|worth it regardless)/i.test(
+        ansLower,
+      )) ||
+    // Explicit sunk cost reasoning
+    /(?:wasted|thrown away|lost|for nothing)/i.test(ansLower);
+
+  if (referencesPastInvestment || commonTrapAnswers) {
+    return trap(
+      "sunk_cost",
+      `Potential sunk cost fallacy: past investment shouldn't influence future decisions`,
+      `Sunk costs are gone - focus on whether FUTURE benefits justify FUTURE costs. What's already spent is irrelevant.`,
+      0.8,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * FRAMING EFFECT: decision influenced by gain vs loss presentation
+ * Trap: different choice based on how options are framed
+ */
+function checkFramingEffect(q: string, answer: string): SpotCheckResult | null {
+  // Detect framing effect structure: same outcome presented differently
+  const hasFramingSignals =
+    (/(?:save|saved|survive|lives?)/i.test(q) || /(?:die|death|lost|killed)/i.test(q)) &&
+    /(?:program|option|choice|treatment|plan) [ab]/i.test(q);
+
+  if (!hasFramingSignals) return null;
+
+  const ansLower = answer.toLowerCase();
+
+  // Classic Asian Disease Problem structure:
+  // - Gain frame: "200 saved" vs "1/3 chance all saved, 2/3 none saved"
+  // - Loss frame: "400 die" vs "1/3 none die, 2/3 all die"
+  // These are mathematically equivalent!
+
+  // Check if answer shows framing bias
+  // In gain frame, people prefer certain option (A)
+  // In loss frame, people prefer risky option (B)
+
+  // Detect if question has gain framing (focus on "saved/survive")
+  const isGainFrame = /(?:save|saved|survive)/i.test(q) && !/(?:die|death|killed)/i.test(q);
+
+  // Detect if question has loss framing (focus on "die/death")
+  const isLossFrame = /(?:die|death|killed)/i.test(q) && !/(?:save|saved|survive)/i.test(q);
+
+  // If someone chooses based on framing without recognizing equivalence
+  if (isGainFrame || isLossFrame) {
+    // Check if answer acknowledges framing effect or just picks
+    const acknowledgesFraming =
+      /(?:equivalent|same|framing|mathematically|expected value|doesn't matter)/i.test(ansLower);
+
+    if (!acknowledgesFraming) {
+      // If they just picked without considering the math
+      const pickedOption = /\b[ab]\b/i.test(ansLower);
+      if (pickedOption) {
+        return trap(
+          "framing_effect",
+          `Potential framing effect: check if options are mathematically equivalent`,
+          `The way choices are presented (lives saved vs lives lost) often triggers different intuitive responses to identical expected outcomes. Calculate expected values to decide rationally.`,
+          0.7,
+        );
+      }
     }
   }
 

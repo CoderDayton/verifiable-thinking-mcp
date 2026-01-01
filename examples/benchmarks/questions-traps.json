@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "Cognitive trap questions - tests structural trap detection across 13 categories",
+  "description": "Cognitive trap questions - tests structural trap detection across 15 categories",
   "questions": [
     {
       "id": "trap_additive_001",
@@ -370,6 +370,56 @@
       "tolerance": 5,
       "trap_type": "monty_hall",
       "intuitive_wrong_answer": "50"
+    },
+    {
+      "id": "trap_sunk_cost_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You've invested $50,000 and 2 years into a business that's clearly failing. A consultant says you need $20,000 more to maybe save it (30% chance). Should you invest the additional $20,000? Answer YES or NO, and explain why the past investment is or isn't relevant.",
+      "expected_answer": "NO",
+      "verification_type": "exact",
+      "trap_type": "sunk_cost",
+      "intuitive_wrong_answer": "YES"
+    },
+    {
+      "id": "trap_sunk_cost_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You bought a $100 concert ticket but feel sick on the day. Going would make you feel worse. Should you go to the concert? Answer YES or NO.",
+      "expected_answer": "NO",
+      "verification_type": "exact",
+      "trap_type": "sunk_cost",
+      "intuitive_wrong_answer": "YES"
+    },
+    {
+      "id": "trap_sunk_cost_003",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "You're 2 hours into a bad movie. Should you continue watching for the remaining hour just because you already spent 2 hours? Answer CONTINUE or STOP.",
+      "expected_answer": "STOP",
+      "verification_type": "exact",
+      "trap_type": "sunk_cost",
+      "intuitive_wrong_answer": "CONTINUE"
+    },
+    {
+      "id": "trap_framing_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Disease outbreak: 600 people affected. Option A: 200 people will be saved. Option B: 1/3 chance all 600 saved, 2/3 chance no one saved. These two options have SAME or DIFFERENT expected outcomes?",
+      "expected_answer": "SAME",
+      "verification_type": "exact",
+      "trap_type": "framing_effect",
+      "intuitive_wrong_answer": "DIFFERENT"
+    },
+    {
+      "id": "trap_framing_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A treatment has 90% survival rate. Another treatment has 10% mortality rate. Which statement is mathematically better? Answer FIRST, SECOND, or EQUIVALENT.",
+      "expected_answer": "EQUIVALENT",
+      "verification_type": "exact",
+      "trap_type": "framing_effect",
+      "intuitive_wrong_answer": "FIRST"
     }
   ]
 }

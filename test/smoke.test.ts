@@ -2196,3 +2196,342 @@ describe("Agent Mode Integration Tests", () => {
     expect(mistakesResult.mistakes_found).toBeGreaterThan(0);
   });
 });
+
+// ============================================================================
+// SPOT-CHECK AND RECONSIDERATION LOOP INTEGRATION TESTS
+// ============================================================================
+
+describe("Spot-Check and Reconsideration Loop Tests", () => {
+  let client: MCPClient;
+
+  beforeAll(async () => {
+    client = new MCPClient();
+    await Bun.sleep(500);
+    await client.request("initialize", {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "spot-check-test", version: "1.0.0" },
+    });
+  });
+
+  afterAll(async () => {
+    await client.close();
+  });
+
+  test("scratchpad: spot_check operation detects bat and ball trap", async () => {
+    const response = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "spot_check",
+        question:
+          "A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost in cents?",
+        answer: "10",
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    const text = (response.result as { content: Array<{ text: string }> }).content[0]?.text || "";
+    const data = extractJson(text);
+
+    expect(data?.operation).toBe("spot_check");
+    expect(data?.spot_check_result).toBeDefined();
+    const result = data?.spot_check_result as {
+      passed: boolean;
+      trap_type: string | null;
+      warning: string | null;
+      hint: string | null;
+      confidence: number;
+    };
+    expect(result.passed).toBe(false);
+    expect(result.trap_type).toBe("additive_system");
+    expect(result.warning).toBeTruthy();
+    expect(result.hint).toBeTruthy();
+    expect(result.confidence).toBeGreaterThan(0.5);
+  });
+
+  test("scratchpad: spot_check operation passes correct answer", async () => {
+    const response = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "spot_check",
+        question:
+          "A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost in cents?",
+        answer: "5",
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    const text = (response.result as { content: Array<{ text: string }> }).content[0]?.text || "";
+    const data = extractJson(text);
+
+    const result = data?.spot_check_result as {
+      passed: boolean;
+      trap_type: string | null;
+    };
+    expect(result.passed).toBe(true);
+    expect(result.trap_type).toBeNull();
+  });
+
+  test("scratchpad: complete operation with trap triggers reconsideration", async () => {
+    const sessionId = "reconsideration-test";
+
+    // Build a reasoning chain
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "The bat and ball cost $1.10 total. The bat costs $1 more than the ball.",
+        purpose: "analysis",
+        session_id: sessionId,
+      },
+    });
+
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "If I subtract $1 from $1.10, I get $0.10. So the ball costs 10 cents.",
+        purpose: "decision",
+        session_id: sessionId,
+      },
+    });
+
+    // Complete with question + final_answer - should trigger spot-check
+    const completeResponse = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "complete",
+        session_id: sessionId,
+        question:
+          "A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost in cents?",
+        final_answer: "10",
+        summary: "The ball costs 10 cents",
+      },
+    });
+
+    expect(completeResponse.error).toBeUndefined();
+    const completeText =
+      (completeResponse.result as { content: Array<{ text: string }> }).content[0]?.text || "";
+    const completeData = extractJson(completeText);
+
+    // Should have "review" status, not "complete"
+    expect(completeData?.status).toBe("review");
+
+    // Should have spot_check_result
+    expect(completeData?.spot_check_result).toBeDefined();
+    const spotResult = completeData?.spot_check_result as {
+      passed: boolean;
+      trap_type: string;
+    };
+    expect(spotResult.passed).toBe(false);
+    expect(spotResult.trap_type).toBe("additive_system");
+
+    // Should have reconsideration prompt
+    expect(completeData?.reconsideration).toBeDefined();
+    const reconsideration = completeData?.reconsideration as {
+      trap_type: string;
+      hint: string;
+      suggested_revise: { target_step: number; reason: string };
+    };
+    expect(reconsideration.trap_type).toBe("additive_system");
+    expect(reconsideration.hint).toBeTruthy();
+    expect(reconsideration.suggested_revise.target_step).toBe(2);
+
+    // Cleanup
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { session_id: sessionId },
+    });
+  });
+
+  test("scratchpad: reconsideration loop - complete → trap → revise → complete", async () => {
+    const sessionId = "reconsideration-loop-test";
+
+    // Step 1: Build reasoning chain with WRONG answer (trap)
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "The lily pad doubles every day and takes 48 days to fill the lake.",
+        purpose: "analysis",
+        session_id: sessionId,
+      },
+    });
+
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "Half the lake means half the time. 48 / 2 = 24 days.",
+        purpose: "decision",
+        session_id: sessionId,
+      },
+    });
+
+    // Step 2: Complete with wrong answer - should trigger spot-check
+    const complete1 = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "complete",
+        session_id: sessionId,
+        question:
+          "A lily pad doubles every day. If it takes 48 days to cover the entire lake, how many days to cover half?",
+        final_answer: "24",
+        summary: "Half the lake takes half the time",
+      },
+    });
+
+    const complete1Data = extractJson(
+      (complete1.result as { content: Array<{ text: string }> }).content[0]?.text || "",
+    );
+
+    // Verify trap was detected
+    expect(complete1Data?.status).toBe("review");
+    expect(complete1Data?.spot_check_result).toBeDefined();
+    expect((complete1Data?.spot_check_result as { trap_type: string }).trap_type).toBe(
+      "nonlinear_growth",
+    );
+
+    // Get suggested revise info
+    const reconsideration = complete1Data?.reconsideration as {
+      suggested_revise: { target_step: number; reason: string };
+    };
+    expect(reconsideration.suggested_revise.target_step).toBe(2);
+
+    // Step 3: Revise based on reconsideration prompt
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "revise",
+        target_step: reconsideration.suggested_revise.target_step,
+        reason: reconsideration.suggested_revise.reason,
+        thought:
+          "Wait - if it doubles each day, then on day 47 it was half the size of day 48. Half the lake is day 47, not 24.",
+        session_id: sessionId,
+        confidence: 0.9,
+      },
+    });
+
+    // Step 4: Complete again with CORRECT answer
+    const complete2 = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "complete",
+        session_id: sessionId,
+        question:
+          "A lily pad doubles every day. If it takes 48 days to cover the entire lake, how many days to cover half?",
+        final_answer: "47",
+        summary: "Half the lake is the day before full (exponential growth)",
+      },
+    });
+
+    const complete2Data = extractJson(
+      (complete2.result as { content: Array<{ text: string }> }).content[0]?.text || "",
+    );
+
+    // Should now be "complete" (not "review")
+    expect(complete2Data?.status).toBe("complete");
+
+    // Spot-check should pass
+    expect(complete2Data?.spot_check_result).toBeDefined();
+    expect((complete2Data?.spot_check_result as { passed: boolean }).passed).toBe(true);
+
+    // No reconsideration needed
+    expect(complete2Data?.reconsideration).toBeUndefined();
+
+    // Should have more steps due to revision
+    expect((complete2Data?.total_steps as number) ?? 0).toBeGreaterThanOrEqual(3);
+
+    // Cleanup
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { session_id: sessionId },
+    });
+  });
+
+  test("scratchpad: complete without question/answer skips spot-check", async () => {
+    const sessionId = "no-spot-check-test";
+
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "This is just a simple reasoning step",
+        purpose: "analysis",
+        session_id: sessionId,
+      },
+    });
+
+    // Complete WITHOUT question - should skip spot-check
+    const response = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "complete",
+        session_id: sessionId,
+        summary: "Done",
+      },
+    });
+
+    const data = extractJson(
+      (response.result as { content: Array<{ text: string }> }).content[0]?.text || "",
+    );
+
+    // Should be "complete" not "review"
+    expect(data?.status).toBe("complete");
+
+    // No spot-check result
+    expect(data?.spot_check_result).toBeUndefined();
+
+    // Cleanup
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { session_id: sessionId },
+    });
+  });
+
+  test("scratchpad: monty hall trap detection", async () => {
+    const response = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "spot_check",
+        question:
+          "Monty Hall: You pick door 1. Host opens door 3 (goat). Should you switch to door 2 or stay?",
+        answer: "stay - it's 50/50 either way",
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    const text = (response.result as { content: Array<{ text: string }> }).content[0]?.text || "";
+    const data = extractJson(text);
+
+    const result = data?.spot_check_result as {
+      passed: boolean;
+      trap_type: string | null;
+    };
+    expect(result.passed).toBe(false);
+    expect(result.trap_type).toBe("monty_hall");
+  });
+
+  test("scratchpad: conjunction fallacy trap detection", async () => {
+    const response = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "spot_check",
+        question:
+          "Linda is 31, single, outspoken. She majored in philosophy. Which is more likely: (A) Linda is a bank teller, or (B) Linda is a bank teller and active feminist?",
+        answer: "B - bank teller and feminist is more likely given her background",
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    const text = (response.result as { content: Array<{ text: string }> }).content[0]?.text || "";
+    const data = extractJson(text);
+
+    const result = data?.spot_check_result as {
+      passed: boolean;
+      trap_type: string | null;
+    };
+    expect(result.passed).toBe(false);
+    expect(result.trap_type).toBe("conjunction_fallacy");
+  });
+});

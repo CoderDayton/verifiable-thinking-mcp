@@ -520,6 +520,11 @@ describe("Structural category coverage", () => {
     },
     { name: "monty_hall", q: "Three doors, host reveals goat, should you switch or stay?" },
     { name: "anchoring", q: "Spin wheel number 65, estimate how many countries in Africa" },
+    { name: "sunk_cost", q: "Already invested $10,000. Should you continue to keep going?" },
+    {
+      name: "framing_effect",
+      q: "Program A: 200 people will be saved. Program B: probability all saved or none.",
+    },
   ];
 
   for (const { name, q } of categories) {
@@ -594,5 +599,121 @@ describe("Monty Hall trap detection", () => {
       "In Monty Hall, after the host reveals a goat, what's the probability of winning if you stay?";
     const result = spotCheck(probQuestion, "50%");
     expectTrap(result, "monty_hall");
+  });
+});
+
+// =============================================================================
+// SUNK COST FALLACY
+// =============================================================================
+
+describe("Sunk Cost Fallacy trap detection", () => {
+  const question =
+    "You've already invested $10,000 in a failing startup. Should you invest another $5,000 to keep it going, knowing it will likely fail?";
+
+  test("detects wrong answer (continue because of past investment)", () => {
+    const result = spotCheck(question, "Yes, continue - I've already spent $10,000");
+    expectTrap(result, "sunk_cost");
+  });
+
+  test("detects wrong answer (can't waste what was spent)", () => {
+    const result = spotCheck(question, "Keep going - can't let that money go to waste");
+    expectTrap(result, "sunk_cost");
+  });
+
+  test("detects wrong answer (too much invested)", () => {
+    const result = spotCheck(question, "Continue because I've come this far");
+    expectTrap(result, "sunk_cost");
+  });
+
+  test("passes correct answer (focus on future value)", () => {
+    const result = spotCheck(
+      question,
+      "No, stop - only continue if future benefits outweigh future costs, regardless of past spending",
+    );
+    expectPass(result);
+  });
+
+  test("passes correct answer (explicit rational reasoning)", () => {
+    const result = spotCheck(
+      question,
+      "Don't invest - the expected return going forward doesn't justify more investment",
+    );
+    expectPass(result);
+  });
+
+  test("needsSpotCheck identifies sunk_cost category", () => {
+    const result = needsSpotCheck(question);
+    expect(result.required).toBe(true);
+    expect(result.categories).toContain("sunk_cost");
+  });
+
+  test("detects sunk cost in movie ticket scenario", () => {
+    const movieQuestion =
+      "You already paid $15 for a movie ticket but realize you don't want to see it. Should you go anyway?";
+    const result = spotCheck(
+      movieQuestion,
+      "Yes, go - I already paid for it, can't let the money be wasted",
+    );
+    expectTrap(result, "sunk_cost");
+  });
+
+  test("passes movie ticket with correct reasoning", () => {
+    const movieQuestion =
+      "You already paid $15 for a movie ticket but realize you don't want to see it. Should you go anyway?";
+    const result = spotCheck(
+      movieQuestion,
+      "No - the $15 is gone either way. Go only if watching is worth your time.",
+    );
+    expectPass(result);
+  });
+});
+
+// =============================================================================
+// FRAMING EFFECT
+// =============================================================================
+
+describe("Framing Effect trap detection", () => {
+  const gainFrameQuestion =
+    "A disease outbreak will kill 600 people. Program A: 200 people will be saved. Program B: 1/3 probability all 600 saved, 2/3 probability no one saved. Which do you choose?";
+
+  const lossFrameQuestion =
+    "A disease outbreak affects 600 people. Program A: 400 people will die. Program B: 1/3 probability no one dies, 2/3 probability all 600 die. Which do you choose?";
+
+  test("detects potential framing trap in gain frame (just picking A)", () => {
+    const result = spotCheck(gainFrameQuestion, "A");
+    expectTrap(result, "framing_effect");
+  });
+
+  test("detects potential framing trap in loss frame (just picking B)", () => {
+    const result = spotCheck(lossFrameQuestion, "B");
+    expectTrap(result, "framing_effect");
+  });
+
+  test("passes when answer acknowledges framing equivalence", () => {
+    const result = spotCheck(
+      gainFrameQuestion,
+      "Both options have the same expected value - they are mathematically equivalent",
+    );
+    expectPass(result);
+  });
+
+  test("passes when answer explicitly calculates expected value", () => {
+    const result = spotCheck(
+      lossFrameQuestion,
+      "The expected value is 200 saved for both options, so it doesn't matter rationally",
+    );
+    expectPass(result);
+  });
+
+  test("needsSpotCheck identifies framing_effect category (gain frame)", () => {
+    const result = needsSpotCheck(gainFrameQuestion);
+    expect(result.required).toBe(true);
+    expect(result.categories).toContain("framing_effect");
+  });
+
+  test("needsSpotCheck identifies framing_effect category (loss frame)", () => {
+    const result = needsSpotCheck(lossFrameQuestion);
+    expect(result.required).toBe(true);
+    expect(result.categories).toContain("framing_effect");
   });
 });
