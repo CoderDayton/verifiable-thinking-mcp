@@ -1,0 +1,313 @@
+{
+  "version": "1.0.0",
+  "description": "Cognitive trap questions - tests structural trap detection across 10 categories",
+  "questions": [
+    {
+      "id": "trap_additive_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost in cents?",
+      "expected_answer": "5",
+      "verification_type": "exact",
+      "trap_type": "additive_system",
+      "intuitive_wrong_answer": "10"
+    },
+    {
+      "id": "trap_additive_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A notebook and pen cost $5.50 together. The notebook costs $5.00 more than the pen. How much does the pen cost in cents?",
+      "expected_answer": "25",
+      "verification_type": "exact",
+      "trap_type": "additive_system",
+      "intuitive_wrong_answer": "50"
+    },
+    {
+      "id": "trap_additive_003",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A hammer and nail cost $10.10 total. The hammer costs $10 more than the nail. What does the nail cost in cents?",
+      "expected_answer": "5",
+      "verification_type": "exact",
+      "trap_type": "additive_system",
+      "intuitive_wrong_answer": "10"
+    },
+    {
+      "id": "trap_additive_004",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "Coffee and a muffin cost $4.40 total. The coffee costs $4 more than the muffin. What does the muffin cost in cents?",
+      "expected_answer": "20",
+      "verification_type": "exact",
+      "trap_type": "additive_system",
+      "intuitive_wrong_answer": "40"
+    },
+    {
+      "id": "trap_nonlinear_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A lily pad doubles in size every day. If it takes 48 days to cover the entire lake, how many days does it take to cover half the lake?",
+      "expected_answer": "47",
+      "verification_type": "exact",
+      "trap_type": "nonlinear_growth",
+      "intuitive_wrong_answer": "24"
+    },
+    {
+      "id": "trap_nonlinear_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "Bacteria doubles every hour. If it fills a jar in 24 hours, when is the jar half full?",
+      "expected_answer": "23",
+      "verification_type": "exact",
+      "trap_type": "nonlinear_growth",
+      "intuitive_wrong_answer": "12"
+    },
+    {
+      "id": "trap_nonlinear_003",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A virus spreads by doubling infected people each day. If everyone (1 million people) is infected on day 20, on which day were 500,000 people infected?",
+      "expected_answer": "19",
+      "verification_type": "exact",
+      "trap_type": "nonlinear_growth",
+      "intuitive_wrong_answer": "10"
+    },
+    {
+      "id": "trap_rate_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "If 5 machines make 5 widgets in 5 minutes, how many minutes does it take for 100 machines to make 100 widgets?",
+      "expected_answer": "5",
+      "verification_type": "exact",
+      "trap_type": "rate_pattern",
+      "intuitive_wrong_answer": "100"
+    },
+    {
+      "id": "trap_rate_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "If 3 workers can paint 3 walls in 3 hours, how many hours does it take 9 workers to paint 9 walls?",
+      "expected_answer": "3",
+      "verification_type": "exact",
+      "trap_type": "rate_pattern",
+      "intuitive_wrong_answer": "9"
+    },
+    {
+      "id": "trap_rate_003",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "If 8 printers print 8 pages in 8 seconds, how many seconds for 1 printer to print 1 page?",
+      "expected_answer": "8",
+      "verification_type": "exact",
+      "trap_type": "rate_pattern",
+      "intuitive_wrong_answer": "1"
+    },
+    {
+      "id": "trap_harmonic_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A car drives to a destination at 30 mph and returns at 60 mph. What is the average speed for the entire round trip in mph?",
+      "expected_answer": "40",
+      "verification_type": "exact",
+      "trap_type": "harmonic_mean",
+      "intuitive_wrong_answer": "45"
+    },
+    {
+      "id": "trap_harmonic_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "Walking uphill at 2 mph and downhill at 6 mph on the same path. Average speed for round trip in mph?",
+      "expected_answer": "3",
+      "verification_type": "exact",
+      "trap_type": "harmonic_mean",
+      "intuitive_wrong_answer": "4"
+    },
+    {
+      "id": "trap_independence_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A fair coin has landed heads 10 times in a row. What is the probability the next flip is heads? Answer as a percentage.",
+      "expected_answer": "50",
+      "verification_type": "numeric",
+      "tolerance": 1,
+      "trap_type": "independence",
+      "intuitive_wrong_answer": "less than 50"
+    },
+    {
+      "id": "trap_independence_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A roulette wheel has landed on red 20 times in a row. What is the probability the next spin is red? (Assume 50/50 for simplicity.) Answer as percentage.",
+      "expected_answer": "50",
+      "verification_type": "numeric",
+      "tolerance": 1,
+      "trap_type": "independence",
+      "intuitive_wrong_answer": "less than 50"
+    },
+    {
+      "id": "trap_pigeonhole_001",
+      "category": "logic",
+      "difficulty": "trap",
+      "question": "A drawer contains red, blue, and green socks. What is the minimum number of socks you must pull out (without looking) to GUARANTEE you have a matching pair?",
+      "expected_answer": "4",
+      "verification_type": "exact",
+      "trap_type": "pigeonhole",
+      "intuitive_wrong_answer": "2"
+    },
+    {
+      "id": "trap_pigeonhole_002",
+      "category": "logic",
+      "difficulty": "trap",
+      "question": "A box has black, white, red, and blue marbles. What is the minimum marbles to draw (blindfolded) to GUARANTEE 2 of the same color?",
+      "expected_answer": "5",
+      "verification_type": "exact",
+      "trap_type": "pigeonhole",
+      "intuitive_wrong_answer": "2"
+    },
+    {
+      "id": "trap_baserate_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A disease affects 1 in 1000 people. A test is 99% accurate (99% true positive, 99% true negative). If you test positive, what's the probability you actually have the disease? Round to nearest percent.",
+      "expected_answer": "9",
+      "verification_type": "numeric",
+      "tolerance": 2,
+      "trap_type": "base_rate",
+      "intuitive_wrong_answer": "99"
+    },
+    {
+      "id": "trap_baserate_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "1% of cars are red sports cars. A witness correctly identifies car color 80% of the time. A witness says the car in an accident was a red sports car. Probability it actually was red? Round to nearest percent.",
+      "expected_answer": "4",
+      "verification_type": "numeric",
+      "tolerance": 2,
+      "trap_type": "base_rate",
+      "intuitive_wrong_answer": "80"
+    },
+    {
+      "id": "trap_factorial_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "How many trailing zeros does 25! (25 factorial) have?",
+      "expected_answer": "6",
+      "verification_type": "exact",
+      "trap_type": "factorial_counting",
+      "intuitive_wrong_answer": "5"
+    },
+    {
+      "id": "trap_factorial_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "How many trailing zeros does 100! (100 factorial) have?",
+      "expected_answer": "24",
+      "verification_type": "exact",
+      "trap_type": "factorial_counting",
+      "intuitive_wrong_answer": "20"
+    },
+    {
+      "id": "trap_clock_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "How many times do the hour and minute hands of a clock overlap in a 12-hour period?",
+      "expected_answer": "11",
+      "verification_type": "exact",
+      "trap_type": "clock_overlap",
+      "intuitive_wrong_answer": "12"
+    },
+    {
+      "id": "trap_clock_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "How many times do clock hands overlap in 24 hours?",
+      "expected_answer": "22",
+      "verification_type": "exact",
+      "trap_type": "clock_overlap",
+      "intuitive_wrong_answer": "24"
+    },
+    {
+      "id": "trap_conditional_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "There are 2 envelopes with money. One has twice the other. You pick one and find $100. Should you switch? YES (switch is better), NO (staying is better), or INDIFFERENT (same expected value)?",
+      "expected_answer": "INDIFFERENT",
+      "verification_type": "exact",
+      "trap_type": "conditional_probability",
+      "intuitive_wrong_answer": "YES"
+    },
+    {
+      "id": "trap_conditional_002",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Monty Hall problem: You pick door 1. Host opens door 3 (has goat). Should you switch to door 2? YES or NO.",
+      "expected_answer": "YES",
+      "verification_type": "exact",
+      "trap_type": "conditional_probability",
+      "intuitive_wrong_answer": "NO"
+    },
+    {
+      "id": "trap_percentage_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A store raises prices by 25% then offers a 25% discount. Is the final price HIGHER, LOWER, or SAME as original?",
+      "expected_answer": "LOWER",
+      "verification_type": "exact",
+      "trap_type": "percentage_trap",
+      "intuitive_wrong_answer": "SAME"
+    },
+    {
+      "id": "trap_percentage_002",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "Stock drops 50% then gains 50%. Is your investment now HIGHER, LOWER, or SAME as original?",
+      "expected_answer": "LOWER",
+      "verification_type": "exact",
+      "trap_type": "percentage_trap",
+      "intuitive_wrong_answer": "SAME"
+    },
+    {
+      "id": "trap_percentage_003",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "A product's price increased by 20% and then decreased by 20%. What is the net change as a percentage? (negative if decrease)",
+      "expected_answer": "-4",
+      "verification_type": "numeric",
+      "tolerance": 0.5,
+      "trap_type": "percentage_trap",
+      "intuitive_wrong_answer": "0"
+    },
+    {
+      "id": "trap_age_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "Mary is twice as old as Ann was when Mary was as old as Ann is now. If Mary is 24, how old is Ann?",
+      "expected_answer": "18",
+      "verification_type": "exact",
+      "trap_type": "age_puzzle",
+      "intuitive_wrong_answer": "12"
+    },
+    {
+      "id": "trap_siblings_001",
+      "category": "reasoning",
+      "difficulty": "trap",
+      "question": "A woman has two children. At least one is a boy born on Tuesday. What's the probability both are boys? Round to nearest percent.",
+      "expected_answer": "48",
+      "verification_type": "numeric",
+      "tolerance": 3,
+      "trap_type": "conditional_probability",
+      "intuitive_wrong_answer": "50"
+    },
+    {
+      "id": "trap_birthday_001",
+      "category": "math",
+      "difficulty": "trap",
+      "question": "In a room of 23 people, what's the approximate probability that at least 2 share a birthday? Round to nearest 10%.",
+      "expected_answer": "50",
+      "verification_type": "numeric",
+      "tolerance": 5,
+      "trap_type": "birthday_paradox",
+      "intuitive_wrong_answer": "6"
+    }
+  ]
+}
