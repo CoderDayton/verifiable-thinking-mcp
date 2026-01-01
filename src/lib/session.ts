@@ -27,6 +27,9 @@ export interface ThoughtRecord {
     input_bytes_saved: number;
     output_bytes_saved: number;
     context_bytes_saved: number;
+    // Token tracking for LLM budget planning
+    original_tokens?: number;
+    compressed_tokens?: number;
   };
   // Revision tracking
   revises_step?: number;
@@ -63,6 +66,17 @@ export interface Session {
   stepNumbers: Set<number>;
   stepToBranchMap: Map<number, string>;
   toolsUsedSet: Set<string>;
+  // Pending thought that failed verification (awaiting recovery action)
+  pendingThought?: {
+    thought: ThoughtRecord;
+    verificationError: {
+      issue: string;
+      evidence: string;
+      suggestions: string[];
+      confidence: number;
+      domain: string;
+    };
+  };
 }
 
 interface SessionManagerConfig {
@@ -449,6 +463,7 @@ class SessionManagerImpl {
     totalBytesSaved: number;
     stepCount: number;
     breakdown: { input: number; output: number; context: number };
+    tokens: { original: number; compressed: number; saved: number };
   } | null {
     const session = this.get(sessionId);
     if (!session) return null;
@@ -456,6 +471,8 @@ class SessionManagerImpl {
     let totalInput = 0;
     let totalOutput = 0;
     let totalContext = 0;
+    let totalOriginalTokens = 0;
+    let totalCompressedTokens = 0;
     let stepCount = 0;
 
     for (const thought of session.thoughts) {
@@ -464,6 +481,8 @@ class SessionManagerImpl {
         totalInput += thought.compression.input_bytes_saved;
         totalOutput += thought.compression.output_bytes_saved;
         totalContext += thought.compression.context_bytes_saved;
+        totalOriginalTokens += thought.compression.original_tokens || 0;
+        totalCompressedTokens += thought.compression.compressed_tokens || 0;
       }
     }
 
@@ -471,7 +490,210 @@ class SessionManagerImpl {
       totalBytesSaved: totalInput + totalOutput + totalContext,
       stepCount,
       breakdown: { input: totalInput, output: totalOutput, context: totalContext },
+      tokens: {
+        original: totalOriginalTokens,
+        compressed: totalCompressedTokens,
+        saved: totalOriginalTokens - totalCompressedTokens,
+      },
     };
+  }
+
+  /** Get path from root to a step (ancestors) - O(n) where n = path length */
+  getPath(sessionId: string, stepNumber: number): ThoughtRecord[] {
+    const session = this.get(sessionId);
+    if (!session) return [];
+
+    const path: ThoughtRecord[] = [];
+    let current = session.stepIndex.get(stepNumber);
+
+    while (current) {
+      path.unshift(current); // Add to front to get root-first order
+
+      // Walk back via branch_from or revision chain
+      if (current.branch_from !== undefined) {
+        current = session.stepIndex.get(current.branch_from);
+      } else if (current.revises_step !== undefined) {
+        // Skip to the original step being revised
+        current = session.stepIndex.get(current.revises_step);
+      } else if (current.step_number > 1) {
+        // Linear predecessor in same branch
+        const prevStep = current.step_number - 1;
+        const prev = session.stepIndex.get(prevStep);
+        // Only follow if same branch
+        if (prev && prev.branch_id === current.branch_id) {
+          current = prev;
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+
+    return path;
+  }
+
+  /** Get current step number for a session/branch */
+  getCurrentStep(sessionId: string, branchId = "main"): number {
+    const session = this.get(sessionId);
+    if (!session) return 0;
+
+    const branchThoughts = session.thoughts.filter((t) => t.branch_id === branchId);
+    if (branchThoughts.length === 0) return 0;
+
+    return Math.max(...branchThoughts.map((t) => t.step_number));
+  }
+
+  /** Get next step number for a session/branch */
+  getNextStep(sessionId: string, branchId = "main"): number {
+    return this.getCurrentStep(sessionId, branchId) + 1;
+  }
+
+  /** Calculate average confidence across session */
+  getAverageConfidence(sessionId: string, branchId?: string): number {
+    const session = this.get(sessionId);
+    if (!session) return 0;
+
+    const thoughts = branchId
+      ? session.thoughts.filter((t) => t.branch_id === branchId)
+      : session.thoughts;
+
+    if (thoughts.length === 0) return 0;
+
+    const confidences = thoughts
+      .filter((t) => t.verification?.confidence !== undefined)
+      .map((t) => t.verification!.confidence);
+
+    if (confidences.length === 0) return 0;
+
+    return confidences.reduce((a, b) => a + b, 0) / confidences.length;
+  }
+
+  /** Get total token usage for a session (estimated from thought lengths) */
+  getTokenUsage(sessionId: string): {
+    total: number;
+    compressed: number;
+    uncompressed: number;
+  } {
+    const session = this.get(sessionId);
+    if (!session) return { total: 0, compressed: 0, uncompressed: 0 };
+
+    let compressed = 0;
+    let uncompressed = 0;
+
+    for (const thought of session.thoughts) {
+      // Estimate tokens: ~4 chars per token
+      const thoughtTokens = Math.ceil(thought.thought.length / 4);
+
+      if (thought.compression?.compressed_tokens !== undefined) {
+        compressed += thought.compression.compressed_tokens;
+      } else {
+        uncompressed += thoughtTokens;
+      }
+    }
+
+    return {
+      total: compressed + uncompressed,
+      compressed,
+      uncompressed,
+    };
+  }
+
+  /** Store a pending thought that failed verification */
+  setPendingThought(
+    sessionId: string,
+    thought: ThoughtRecord,
+    verificationError: {
+      issue: string;
+      evidence: string;
+      suggestions: string[];
+      confidence: number;
+      domain: string;
+    },
+  ): void {
+    const session = this.getOrCreate(sessionId);
+    session.pendingThought = { thought, verificationError };
+    session.updated_at = Date.now();
+  }
+
+  /** Get pending thought for a session */
+  getPendingThought(sessionId: string): Session["pendingThought"] {
+    const session = this.get(sessionId);
+    return session?.pendingThought;
+  }
+
+  /** Clear pending thought (after override or when replaced by revision) */
+  clearPendingThought(sessionId: string): boolean {
+    const session = this.get(sessionId);
+    if (!session?.pendingThought) return false;
+    session.pendingThought = undefined;
+    session.updated_at = Date.now();
+    return true;
+  }
+
+  /** Commit pending thought (used by override operation) */
+  commitPendingThought(sessionId: string): { success: boolean; error?: string } {
+    const session = this.get(sessionId);
+    if (!session?.pendingThought) {
+      return { success: false, error: "No pending thought to commit" };
+    }
+
+    const result = this.addThought(sessionId, session.pendingThought.thought);
+    if (result.success) {
+      session.pendingThought = undefined;
+    }
+    return result;
+  }
+
+  /** Store hint state for progressive reveals */
+  setHintState(
+    sessionId: string,
+    state: {
+      expression: string;
+      revealCount: number;
+      totalSteps: number;
+      simplified: string;
+    },
+  ): void {
+    const session = this.getOrCreate(sessionId);
+    session.metadata.hintState = state;
+    session.updated_at = Date.now();
+  }
+
+  /** Get hint state for a session */
+  getHintState(sessionId: string): {
+    expression: string;
+    revealCount: number;
+    totalSteps: number;
+    simplified: string;
+  } | null {
+    const session = this.get(sessionId);
+    const state = session?.metadata?.hintState;
+    if (
+      state &&
+      typeof state === "object" &&
+      "expression" in state &&
+      "revealCount" in state &&
+      "totalSteps" in state &&
+      "simplified" in state
+    ) {
+      return state as {
+        expression: string;
+        revealCount: number;
+        totalSteps: number;
+        simplified: string;
+      };
+    }
+    return null;
+  }
+
+  /** Clear hint state */
+  clearHintState(sessionId: string): void {
+    const session = this.get(sessionId);
+    if (session?.metadata) {
+      delete session.metadata.hintState;
+      session.updated_at = Date.now();
+    }
   }
 
   destroy(): void {

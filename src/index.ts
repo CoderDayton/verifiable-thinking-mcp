@@ -6,7 +6,7 @@ import {
   compressTool,
   getSessionTool,
   listSessionsTool,
-  thinkTool,
+  scratchpadTool,
 } from "./tools/index.ts";
 
 const server = new FastMCP({
@@ -15,7 +15,7 @@ const server = new FastMCP({
 });
 
 // Register tools
-server.addTool(thinkTool);
+server.addTool(scratchpadTool);
 server.addTool(listSessionsTool);
 server.addTool(getSessionTool);
 server.addTool(clearSessionTool);
@@ -23,7 +23,7 @@ server.addTool(compressTool);
 
 // Register prompts
 for (const prompt of allPrompts) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: FastMCP prompt type mismatch
   server.addPrompt(prompt as any);
 }
 
@@ -34,7 +34,7 @@ for (const resource of allResources) {
 
 // Register resource templates
 for (const template of allResourceTemplates) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // biome-ignore lint/suspicious/noExplicitAny: FastMCP template type mismatch
   server.addResourceTemplate(template as any);
 }
 
