@@ -20,6 +20,7 @@ import {
   getVerbosity,
   type Verbosity,
 } from "./prompts.ts";
+import { needsSpotCheck } from "./spot-check.ts";
 
 // =============================================================================
 // EXPLANATORY QUESTION DETECTION
@@ -91,6 +92,8 @@ export interface RouteResult {
   isExplanatory: boolean;
   /** Detected meta-domain (coding, scientific, educational, financial, general) */
   metaDomain: string;
+  /** Whether to run spot-check on the answer (High+ complexity with trap patterns) */
+  shouldSpotCheck: boolean;
   /** Prompts to use */
   prompts: RoutePrompts;
 }
@@ -121,6 +124,13 @@ export function routeQuestion(question: string): RouteResult {
   const tier = complexity.tier;
   const metaDomain = detectMetaDomain(question);
 
+  // Determine if spot-check should run:
+  // - Has structural trap patterns (likely to trigger intuitive but wrong answers)
+  // - NOT explanatory (spot-check is for factual answers)
+  // - NOT trivial (trivial questions are too simple for traps)
+  const spotCheckResult = needsSpotCheck(question);
+  const shouldSpotCheck = !trivial && !explanatory && spotCheckResult.required;
+
   // Domain-aware prompts for explanatory questions (token-light steering)
   const getExplanatoryPrompts = () => ({
     system: getDomainSystemPrompt(metaDomain),
@@ -144,6 +154,7 @@ export function routeQuestion(question: string): RouteResult {
       steps: 1,
       isExplanatory: explanatory,
       metaDomain,
+      shouldSpotCheck: false, // Never spot-check trivial
       prompts: {
         main: trivialPrompt,
       },
@@ -160,6 +171,7 @@ export function routeQuestion(question: string): RouteResult {
       steps: 1,
       isExplanatory: explanatory,
       metaDomain,
+      shouldSpotCheck: false, // Low complexity doesn't need spot-check
       prompts: {
         main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("baseline"),
       },
@@ -176,6 +188,7 @@ export function routeQuestion(question: string): RouteResult {
     steps: 1,
     isExplanatory: explanatory,
     metaDomain,
+    shouldSpotCheck,
     prompts: {
       main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning"),
     },

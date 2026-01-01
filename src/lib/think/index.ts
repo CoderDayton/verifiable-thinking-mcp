@@ -89,16 +89,23 @@ export {
   type RoutingPath,
   routeQuestion,
 } from "./route.ts";
-
 // Schema
 export { NextActionSchema, type ThinkArgs, ThinkSchema } from "./schema.ts";
-
 // Scratchpad schema
 export {
   type ScratchpadArgs,
   type ScratchpadResponse,
   ScratchpadSchema,
 } from "./scratchpad-schema.ts";
+// Spot-check (lightweight trap detection for High+ complexity)
+export {
+  hasTrapPatterns,
+  type NeedsSpotCheckResult,
+  needsSpotCheck,
+  type SpotCheckResult,
+  spotCheck,
+  type TrapDetector,
+} from "./spot-check.ts";
 
 // Types
 export type {
