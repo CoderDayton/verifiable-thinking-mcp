@@ -474,39 +474,12 @@ function matchExpectedAnswer(cleaned: string, expectedAnswers: string[]): string
 }
 
 /**
- * Extract answer from LLM response using priority-based pattern matching
- *
- * Priority order:
- * 0. If expectedAnswers provided, look for exact match in response (fastest path)
- * 1. LaTeX \boxed{X} (explicit answer marking)
- * 2. "Final Answer: X" (with colon)
- * 3. "Answer: X" (with colon)
- * 4. "The answer is X" / "answer is X"
- * 4b. "should be X" / "must be X"
- * 4c. Card flip patterns (Wason task)
- * 5. "Result: X"
- * 6. Last equation result "= X"
- * 7. Standalone numbers in last lines
- * 8. Last number/percentage in response
- * 8b. Word fractions
- * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
+ * Match explicit answer markers in text (Priority 2-5).
+ * Patterns: "Final Answer: X", "Answer: X", "The answer is X", "Result: X", etc.
+ * @returns The extracted answer, or null if no marker found
  */
-export function extractAnswer(response: string, expectedAnswers?: string[]): string {
-  // Strip all LLM artifacts (thinking tags, markdown, model tokens, etc.)
-  const cleaned = stripLLMOutput(response);
-
-  // Priority 0: If we know expected answers, look for them directly in the response
-  if (expectedAnswers && expectedAnswers.length > 0) {
-    const matched = matchExpectedAnswer(cleaned, expectedAnswers);
-    if (matched) return matched;
-  }
-
-  // Priority 1: LaTeX boxed (highest confidence - LLM explicitly marked answer)
-  const boxedMatch = cleaned.match(/\\boxed\{([^}]+)\}/);
-  if (boxedMatch?.[1]) return cleanNumber(boxedMatch[1]);
-
+function matchExplicitMarkers(cleaned: string): string | null {
   // Priority 2: "Final Answer: X" (with colon, very explicit)
-  // Capture until newline or sentence end (period followed by space or end)
   const finalColonMatch = cleaned.match(/final\s+answer:\s*([^\n]+?)(?:\.\s|$)/i);
   if (finalColonMatch?.[1]) {
     const extracted = extractFromPhrase(finalColonMatch[1]);
@@ -539,7 +512,6 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
     /(?:cards?\s+to\s+flip|need\s+to\s+flip|must\s+flip)\s+(?:are\s+)?([A-Z0-9,\s]+)/i,
   );
   if (flipMatch?.[1]) {
-    // Clean up the card list
     const cards = flipMatch[1]
       .trim()
       .replace(/\s+and\s+/gi, ",")
@@ -569,6 +541,40 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
     const extracted = extractFromPhrase(resultMatch[1]);
     if (extracted) return extracted;
   }
+
+  return null;
+}
+
+/**
+ * Extract answer from LLM response using priority-based pattern matching
+ *
+ * Priority order:
+ * 0. If expectedAnswers provided, look for exact match in response (fastest path)
+ * 1. LaTeX \boxed{X} (explicit answer marking)
+ * 2-5. Explicit markers (via matchExplicitMarkers)
+ * 6. Last equation result "= X"
+ * 7. Standalone numbers in last lines
+ * 8. Last number/percentage in response
+ * 8b. Word fractions
+ * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
+ */
+export function extractAnswer(response: string, expectedAnswers?: string[]): string {
+  // Strip all LLM artifacts (thinking tags, markdown, model tokens, etc.)
+  const cleaned = stripLLMOutput(response);
+
+  // Priority 0: If we know expected answers, look for them directly in the response
+  if (expectedAnswers && expectedAnswers.length > 0) {
+    const matched = matchExpectedAnswer(cleaned, expectedAnswers);
+    if (matched) return matched;
+  }
+
+  // Priority 1: LaTeX boxed (highest confidence - LLM explicitly marked answer)
+  const boxedMatch = cleaned.match(/\\boxed\{([^}]+)\}/);
+  if (boxedMatch?.[1]) return cleanNumber(boxedMatch[1]);
+
+  // Priority 2-5: Explicit answer markers
+  const explicitMatch = matchExplicitMarkers(cleaned);
+  if (explicitMatch) return explicitMatch;
 
   // Priority 6: Last equation result "= X" in the text (including fractions like "= 2/3")
   const eqMatches = [...cleaned.matchAll(/=\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)/g)];
@@ -735,6 +741,8 @@ export function normalizeAnswer(answer: string): string {
  * - Case-insensitive comparison
  * - Numeric tolerance (0.01% relative or 0.001 absolute for fraction tolerance)
  * - Fractions: "2/3" matches "0.667", "two-thirds"
+ * - Percentages: "75%" matches "0.75", "75 percent"
+ * - Scientific notation: "1.5e6" matches "1500000", "3×10^8"
  * - Partial containment: "45" matches "45 degrees"
  */
 export function answersMatch(extracted: string, expected: string): boolean {
@@ -744,16 +752,13 @@ export function answersMatch(extracted: string, expected: string): boolean {
   // Exact match
   if (normExtracted === normExpected) return true;
 
-  // Try numeric comparison (including fractions)
-  // First try direct parseFloat, then try fraction parsing
-  let numExtracted = Number.parseFloat(normExtracted);
-  let numExpected = Number.parseFloat(normExpected);
-
   // Track if we parsed fractions (need wider tolerance for rounding)
   let hasFraction = false;
 
-  // If parseFloat failed or gave partial result (e.g., "2" from "2/3"), try fraction parsing
-  // Check if original has "/" to detect fractions that parseFloat truncated
+  // Try fraction parsing FIRST (before parseNumericValue, since parseFloat("1/2") = 1)
+  let numExtracted: number | null = null;
+  let numExpected: number | null = null;
+
   if (extracted.includes("/")) {
     const fracExtracted = parseFraction(extracted);
     if (fracExtracted !== null) {
@@ -769,21 +774,16 @@ export function answersMatch(extracted: string, expected: string): boolean {
     }
   }
 
-  // Also try word fractions ("two-thirds", "one-half")
-  if (
-    Number.isNaN(numExtracted) ||
-    extracted.match(/\b(half|third|quarter|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/i)
-  ) {
+  // Try word fractions ("two-thirds", "one-half")
+  // Just try parseFraction() - it handles all word fraction formats
+  if (numExtracted === null) {
     const fracExtracted = parseFraction(extracted);
     if (fracExtracted !== null) {
       numExtracted = fracExtracted;
       hasFraction = true;
     }
   }
-  if (
-    Number.isNaN(numExpected) ||
-    expected.match(/\b(half|third|quarter|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/i)
-  ) {
+  if (numExpected === null) {
     const fracExpected = parseFraction(expected);
     if (fracExpected !== null) {
       numExpected = fracExpected;
@@ -791,7 +791,15 @@ export function answersMatch(extracted: string, expected: string): boolean {
     }
   }
 
-  if (!Number.isNaN(numExtracted) && !Number.isNaN(numExpected)) {
+  // Try numeric comparison (percentages, scientific notation, plain numbers)
+  if (numExtracted === null) {
+    numExtracted = parseNumericValue(extracted);
+  }
+  if (numExpected === null) {
+    numExpected = parseNumericValue(expected);
+  }
+
+  if (numExtracted !== null && numExpected !== null) {
     // Use wider tolerance for fractions (0.001 absolute) to handle rounding in 3-digit decimals
     // For non-fractions, use tighter tolerance (0.0001 absolute or 0.01% relative)
     const absDiff = Math.abs(numExtracted - numExpected);
@@ -806,4 +814,56 @@ export function answersMatch(extracted: string, expected: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * Parse a numeric value from a string, handling percentages and scientific notation.
+ * @returns The numeric value, or null if not parseable
+ */
+function parseNumericValue(input: string): number | null {
+  const trimmed = input.trim();
+
+  // Check for percentage (75%, 75 percent, 75 pct)
+  const percentMatch = trimmed.match(/^(-?[\d,]+(?:\.\d+)?)\s*(%|percent|pct)$/i);
+  if (percentMatch?.[1]) {
+    const value = Number.parseFloat(percentMatch[1].replace(/,/g, ""));
+    if (!Number.isNaN(value)) return value / 100;
+  }
+
+  // Check for scientific notation with × or x (3×10^8, 3x10^8, 3×10⁸)
+  const sciMultMatch = trimmed.match(/^(-?[\d.]+)\s*[×xX]\s*10[\^]?(-?\d+)$/);
+  if (sciMultMatch?.[1] && sciMultMatch?.[2]) {
+    const base = Number.parseFloat(sciMultMatch[1]);
+    const exp = Number.parseInt(sciMultMatch[2], 10);
+    if (!Number.isNaN(base) && !Number.isNaN(exp)) return base * 10 ** exp;
+  }
+
+  // Check for Unicode superscript exponents (10⁸, 10⁻³)
+  const superscriptMap: Record<string, string> = {
+    "⁰": "0",
+    "¹": "1",
+    "²": "2",
+    "³": "3",
+    "⁴": "4",
+    "⁵": "5",
+    "⁶": "6",
+    "⁷": "7",
+    "⁸": "8",
+    "⁹": "9",
+    "⁻": "-",
+  };
+  const superMatch = trimmed.match(/^(-?[\d.]+)\s*[×xX]\s*10([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)$/);
+  if (superMatch?.[1] && superMatch?.[2]) {
+    const base = Number.parseFloat(superMatch[1]);
+    const expStr = superMatch[2]
+      .split("")
+      .map((c) => superscriptMap[c] ?? c)
+      .join("");
+    const exp = Number.parseInt(expStr, 10);
+    if (!Number.isNaN(base) && !Number.isNaN(exp)) return base * 10 ** exp;
+  }
+
+  // Standard parseFloat handles 1.5e6 notation
+  const value = Number.parseFloat(trimmed.replace(/,/g, ""));
+  return Number.isNaN(value) ? null : value;
 }

@@ -4127,6 +4127,58 @@ describe("AnswerExtraction - parseFraction", () => {
   });
 });
 
+describe("AnswerExtraction - answersMatch percentages", () => {
+  test("percentage symbol matches decimal", () => {
+    expect(answersMatch("75%", "0.75")).toBe(true);
+    expect(answersMatch("50%", "0.5")).toBe(true);
+    expect(answersMatch("100%", "1")).toBe(true);
+    expect(answersMatch("25%", "0.25")).toBe(true);
+  });
+
+  test("'percent' word matches decimal", () => {
+    expect(answersMatch("75 percent", "0.75")).toBe(true);
+    expect(answersMatch("50 percent", "0.5")).toBe(true);
+  });
+
+  test("'pct' abbreviation matches decimal", () => {
+    expect(answersMatch("75 pct", "0.75")).toBe(true);
+    expect(answersMatch("25pct", "0.25")).toBe(true);
+  });
+
+  test("decimal matches percentage", () => {
+    expect(answersMatch("0.75", "75%")).toBe(true);
+    expect(answersMatch("0.5", "50 percent")).toBe(true);
+  });
+
+  test("percentage with commas", () => {
+    expect(answersMatch("1,000%", "10")).toBe(true);
+  });
+});
+
+describe("AnswerExtraction - answersMatch scientific notation", () => {
+  test("e notation matches expanded number", () => {
+    expect(answersMatch("1.5e6", "1500000")).toBe(true);
+    expect(answersMatch("1e3", "1000")).toBe(true);
+    expect(answersMatch("2.5e-2", "0.025")).toBe(true);
+  });
+
+  test("multiplication notation matches expanded", () => {
+    expect(answersMatch("3×10^8", "300000000")).toBe(true);
+    expect(answersMatch("3x10^8", "300000000")).toBe(true);
+    expect(answersMatch("3X10^8", "300000000")).toBe(true);
+  });
+
+  test("unicode superscript notation", () => {
+    expect(answersMatch("3×10⁸", "300000000")).toBe(true);
+    expect(answersMatch("1×10⁻²", "0.01")).toBe(true);
+  });
+
+  test("expanded number matches scientific", () => {
+    expect(answersMatch("1500000", "1.5e6")).toBe(true);
+    expect(answersMatch("300000000", "3×10^8")).toBe(true);
+  });
+});
+
 // =============================================================================
 // TOKEN ESTIMATION TESTS
 // =============================================================================
