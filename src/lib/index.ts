@@ -68,6 +68,8 @@ export {
   type LLMJudgeFunc,
   summarizeJudgments,
 } from "./judge";
+// Math module (operators, tokenizer, AST) - also re-exported via verification
+export * as math from "./math";
 // Session management
 export {
   SessionManager,
