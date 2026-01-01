@@ -4005,6 +4005,14 @@ describe("AnswerExtraction - answersMatch", () => {
     expect(answersMatch("YES", "NO")).toBe(false);
   });
 
+  test("rejects false positive containment for numeric-only strings", () => {
+    // Bug fix: "1/2" should NOT match "1" via containment (both numeric)
+    expect(answersMatch("1/2", "1")).toBe(false);
+    expect(answersMatch("12", "1")).toBe(false);
+    expect(answersMatch("21", "1")).toBe(false);
+    expect(answersMatch("123", "12")).toBe(false);
+  });
+
   // Fraction matching tests
   test("fraction to decimal: 1/2 matches 0.5", () => {
     expect(answersMatch("1/2", "0.5")).toBe(true);

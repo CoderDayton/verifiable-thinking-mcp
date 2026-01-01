@@ -551,12 +551,8 @@ function matchExplicitMarkers(cleaned: string): string | null {
  * Priority order:
  * 0. If expectedAnswers provided, look for exact match in response (fastest path)
  * 1. LaTeX \boxed{X} (explicit answer marking)
- * 2-5. Explicit markers (via matchExplicitMarkers)
- * 6. Last equation result "= X"
- * 7. Standalone numbers in last lines
- * 8. Last number/percentage in response
- * 8b. Word fractions
- * 9. Last meaningful word (for YES/NO/TRUE/FALSE)
+ * 2-5. Explicit markers (via matchExplicitMarkers): "Final Answer:", "Answer:", "The answer is"
+ * 6-9. Implicit patterns (via matchImplicitPatterns): equations, numbers, fractions, YES/NO
  */
 export function extractAnswer(response: string, expectedAnswers?: string[]): string {
   // Strip all LLM artifacts (thinking tags, markdown, model tokens, etc.)
@@ -576,6 +572,16 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
   const explicitMatch = matchExplicitMarkers(cleaned);
   if (explicitMatch) return explicitMatch;
 
+  // Priority 6-9: Implicit patterns (equations, standalone numbers, word fractions)
+  return matchImplicitPatterns(cleaned);
+}
+
+/**
+ * Match implicit answer patterns (Priority 6-9).
+ * Patterns: equation results, standalone numbers, percentages, word fractions, YES/NO.
+ * @returns The extracted answer, or empty string if nothing found
+ */
+function matchImplicitPatterns(cleaned: string): string {
   // Priority 6: Last equation result "= X" in the text (including fractions like "= 2/3")
   const eqMatches = [...cleaned.matchAll(/=\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)/g)];
   if (eqMatches.length > 0) {
@@ -808,9 +814,18 @@ export function answersMatch(extracted: string, expected: string): boolean {
     if (absDiff < Math.max(absTol, relTol)) return true;
   }
 
-  // Check if one contains the other (for partial matches like "45" vs "45 degrees")
-  if (normExpected.includes(normExtracted) || normExtracted.includes(normExpected)) {
-    return true;
+  // Check if one contains the other as a complete token (for "45" vs "45 degrees")
+  // Only applies when not both purely numeric (numeric comparison already handled above)
+  // For "45 degrees" vs "45": shorter appears at start/end of longer (after normalization removes spaces)
+  const hasNonNumeric = /[a-z]/i.test(normExtracted) || /[a-z]/i.test(normExpected);
+  if (hasNonNumeric) {
+    const shorter = normExtracted.length <= normExpected.length ? normExtracted : normExpected;
+    const longer = normExtracted.length > normExpected.length ? normExtracted : normExpected;
+
+    // Shorter must appear at start or end of longer (handles "45degrees"↔"45", "answeris42"↔"42")
+    if (shorter.length > 0 && (longer.startsWith(shorter) || longer.endsWith(shorter))) {
+      return true;
+    }
   }
 
   return false;
