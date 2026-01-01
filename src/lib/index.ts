@@ -44,8 +44,10 @@ export {
 } from "./domain";
 // Answer extraction & matching
 export {
+  type AnswerExtractionResult,
   answersMatch,
   extractAnswer,
+  extractAnswerWithConfidence,
   normalizeAnswer,
   parseFraction,
   shouldStreamStrip,

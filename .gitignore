@@ -94,10 +94,14 @@ desktop.ini
 # =============================================================================
 # Benchmark Results (keep questions, ignore generated results)
 # =============================================================================
+examples/results/*.json
+examples/results/*.log
+!examples/results/.gitkeep
 examples/benchmarks/results-*.json
 examples/benchmarks/judge-*.json
 examples/benchmarks/compression-results-*.json
 examples/benchmarks/compression-comparison-*.json
+examples/benchmarks/.cache/
 
 # =============================================================================
 # Reference materials (research, drafts, not part of the codebase)

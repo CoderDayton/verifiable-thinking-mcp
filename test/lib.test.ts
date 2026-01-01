@@ -3131,6 +3131,7 @@ describe("CompressionDetection - needsCompression", () => {
 import {
   answersMatch,
   extractAnswer,
+  extractAnswerWithConfidence,
   normalizeAnswer,
   parseFraction,
   shouldStreamStrip,
@@ -3955,6 +3956,59 @@ describe("AnswerExtraction - extractAnswer", () => {
     test("handles standalone percentage on line", () => {
       expect(extractAnswer("The result:\n95%")).toBe("95%");
     });
+  });
+});
+
+describe("AnswerExtraction - extractAnswerWithConfidence", () => {
+  test("highest confidence for expected answer match", () => {
+    const result = extractAnswerWithConfidence("The answer is definitely 42", ["42", "forty-two"]);
+    expect(result.answer).toBe("42");
+    expect(result.confidence).toBe(1.0);
+    expect(result.source).toBe("expected");
+  });
+
+  test("high confidence for boxed answers", () => {
+    const result = extractAnswerWithConfidence("Therefore \\boxed{42} is the answer");
+    expect(result.answer).toBe("42");
+    expect(result.confidence).toBe(0.95);
+    expect(result.source).toBe("boxed");
+  });
+
+  test("explicit markers have good confidence", () => {
+    const result = extractAnswerWithConfidence("After calculation, the answer is 99.");
+    expect(result.answer).toBe("99");
+    expect(result.confidence).toBe(0.85);
+    expect(result.source).toBe("explicit");
+  });
+
+  test("equation results have moderate confidence", () => {
+    const result = extractAnswerWithConfidence("Calculating: 2 + 2 = 4. So 5 + 7 = 12");
+    expect(result.answer).toBe("12");
+    expect(result.confidence).toBe(0.7);
+    expect(result.source).toBe("equation");
+  });
+
+  test("standalone numbers have lower confidence", () => {
+    const result = extractAnswerWithConfidence("Some text here.\n42");
+    expect(result.answer).toBe("42");
+    expect(result.confidence).toBe(0.6);
+    expect(result.source).toBe("standalone");
+  });
+
+  test("fallback has lowest confidence", () => {
+    const result = extractAnswerWithConfidence("The statement is TRUE");
+    expect(result.answer).toBe("TRUE");
+    expect(result.confidence).toBe(0.3);
+    expect(result.source).toBe("fallback");
+  });
+
+  test("returns same answer as extractAnswer", () => {
+    const inputs = ["The answer is 42", "\\boxed{99}", "Result: 3.14", "2 + 3 = 5", "YES"];
+    for (const input of inputs) {
+      const withConf = extractAnswerWithConfidence(input);
+      const plain = extractAnswer(input);
+      expect(withConf.answer).toBe(plain);
+    }
   });
 });
 

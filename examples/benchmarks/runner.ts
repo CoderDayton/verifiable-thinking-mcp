@@ -29,6 +29,98 @@ import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
 import { routeQuestion, spotCheck, type SpotCheckResult } from "../../src/lib/think/index";
 import { detectCommonMistakesFromText, type MistakeType } from "../../src/lib/compute/solvers/derivation";
 
+// ============================================================================
+// RESULT CACHING
+// ============================================================================
+
+const CACHE_DIR = resolve(__dirname, ".cache");
+const CACHE_VERSION = "v2"; // Bump when RunResult schema changes
+
+/**
+ * Generate a cache key for a question + model combination.
+ * Uses Bun's fast hashing for content-based keys.
+ */
+function getCacheKey(
+  question: { id: string; question: string; expected_answer: string | string[] | null },
+  model: string,
+  mode: "baseline" | "tool"
+): string {
+  const content = JSON.stringify({
+    v: CACHE_VERSION,
+    id: question.id,
+    q: question.question,
+    exp: question.expected_answer,
+    model,
+    mode,
+  });
+  const hash = Bun.hash(content).toString(16);
+  return `${question.id}-${mode}-${hash.slice(0, 12)}`;
+}
+
+/**
+ * Get cached result for a question if it exists.
+ */
+async function getCachedResult(
+  question: { id: string; question: string; expected_answer: string | string[] | null },
+  model: string,
+  mode: "baseline" | "tool"
+): Promise<RunResult["baseline"] | RunResult["with_tool"] | null> {
+  const key = getCacheKey(question, model, mode);
+  const cachePath = resolve(CACHE_DIR, `${key}.json`);
+  
+  try {
+    const file = Bun.file(cachePath);
+    if (await file.exists()) {
+      return await file.json();
+    }
+  } catch {
+    // Cache miss or corrupt file
+  }
+  return null;
+}
+
+/**
+ * Cache a result for a question.
+ */
+async function cacheResult(
+  question: { id: string; question: string; expected_answer: string | string[] | null },
+  model: string,
+  mode: "baseline" | "tool",
+  result: RunResult["baseline"] | RunResult["with_tool"]
+): Promise<void> {
+  const key = getCacheKey(question, model, mode);
+  const cachePath = resolve(CACHE_DIR, `${key}.json`);
+  
+  try {
+    // Ensure cache directory exists
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(CACHE_DIR, { recursive: true });
+    await Bun.write(cachePath, JSON.stringify(result));
+  } catch {
+    // Ignore cache write errors
+  }
+}
+
+/**
+ * Clear all cached results.
+ */
+async function clearCache(): Promise<number> {
+  let cleared = 0;
+  try {
+    const { readdir, unlink } = await import("node:fs/promises");
+    const files = await readdir(CACHE_DIR);
+    for (const file of files) {
+      if (file.endsWith(".json")) {
+        await unlink(resolve(CACHE_DIR, file));
+        cleared++;
+      }
+    }
+  } catch {
+    // Directory doesn't exist or other error
+  }
+  return cleared;
+}
+
 // Types
 export interface Question {
   id: string;
@@ -1234,6 +1326,7 @@ export async function runBenchmark(
     concurrency?: number;
     spotCheckDiagnostics?: boolean;
     onProgress?: (completed: number, total: number, result: RunResult) => void;
+    useCache?: boolean;
   } = {}
 ): Promise<BenchmarkResults> {
   const {
@@ -1246,6 +1339,7 @@ export async function runBenchmark(
     concurrency = 1,
     spotCheckDiagnostics = false,
     onProgress,
+    useCache = false,
   } = options;
 
   const log = quiet ? () => {} : console.log.bind(console);
@@ -1313,64 +1407,120 @@ export async function runBenchmark(
     };
 
     if (doBaseline) {
-      if (concurrency === 1) log("  Running baseline (pure LLM)...");
-      result.baseline = await runBaseline(llm, q);
-      if (concurrency === 1) {
-        const correctMark =
-          result.baseline.correct === null
-            ? "○"
-            : result.baseline.correct
-            ? "✓"
-            : "✗";
-        const preview = result.baseline.answer.split("\n")[0].slice(0, 60);
-        log(
-          `  Baseline: ${correctMark} (${result.baseline.time_ms.toFixed(
-            2
-          )}ms) → "${preview}${
-            result.baseline.answer.length > 60 ? "..." : ""
-          }"`
-        );
+      const model = process.env.LLM_MODEL || "unknown";
+      // Check cache first
+      if (useCache) {
+        const cached = await getCachedResult(q, model, "baseline");
+        if (cached) {
+          result.baseline = cached as RunResult["baseline"];
+          if (concurrency === 1) {
+            const correctMark = result.baseline.correct === null ? "○" : result.baseline.correct ? "✓" : "✗";
+            const preview = result.baseline.answer.split("\n")[0].slice(0, 60);
+            log(`  Baseline: ${correctMark} [CACHED] → "${preview}${result.baseline.answer.length > 60 ? "..." : ""}"`);
+          }
+        } else {
+          if (concurrency === 1) log("  Running baseline (pure LLM)...");
+          result.baseline = await runBaseline(llm, q);
+          await cacheResult(q, model, "baseline", result.baseline);
+          if (concurrency === 1) {
+            const correctMark = result.baseline.correct === null ? "○" : result.baseline.correct ? "✓" : "✗";
+            const preview = result.baseline.answer.split("\n")[0].slice(0, 60);
+            log(`  Baseline: ${correctMark} (${result.baseline.time_ms.toFixed(2)}ms) → "${preview}${result.baseline.answer.length > 60 ? "..." : ""}"`);
+          }
+        }
+      } else {
+        if (concurrency === 1) log("  Running baseline (pure LLM)...");
+        result.baseline = await runBaseline(llm, q);
+        if (concurrency === 1) {
+          const correctMark =
+            result.baseline.correct === null
+              ? "○"
+              : result.baseline.correct
+              ? "✓"
+              : "✗";
+          const preview = result.baseline.answer.split("\n")[0].slice(0, 60);
+          log(
+            `  Baseline: ${correctMark} (${result.baseline.time_ms.toFixed(
+              2
+            )}ms) → "${preview}${
+              result.baseline.answer.length > 60 ? "..." : ""
+            }"`
+          );
+        }
       }
     }
 
     if (doTool && mcp) {
-      if (concurrency === 1 && !verbose) log("  Running with MCP tool...");
-      result.with_tool = await runWithTool(
-        llm,
-        mcp,
-        q,
-        useLocalCompute,
-        compressionLevel,
-        verbose && concurrency === 1
-      );
-      if (concurrency === 1) {
-        const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
-        const compTag = result.with_tool.compression
-          ? ` [scratchpad: ${result.with_tool.compression.bytes_saved}B saved]`
-          : "";
-        const pathTag = result.with_tool.complexity_path
-          ? ` via ${result.with_tool.complexity_path}`
-          : "";
-        const correctMark =
-          result.with_tool.correct === null
-            ? "○"
-            : result.with_tool.correct
-            ? "✓"
-            : "✗";
-        const preview = result.with_tool.answer.split("\n")[0].slice(0, 60);
-        log(
-          `  Result: ${correctMark} (${result.with_tool.time_ms.toFixed(
-            0
-          )}ms)${pathTag}${methodTag}${compTag} → "${preview}${
-            result.with_tool.answer.length > 60 ? "..." : ""
-          }"`
+      const model = process.env.LLM_MODEL || "unknown";
+      // Check cache first
+      if (useCache) {
+        const cached = await getCachedResult(q, model, "tool");
+        if (cached) {
+          result.with_tool = cached as RunResult["with_tool"];
+          if (concurrency === 1) {
+            const correctMark = result.with_tool.correct === null ? "○" : result.with_tool.correct ? "✓" : "✗";
+            const preview = result.with_tool.answer.split("\n")[0].slice(0, 60);
+            const pathTag = result.with_tool.complexity_path ? ` via ${result.with_tool.complexity_path}` : "";
+            log(`  Result: ${correctMark} [CACHED]${pathTag} → "${preview}${result.with_tool.answer.length > 60 ? "..." : ""}"`);
+          }
+        } else {
+          if (concurrency === 1 && !verbose) log("  Running with MCP tool...");
+          result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel, verbose && concurrency === 1);
+          await cacheResult(q, model, "tool", result.with_tool);
+          if (concurrency === 1) {
+            const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
+            const compTag = result.with_tool.compression ? ` [scratchpad: ${result.with_tool.compression.bytes_saved}B saved]` : "";
+            const pathTag = result.with_tool.complexity_path ? ` via ${result.with_tool.complexity_path}` : "";
+            const correctMark = result.with_tool.correct === null ? "○" : result.with_tool.correct ? "✓" : "✗";
+            const preview = result.with_tool.answer.split("\n")[0].slice(0, 60);
+            log(`  Result: ${correctMark} (${result.with_tool.time_ms.toFixed(0)}ms)${pathTag}${methodTag}${compTag} → "${preview}${result.with_tool.answer.length > 60 ? "..." : ""}"`);
+            if (spotCheckDiagnostics && result.with_tool.spot_check && !result.with_tool.spot_check.passed) {
+              const sc = result.with_tool.spot_check;
+              log(`    ⚠️  TRAP DETECTED: ${sc.trapType || "unknown"}`);
+              if (sc.warning) log(`       Warning: ${sc.warning}`);
+              if (sc.hint) log(`       Hint: ${sc.hint}`);
+            }
+          }
+        }
+      } else {
+        if (concurrency === 1 && !verbose) log("  Running with MCP tool...");
+        result.with_tool = await runWithTool(
+          llm,
+          mcp,
+          q,
+          useLocalCompute,
+          compressionLevel,
+          verbose && concurrency === 1
         );
-        // Show spot-check diagnostics if enabled and trap detected
-        if (spotCheckDiagnostics && result.with_tool.spot_check && !result.with_tool.spot_check.passed) {
-          const sc = result.with_tool.spot_check;
-          log(`    ⚠️  TRAP DETECTED: ${sc.trapType || "unknown"}`);
-          if (sc.warning) log(`       Warning: ${sc.warning}`);
-          if (sc.hint) log(`       Hint: ${sc.hint}`);
+        if (concurrency === 1) {
+          const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
+          const compTag = result.with_tool.compression
+            ? ` [scratchpad: ${result.with_tool.compression.bytes_saved}B saved]`
+            : "";
+          const pathTag = result.with_tool.complexity_path
+            ? ` via ${result.with_tool.complexity_path}`
+            : "";
+          const correctMark =
+            result.with_tool.correct === null
+              ? "○"
+              : result.with_tool.correct
+              ? "✓"
+              : "✗";
+          const preview = result.with_tool.answer.split("\n")[0].slice(0, 60);
+          log(
+            `  Result: ${correctMark} (${result.with_tool.time_ms.toFixed(
+              0
+            )}ms)${pathTag}${methodTag}${compTag} → "${preview}${
+              result.with_tool.answer.length > 60 ? "..." : ""
+            }"`
+          );
+          // Show spot-check diagnostics if enabled and trap detected
+          if (spotCheckDiagnostics && result.with_tool.spot_check && !result.with_tool.spot_check.passed) {
+            const sc = result.with_tool.spot_check;
+            log(`    ⚠️  TRAP DETECTED: ${sc.trapType || "unknown"}`);
+            if (sc.warning) log(`       Warning: ${sc.warning}`);
+            if (sc.hint) log(`       Hint: ${sc.hint}`);
+          }
         }
       }
     }
@@ -2575,12 +2725,21 @@ Options:
   --ci-report        Output CI-friendly summary with exit code
   --verbose, -v      Stream LLM responses in real-time
   --parallel=N       Run N questions concurrently (default: 1, sequential)
+  --cache            Use cached results for unchanged questions (faster re-runs)
+  --clear-cache      Clear cached results and exit
   --help, -h         Show this help
 
 Environment Variables:
   LLM_MODEL          Model to use
   LLM_API_KEY        API key for LLM provider
     `);
+    process.exit(0);
+  }
+
+  // Handle --clear-cache
+  if (args.includes("--clear-cache")) {
+    const cleared = await clearCache();
+    console.log(`Cleared ${cleared} cached results from ${CACHE_DIR}`);
     process.exit(0);
   }
 
@@ -2619,6 +2778,7 @@ Environment Variables:
     : "auto";
   const mistakesOnly = args.includes("--mistakes-only");
   const spotCheckDiag = args.includes("--spot-check");
+  const useCache = args.includes("--cache");
 
   const log = jsonOutput ? () => {} : console.log.bind(console);
 
@@ -2764,9 +2924,12 @@ Environment Variables:
     process.exit(0);
   }
 
-  // Incremental results file - saves after each question completes
+  // Incremental results file - saves to ../results/ after each question completes
   const incrementalFile = `results-${Date.now()}.json`;
-  const incrementalPath = new URL(incrementalFile, import.meta.url).pathname;
+  const resultsDir = new URL("../results/", import.meta.url).pathname;
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(resultsDir, { recursive: true });
+  const incrementalPath = `${resultsDir}${incrementalFile}`;
   const incrementalResults: RunResult[] = [];
   
   // Progress callback that saves incrementally
@@ -2801,6 +2964,7 @@ Environment Variables:
     concurrency: parallel,
     spotCheckDiagnostics: spotCheckDiag,
     onProgress: saveIncrementally,
+    useCache,
   });
 
   if (jsonOutput) {

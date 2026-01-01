@@ -546,6 +546,58 @@ function matchExplicitMarkers(cleaned: string): string | null {
 }
 
 /**
+ * Answer extraction result with confidence score.
+ */
+export interface AnswerExtractionResult {
+  answer: string;
+  confidence: number; // 0-1, higher = more confident
+  source: "expected" | "boxed" | "explicit" | "equation" | "standalone" | "implicit" | "fallback";
+}
+
+/**
+ * Extract answer from LLM response with confidence scoring.
+ * Higher confidence sources (explicit markers, boxed) are preferred over implicit ones.
+ *
+ * Confidence levels:
+ * - 1.0: Expected answer found in response (verified match)
+ * - 0.95: LaTeX \boxed{X} (LLM explicitly marked)
+ * - 0.85: "Final Answer:", "Answer:", "The answer is" patterns
+ * - 0.7: Equation result "= X"
+ * - 0.6: Standalone number in last lines
+ * - 0.4: Last number/percentage in response
+ * - 0.3: Word fractions, YES/NO fallback
+ */
+export function extractAnswerWithConfidence(
+  response: string,
+  expectedAnswers?: string[],
+): AnswerExtractionResult {
+  // Priority 1: LaTeX boxed (check BEFORE stripping - stripLLMOutput extracts boxed content)
+  // Highest confidence because LLM explicitly marked this as the answer
+  const boxedMatch = response.match(/\\boxed\{([^}]+)\}/);
+  if (boxedMatch?.[1]) {
+    return { answer: cleanNumber(boxedMatch[1]), confidence: 0.95, source: "boxed" };
+  }
+
+  // Strip all LLM artifacts (thinking tags, markdown, model tokens, etc.)
+  const cleaned = stripLLMOutput(response);
+
+  // Priority 0: If we know expected answers, look for them directly in the response
+  if (expectedAnswers && expectedAnswers.length > 0) {
+    const matched = matchExpectedAnswer(cleaned, expectedAnswers);
+    if (matched) return { answer: matched, confidence: 1.0, source: "expected" };
+  }
+
+  // Priority 2-5: Explicit answer markers
+  const explicitMatch = matchExplicitMarkers(cleaned);
+  if (explicitMatch) {
+    return { answer: explicitMatch, confidence: 0.85, source: "explicit" };
+  }
+
+  // Priority 6-9: Implicit patterns (equations, standalone numbers, word fractions)
+  return matchImplicitPatternsWithConfidence(cleaned);
+}
+
+/**
  * Extract answer from LLM response using priority-based pattern matching
  *
  * Priority order:
@@ -555,79 +607,72 @@ function matchExplicitMarkers(cleaned: string): string | null {
  * 6-9. Implicit patterns (via matchImplicitPatterns): equations, numbers, fractions, YES/NO
  */
 export function extractAnswer(response: string, expectedAnswers?: string[]): string {
-  // Strip all LLM artifacts (thinking tags, markdown, model tokens, etc.)
-  const cleaned = stripLLMOutput(response);
-
-  // Priority 0: If we know expected answers, look for them directly in the response
-  if (expectedAnswers && expectedAnswers.length > 0) {
-    const matched = matchExpectedAnswer(cleaned, expectedAnswers);
-    if (matched) return matched;
-  }
-
-  // Priority 1: LaTeX boxed (highest confidence - LLM explicitly marked answer)
-  const boxedMatch = cleaned.match(/\\boxed\{([^}]+)\}/);
-  if (boxedMatch?.[1]) return cleanNumber(boxedMatch[1]);
-
-  // Priority 2-5: Explicit answer markers
-  const explicitMatch = matchExplicitMarkers(cleaned);
-  if (explicitMatch) return explicitMatch;
-
-  // Priority 6-9: Implicit patterns (equations, standalone numbers, word fractions)
-  return matchImplicitPatterns(cleaned);
+  return extractAnswerWithConfidence(response, expectedAnswers).answer;
 }
 
 /**
- * Match implicit answer patterns (Priority 6-9).
- * Patterns: equation results, standalone numbers, percentages, word fractions, YES/NO.
- * @returns The extracted answer, or empty string if nothing found
+ * Match implicit answer patterns with confidence scoring (Priority 6-9).
  */
-function matchImplicitPatterns(cleaned: string): string {
-  // Priority 6: Last equation result "= X" in the text (including fractions like "= 2/3")
+function matchImplicitPatternsWithConfidence(cleaned: string): AnswerExtractionResult {
+  // Priority 6: Last equation result "= X" (confidence 0.7)
   const eqMatches = [...cleaned.matchAll(/=\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)/g)];
   if (eqMatches.length > 0) {
     const lastMatch = eqMatches[eqMatches.length - 1];
-    if (lastMatch?.[1]) return cleanNumber(lastMatch[1]);
+    if (lastMatch?.[1]) {
+      return { answer: cleanNumber(lastMatch[1]), confidence: 0.7, source: "equation" };
+    }
   }
 
-  // Priority 7: Look for standalone numbers (including fractions) in the last few lines
+  // Priority 7: Standalone numbers in last few lines (confidence 0.6)
   const lines = cleaned.trim().split("\n").slice(-5);
   for (const line of lines.reverse()) {
-    // "is NUMBER" pattern (including fractions and percentages)
-    // Note: Can't use \b after %? because % is not a word char - use lookahead instead
     const isNumMatch = line.match(/is\s+(-?[\d,]+(?:\.\d+)?(?:\/\d+)?%?)(?=\s|$|[.,;:!?)])/i);
-    if (isNumMatch?.[1]) return cleanNumber(isNumMatch[1]);
+    if (isNumMatch?.[1]) {
+      return { answer: cleanNumber(isNumMatch[1]), confidence: 0.6, source: "standalone" };
+    }
 
-    // Standalone number/fraction/percentage on a line
     const standaloneNum = line.match(/^\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?%?)\s*$/);
-    if (standaloneNum?.[1]) return cleanNumber(standaloneNum[1]);
+    if (standaloneNum?.[1]) {
+      return { answer: cleanNumber(standaloneNum[1]), confidence: 0.6, source: "standalone" };
+    }
   }
 
-  // Priority 8: Last percentage in response (check before plain numbers)
+  // Priority 8: Last percentage (confidence 0.4)
   const percentMatches = [...cleaned.matchAll(RE_PERCENTAGE)];
   if (percentMatches.length > 0) {
     const lastMatch = percentMatches[percentMatches.length - 1];
-    if (lastMatch?.[1]) return `${cleanNumber(lastMatch[1])}%`;
+    if (lastMatch?.[1]) {
+      return { answer: `${cleanNumber(lastMatch[1])}%`, confidence: 0.4, source: "implicit" };
+    }
   }
 
-  // Priority 8a: Last number/fraction in the entire response
+  // Priority 8a: Last number/fraction (confidence 0.4)
   const allNumbers = cleaned.match(/-?[\d,]+(?:\.\d+)?(?:\/\d+)?/g);
   if (allNumbers && allNumbers.length > 0) {
     const lastNum = allNumbers[allNumbers.length - 1];
-    if (lastNum) return cleanNumber(lastNum);
+    if (lastNum) {
+      return { answer: cleanNumber(lastNum), confidence: 0.4, source: "implicit" };
+    }
   }
 
-  // Priority 8b: Word fractions ("two-thirds", "one-half", "three-quarters")
-  // Reset lastIndex since RE_WORD_FRACTION has 'g' flag
+  // Priority 8b: Word fractions (confidence 0.3)
   RE_WORD_FRACTION.lastIndex = 0;
   const wordFractionMatch = cleaned.match(RE_WORD_FRACTION);
   if (wordFractionMatch && wordFractionMatch.length > 0) {
-    // Return last word fraction found (most likely the answer)
-    return wordFractionMatch[wordFractionMatch.length - 1]!;
+    return {
+      answer: wordFractionMatch[wordFractionMatch.length - 1]!,
+      confidence: 0.3,
+      source: "fallback",
+    };
   }
 
-  // Priority 9: Last meaningful word (for YES/NO/TRUE/FALSE type answers)
+  // Priority 9: Last meaningful word (confidence 0.3)
   const lastLines = cleaned.trim().split("\n").slice(-3).join(" ");
-  return extractLastMeaningfulWord(lastLines);
+  return {
+    answer: extractLastMeaningfulWord(lastLines),
+    confidence: 0.3,
+    source: "fallback",
+  };
 }
 
 // =============================================================================
