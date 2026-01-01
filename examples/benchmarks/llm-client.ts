@@ -10,6 +10,16 @@ let lastRequestTime = 0;
 const LLM_CONCURRENCY = parseInt(process.env.LLM_CONCURRENCY || "2", 10);
 const LLM_DELAY = parseFloat(process.env.LLM_DELAY || "1.0") * 1000; // Convert to ms
 
+/**
+ * Sanitize error messages to prevent API key leakage in logs.
+ */
+function sanitizeError(text: string): string {
+  return text
+    .replace(/Bearer [^\s"]+/gi, "Bearer [REDACTED]")
+    .replace(/Authorization:\s*[^\s"]+/gi, "Authorization: [REDACTED]")
+    .replace(/api[_-]?key[=:]\s*[^\s"&]+/gi, "api_key=[REDACTED]");
+}
+
 export interface LLMConfig {
   baseUrl: string;
   model: string;
@@ -282,7 +292,8 @@ export class LLMClient {
           }
 
           if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${sanitizeError(errorText)}`);
           }
 
           const data = (await response.json()) as ChatResponseWithTools;
@@ -346,9 +357,10 @@ export class LLMClient {
         signal: controller.signal,
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-      }
+          if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${sanitizeError(errorText)}`);
+          }
 
       const reader = response.body?.getReader();
       if (!reader) return;

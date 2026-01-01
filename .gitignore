@@ -102,6 +102,7 @@ examples/benchmarks/judge-*.json
 examples/benchmarks/compression-results-*.json
 examples/benchmarks/compression-comparison-*.json
 examples/benchmarks/.cache/
+examples/benchmarks/*.log
 
 # =============================================================================
 # Reference materials (research, drafts, not part of the codebase)

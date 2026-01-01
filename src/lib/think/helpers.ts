@@ -537,7 +537,7 @@ export function jsonResponse(data: Record<string, unknown>) {
 
 /** Initialize execute context from args */
 export function initContext(args: ThinkArgs, thought: string): ExecuteContext {
-  const sessionId = args.session_id || `s_${Date.now().toString(36)}`;
+  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
   const branch = args.branch_id || "main";
   const step = args.step_number;
   const compressionLevel = (args.compression_level || "auto") as CompressionLevel;

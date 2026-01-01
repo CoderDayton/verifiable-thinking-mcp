@@ -361,7 +361,7 @@ async function handleStep(
   ctx: MCPContext,
 ): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id || `s_${Date.now().toString(36)}`;
+  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
   const branchId = "main"; // Default branch for step operation
   const threshold = args.confidence_threshold ?? 0.8;
   const tokenBudget = args.token_budget ?? 3000;
@@ -750,7 +750,7 @@ async function handleBranch(
 
   // Determine branch point
   const fromStep = args.from_step ?? SessionManager.getCurrentStep(sessionId, "main");
-  const branchId = `branch-${Date.now().toString(36)}`;
+  const branchId = `branch-${crypto.randomUUID()}`;
   const branchName = args.branch_name || `Alternative from step ${fromStep}`;
 
   // Auto-increment step number for new branch
@@ -1175,7 +1175,7 @@ async function handleAugment(
   ctx: MCPContext,
 ): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id || `s_${Date.now().toString(36)}`;
+  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
   const threshold = args.confidence_threshold ?? 0.8;
   const branchId = "main";
 

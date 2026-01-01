@@ -22,8 +22,14 @@ to the query while maintaining coherence by preserving original sentence order.
 Use this to reduce token costs before sending large contexts to LLMs.`,
 
   parameters: z.object({
-    context: z.string().describe("The text/context to compress"),
-    query: z.string().describe("Focus query - sentences relevant to this are kept"),
+    context: z
+      .string()
+      .max(1_000_000, "Context exceeds 1MB limit - split into smaller chunks")
+      .describe("The text/context to compress"),
+    query: z
+      .string()
+      .max(10_000, "Query exceeds 10KB limit")
+      .describe("Focus query - sentences relevant to this are kept"),
     target_ratio: z
       .number()
       .min(0.1)

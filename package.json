@@ -6,8 +6,8 @@
   "private": true,
   "dependencies": {
     "dotenv": "^17.2.3",
-    "fastmcp": "latest",
-    "zod": "latest"
+    "fastmcp": "^3.26.7",
+    "zod": "^4.3.4"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
@@ -15,7 +15,7 @@
     "lefthook": "^2.0.13"
   },
   "peerDependencies": {
-    "typescript": "^5"
+    "typescript": "^5.9.3"
   },
   "scripts": {
     "dev": "fastmcp dev src/index.ts",
