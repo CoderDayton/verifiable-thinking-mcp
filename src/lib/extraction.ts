@@ -4,79 +4,67 @@
  * Based on HuggingFace Math-Verify patterns
  */
 
-// =============================================================================
-// PRE-COMPILED REGEX PATTERNS
-// Module-level constants avoid recompilation on every stripLLMOutput call
-// =============================================================================
-
-// Thinking/Reasoning Tags
-const RE_THINK = /<think>[\s\S]*?<\/think>/gi;
-const RE_THINKING = /<thinking>[\s\S]*?<\/thinking>/gi;
-const RE_REASONING = /<reasoning>[\s\S]*?<\/reasoning>/gi;
-const RE_ANTITHINK = /<antithink>[\s\S]*?<\/antithink>/gi;
-const RE_THOUGHT = /<thought>[\s\S]*?<\/thought>/gi;
-const RE_THOUGHTS = /<thoughts>[\s\S]*?<\/thoughts>/gi;
-const RE_REFLECTION = /<reflection>[\s\S]*?<\/reflection>/gi;
-const RE_INTERNAL_MONOLOGUE = /<internal_monologue>[\s\S]*?<\/internal_monologue>/gi;
-
-// Tool/Artifact Containers
-const RE_TOOL_CALL = /<tool_call>[\s\S]*?<\/tool_call>/gi;
-const RE_TOOL_RESULT = /<tool_result>[\s\S]*?<\/tool_result>/gi;
-const RE_ARTIFACTS = /<ARTIFACTS>[\s\S]*?<\/ARTIFACTS>/gi;
-const RE_DOCUMENT_CONTENT = /<document_content>[\s\S]*?<\/document_content>/gi;
-const RE_CONTEXT = /<context>[\s\S]*?<\/context>/gi;
-
-// Model-Specific Tokens
-const RE_BEGIN_BOX = /<\|begin_of_box\|>/gi;
-const RE_END_BOX = /<\|end_of_box\|>/gi;
-const RE_IM_BLOCK = /<\|im_start\|>[\s\S]*?<\|im_end\|>/gi;
-const RE_ENDOFTEXT = /<\|endoftext\|>/gi;
-const RE_PAD = /<\|pad\|>/gi;
-
-// Markdown
-const RE_CODE_BLOCK = /```[\s\S]*?```/g;
-const RE_BOLD_ASTERISK = /\*\*([^*]+)\*\*/g;
-const RE_BOLD_UNDERSCORE = /__([^_]+)__/g;
-const RE_ITALIC_ASTERISK = /\*([^*]+)\*/g;
-const RE_ITALIC_UNDERSCORE = /_([^_]+)_/g;
-const RE_INLINE_CODE = /`([^`]+)`/g;
-const RE_HEADINGS = /^#{1,6}\s*/gm;
-const RE_STRIKETHROUGH = /~~([^~]+)~~/g;
-const RE_IMAGES = /!\[[^\]]*\]\([^)]+\)/g;
-const RE_LINKS = /\[([^\]]+)\]\([^)]+\)/g;
-const RE_BLOCKQUOTE = /^>\s*/gm;
-const RE_HORIZONTAL_RULE = /^[-*_]{3,}\s*$/gm;
-const RE_UNORDERED_LIST = /^[\s]*[-*+]\s+/gm;
-const RE_ORDERED_LIST = /^[\s]*\d+\.\s+/gm;
-
-// LaTeX
-const RE_BOXED_DOLLAR = /\$\\boxed\{([^}]+)\}\$/g;
-const RE_BOXED = /\\boxed\{([^}]+)\}/g;
-const RE_INLINE_MATH = /\$([^$]+)\$/g;
-
-// HTML
-const RE_NBSP = /&nbsp;/gi;
-const RE_AMP = /&amp;/gi;
-const RE_LT = /&lt;/gi;
-const RE_GT = /&gt;/gi;
-const RE_QUOT = /&quot;/gi;
-const RE_APOS = /&#39;/gi;
-const RE_BR = /<br\s*\/?>/gi;
-const RE_SIMPLE_TAGS = /<\/?(?:p|div|span|b|i|u|em|strong)>/gi;
-
-// Whitespace
-const RE_MULTI_NEWLINE = /\n{3,}/g;
-const RE_TRAILING_WHITESPACE = /[ \t]+$/gm;
-const RE_MULTI_SPACE = /[ \t]{2,}/g;
-
-// Word fractions (pre-compiled for performance)
-const RE_WORD_FRACTION =
-  /\b(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/gi;
-const RE_WORD_FRACTION_START =
-  /^(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/i;
-
-// Percentage pattern (captures number with %)
-const RE_PERCENTAGE = /(-?[\d,]+(?:\.\d+)?)\s*%/g;
+// Import pre-compiled regex patterns from centralized module
+import {
+  RE_AMP,
+  RE_ANTITHINK,
+  RE_APOS,
+  RE_ARTIFACTS,
+  // Model-Specific Tokens
+  RE_BEGIN_BOX,
+  RE_BLOCKQUOTE,
+  RE_BOLD_ASTERISK,
+  RE_BOLD_UNDERSCORE,
+  RE_BOXED,
+  // LaTeX
+  RE_BOXED_DOLLAR,
+  RE_BR,
+  // Markdown
+  RE_CODE_BLOCK,
+  RE_CONTEXT,
+  RE_DOCUMENT_CONTENT,
+  RE_END_BOX,
+  RE_ENDOFTEXT,
+  RE_GT,
+  RE_HEADINGS,
+  RE_HORIZONTAL_RULE,
+  RE_IM_BLOCK,
+  RE_IMAGES,
+  RE_INLINE_CODE,
+  RE_INLINE_MATH,
+  RE_INTERNAL_MONOLOGUE,
+  RE_ITALIC_ASTERISK,
+  RE_ITALIC_UNDERSCORE,
+  RE_LINKS,
+  RE_LT,
+  RE_MODEL_TOKENS_FAST,
+  // Whitespace
+  RE_MULTI_NEWLINE,
+  RE_MULTI_SPACE,
+  // HTML
+  RE_NBSP,
+  RE_ORDERED_LIST,
+  RE_PAD,
+  RE_PERCENTAGE,
+  RE_QUOT,
+  RE_REASONING,
+  RE_REFLECTION,
+  RE_SIMPLE_TAGS,
+  RE_STRIKETHROUGH,
+  // Thinking/Reasoning Tags
+  RE_THINK,
+  RE_THINKING,
+  RE_THOUGHT,
+  RE_THOUGHTS,
+  // Tool/Artifact Containers
+  RE_TOOL_CALL,
+  RE_TOOL_RESULT,
+  RE_TRAILING_WHITESPACE,
+  RE_UNORDERED_LIST,
+  // Answer Extraction
+  RE_WORD_FRACTION,
+  RE_WORD_FRACTION_START,
+} from "./patterns.ts";
 
 /**
  * Strip all LLM output artifacts for clean display/comparison.
@@ -164,11 +152,6 @@ export const stripMarkdown = stripLLMOutput;
 // =============================================================================
 // FAST PATH: Only thinking tags + model tokens (no markdown/HTML cleanup)
 // =============================================================================
-
-/**
- * Model tokens that commonly appear with thinking tags.
- */
-const RE_MODEL_TOKENS_FAST = /<\|(?:endoftext|pad|begin_of_box|end_of_box)\|>/gi;
 
 /**
  * Fast variant that only strips thinking tags and model tokens.
