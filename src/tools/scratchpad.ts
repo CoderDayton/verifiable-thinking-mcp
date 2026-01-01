@@ -1076,6 +1076,29 @@ async function handleComplete(
     await streamContent({ type: "text", text: `**Answer:** ${args.final_answer}\n` });
   }
 
+  // Auto spot-check if question and final_answer provided
+  let spotCheckResult:
+    | {
+        passed: boolean;
+        trapType: string | null;
+        warning: string | null;
+        hint: string | null;
+        confidence: number;
+      }
+    | undefined;
+  if (args.question && args.final_answer) {
+    spotCheckResult = spotCheck(args.question, args.final_answer);
+    if (!spotCheckResult.passed) {
+      await streamContent({
+        type: "text",
+        text:
+          `\n⚠️ **Spot-check warning:** ${spotCheckResult.trapType}\n` +
+          (spotCheckResult.warning ? `   ${spotCheckResult.warning}\n` : "") +
+          (spotCheckResult.hint ? `   💡 ${spotCheckResult.hint}\n` : ""),
+      });
+    }
+  }
+
   const response: ScratchpadResponse = {
     session_id: sessionId,
     current_step: SessionManager.getCurrentStep(sessionId, branchId),
@@ -1089,6 +1112,17 @@ async function handleComplete(
     final_summary: args.summary,
     total_steps: thoughts.length,
   };
+
+  // Add spot-check result if we ran it
+  if (spotCheckResult) {
+    response.spot_check_result = {
+      passed: spotCheckResult.passed,
+      trap_type: spotCheckResult.trapType,
+      warning: spotCheckResult.warning,
+      hint: spotCheckResult.hint,
+      confidence: spotCheckResult.confidence,
+    };
+  }
 
   // Add compression stats if any compression occurred
   if (compressionStats && compressionStats.totalBytesSaved > 0) {

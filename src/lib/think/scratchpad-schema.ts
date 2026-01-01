@@ -133,6 +133,10 @@ const CompleteOperationSchema = z.object({
 
   summary: z.string().optional().describe("Final summary/conclusion"),
   final_answer: z.string().optional().describe("The answer/result"),
+  question: z
+    .string()
+    .optional()
+    .describe("Original question (enables auto spot-check for trap detection)"),
 });
 
 const AugmentOperationSchema = z.object({
