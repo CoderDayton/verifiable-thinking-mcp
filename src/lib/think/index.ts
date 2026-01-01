@@ -82,19 +82,23 @@ export {
 
 // Routing (complexity-based path selection)
 export {
-  buildSpotCheckPrompt,
   getComplexityInfo,
   isExplanatoryQuestion,
-  parseSpotCheckResponse,
   type RoutePrompts,
   type RouteResult,
   type RoutingPath,
   routeQuestion,
-  type SpotCheckInput,
 } from "./route.ts";
 
 // Schema
 export { NextActionSchema, type ThinkArgs, ThinkSchema } from "./schema.ts";
+
+// Scratchpad schema
+export {
+  type ScratchpadArgs,
+  type ScratchpadResponse,
+  ScratchpadSchema,
+} from "./scratchpad-schema.ts";
 
 // Types
 export type {

@@ -25,6 +25,7 @@
     "test:coverage": "bun test --coverage",
     "test:ci": "bun test --coverage --bail && bun run coverage:check",
     "coverage:check": "bun run scripts/check-coverage.ts",
+    "coverage:report": "bun test --coverage && bun run scripts/check-coverage.ts",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src test scripts",
     "format": "biome format --write src test scripts",

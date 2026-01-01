@@ -89,6 +89,7 @@ export function getRegistryStats(): { count: number; byType: Record<string, numb
     if (solver.types & SolverType.FACTS) byType.facts = (byType.facts || 0) + 1;
     if (solver.types & SolverType.LOGIC) byType.logic = (byType.logic || 0) + 1;
     if (solver.types & SolverType.PROBABILITY) byType.probability = (byType.probability || 0) + 1;
+    if (solver.types & SolverType.DERIVATION) byType.derivation = (byType.derivation || 0) + 1;
   }
 
   return { count: solvers.length, byType };

@@ -27,9 +27,9 @@ export const GUARDS = {
 
 export const ARITHMETIC = {
   whatIs: /what\s+is\s+([\d\s+\-*/().]+)/i,
-  calculate: /calculate\s+([\d\s+\-*/().]+)/i,
-  compute: /compute\s+([\d\s+\-*/().]+)/i,
-  evaluate: /evaluate\s+([\d\s+\-*/().]+)/i,
+  calculate: /calculate[:\s]+\s*([\d\s+\-*/().]+)/i,
+  compute: /compute[:\s]+\s*([\d\s+\-*/().]+)/i,
+  evaluate: /evaluate[:\s]+\s*([\d\s+\-*/().]+)/i,
   equalsQuestion: /([\d\s+\-*/().]+)\s*=\s*\?/,
   bareExpression: /^([\d\s+\-*/().]+)$/,
   validChars: /^[\d+\-*/().]+$/,

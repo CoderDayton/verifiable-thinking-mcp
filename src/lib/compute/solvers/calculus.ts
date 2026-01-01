@@ -7,7 +7,7 @@ import { formatResult, normalizeUnicodeSuperscripts } from "../math.ts";
 import { CALCULUS } from "../patterns.ts";
 import type { ComputeResult, PolyTerm, Solver } from "../types.ts";
 
-/** Parse a polynomial string like "3x^2 + 2x - 5" into terms */
+/** Parse a polynomial string like "3x^2 + 2x - 5" into terms @internal */
 function parsePolynomial(text: string): PolyTerm[] {
   // Normalize: whitespace, case, and Unicode superscripts
   const clean = normalizeUnicodeSuperscripts(text).replace(/\s+/g, "").toLowerCase();
@@ -40,14 +40,14 @@ function parsePolynomial(text: string): PolyTerm[] {
   return terms;
 }
 
-/** Differentiate polynomial terms using power rule */
+/** Differentiate polynomial terms using power rule @internal */
 function differentiateTerms(terms: PolyTerm[]): PolyTerm[] {
   return terms
     .map((t) => ({ coeff: t.coeff * t.exp, exp: t.exp - 1 }))
     .filter((t) => t.coeff !== 0);
 }
 
-/** Integrate polynomial terms using power rule */
+/** Integrate polynomial terms using power rule @internal */
 function integrateTerms(terms: PolyTerm[]): PolyTerm[] {
   return terms.map((t) => {
     if (t.exp === -1) throw new Error("Cannot integrate 1/x in polynomial mode");
@@ -61,8 +61,13 @@ function integrateTerms(terms: PolyTerm[]): PolyTerm[] {
  * Accuracy: O(h^4) where h = (b-a)/n
  */
 export function simpsonIntegrate(fn: (x: number) => number, a: number, b: number, n = 100): number {
-  // n must be even for Simpson's rule
+  // Handle edge cases
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return NaN;
+  if (a === b) return 0;
+
+  // n must be even for Simpson's rule, and capped for safety
   if (n % 2 !== 0) n++;
+  n = Math.min(n, 10000);
 
   const h = (b - a) / n;
   let sum = fn(a) + fn(b);
@@ -80,6 +85,7 @@ export function simpsonIntegrate(fn: (x: number) => number, a: number, b: number
  * Create a safe evaluator function for simple math expressions
  * Supports: x, numbers, +, -, *, /, ^, sin, cos, tan, exp, ln, sqrt
  * Returns null if expression is not safe to evaluate
+ * @internal
  */
 function createSafeFunction(expr: string): ((x: number) => number) | null {
   // Normalize
@@ -103,7 +109,7 @@ function createSafeFunction(expr: string): ((x: number) => number) | null {
   }
 }
 
-/** Evaluate polynomial at a point */
+/** Evaluate polynomial at a point @internal */
 function evaluatePolynomial(terms: PolyTerm[], x: number): number {
   return terms.reduce((sum, t) => sum + t.coeff * x ** t.exp, 0);
 }

@@ -26,6 +26,7 @@ export const SolverType = {
   FACTS: 1 << 8, // 256 - known mathematical facts (rationality, etc.)
   LOGIC: 1 << 9, // 512 - propositional logic (modus ponens/tollens, syllogism, XOR)
   PROBABILITY: 1 << 10, // 1024 - independent events, gambler's fallacy
+  DERIVATION: 1 << 11, // 2048 - algebraic derivations and proofs
 } as const;
 
 /** Combined flags for convenience */
@@ -36,7 +37,7 @@ export const SolverGroup = {
     SolverType.FORMULA_TIER3 |
     SolverType.FORMULA_TIER4,
   WORD_ALL: SolverType.WORD_PROBLEM | SolverType.MULTI_STEP,
-  ALL: 0x7ff, // All solvers (11 bits)
+  ALL: 0xfff, // All solvers (12 bits)
 } as const;
 
 export type SolverMask = number;
@@ -397,6 +398,91 @@ const CLASSIFIER_RULES: ClassifierRule[] = [
       (lower.includes("pair") || lower.includes("matching")),
     types: SolverType.WORD_PROBLEM,
   },
+
+  // DERIVATION: prove/show/verify keywords
+  {
+    guard: (_text, lower, _chars) =>
+      lower.includes("prove") ||
+      lower.includes("show that") ||
+      lower.includes("verify") ||
+      lower.includes("derivation"),
+    types: SolverType.DERIVATION,
+  },
+
+  // DERIVATION: Multiple equals signs (a = b = c chains)
+  {
+    guard: (text, _lower, _chars) => (text.match(/=/g)?.length ?? 0) >= 2,
+    types: SolverType.DERIVATION,
+  },
+
+  // DERIVATION: Arrow symbols (⟹, →, =>)
+  {
+    guard: (text, _lower, _chars) =>
+      text.includes("⟹") || text.includes("→") || text.includes("=>"),
+    types: SolverType.DERIVATION,
+  },
+
+  // STATISTICS: mean/average (TIER3 + WORD_PROBLEM for statistics solver)
+  {
+    guard: (_text, lower, _chars) => lower.includes("mean") || lower.includes("average"),
+    types: SolverType.FORMULA_TIER3 | SolverType.WORD_PROBLEM,
+  },
+
+  // STATISTICS: standard error
+  {
+    guard: (_text, lower, _chars) => lower.includes("standard error"),
+    types: SolverType.FORMULA_TIER3 | SolverType.WORD_PROBLEM,
+  },
+
+  // STATISTICS: expected value
+  {
+    guard: (_text, lower, _chars) =>
+      lower.includes("expected value") || (lower.includes("chance") && lower.includes("$")),
+    types: SolverType.FORMULA_TIER3 | SolverType.WORD_PROBLEM,
+  },
+
+  // STATISTICS: handshake problem
+  {
+    guard: (_text, lower, _chars) => lower.includes("handshake") || lower.includes("shakes hands"),
+    types: SolverType.FORMULA_TIER3 | SolverType.WORD_PROBLEM,
+  },
+
+  // STATISTICS: permutations with repetition (arrange letters in WORD)
+  {
+    guard: (_text, lower, _chars) => lower.includes("arrange") && lower.includes("letter"),
+    types: SolverType.FORMULA_TIER3 | SolverType.WORD_PROBLEM,
+  },
+
+  // LOGIC: affirming the consequent / denying the antecedent
+  {
+    guard: (_text, lower, _chars) =>
+      lower.includes("if ") &&
+      (lower.includes("therefore") || lower.includes("conclude") || lower.includes("valid")),
+    types: SolverType.LOGIC,
+  },
+
+  // LOGIC: De Morgan's laws
+  {
+    guard: (_text, lower, _chars) =>
+      (lower.includes("not") || lower.includes("¬")) &&
+      (lower.includes(" and ") || lower.includes(" or ")) &&
+      (lower.includes("=") || lower.includes("equivalent")),
+    types: SolverType.LOGIC,
+  },
+
+  // LOGIC: "Some A are B" syllogism patterns
+  {
+    guard: (_text, lower, _chars) =>
+      lower.includes("some ") && lower.includes(" are ") && lower.includes("valid"),
+    types: SolverType.LOGIC,
+  },
+
+  // LOGIC: Contrapositive patterns (All A are B ≡ All non-B are non-A)
+  {
+    guard: (_text, lower, _chars) =>
+      lower.includes("equivalent") && lower.includes("all ") && lower.includes("non-"),
+    types: SolverType.LOGIC,
+  },
 ];
 
 // =============================================================================
@@ -464,5 +550,6 @@ export function describeMask(mask: SolverMask): string[] {
   if (mask & SolverType.FACTS) types.push("facts");
   if (mask & SolverType.LOGIC) types.push("logic");
   if (mask & SolverType.PROBABILITY) types.push("probability");
+  if (mask & SolverType.DERIVATION) types.push("derivation");
   return types;
 }

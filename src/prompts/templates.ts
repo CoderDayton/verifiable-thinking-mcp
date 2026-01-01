@@ -37,7 +37,6 @@ For each step:
 1. State premises explicitly
 2. Apply one inference rule per step (modus ponens, modus tollens, etc.)
 3. Use verify=true to check logical consistency
-4. Use check_blindspot=true for complex inferences
 
 Avoid introducing new premises without justification.`,
   },

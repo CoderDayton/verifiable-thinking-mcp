@@ -2,6 +2,7 @@
  * Formula solver - tiered pattern matching for mathematical formulas
  */
 
+import { type ASTNode, buildAST, simplifyAST, tokenizeMathExpression } from "../../verification.ts";
 import { SolverType } from "../classifier.ts";
 import {
   combinations,
@@ -16,7 +17,7 @@ import {
 import { GUARDS, TIER1, TIER2, TIER3, TIER4 } from "../patterns.ts";
 import type { ComputeResult, Solver } from "../types.ts";
 
-/** Helper to build a successful ComputeResult */
+/** Helper to build a successful ComputeResult @internal */
 function solved(result: string | number, method: string, start: number): ComputeResult {
   return {
     solved: true,
@@ -30,6 +31,7 @@ function solved(result: string | number, method: string, start: number): Compute
 /**
  * Matrix determinant using Gaussian elimination
  * O(n³) complexity - works for any NxN matrix
+ * @internal
  */
 function matrixDeterminant(matrix: number[][]): number | null {
   const n = matrix.length;
@@ -113,6 +115,7 @@ function matrixDeterminant(matrix: number[][]): number | null {
  * - [[1,2],[3,4]] - JSON-like
  * - [1,2;3,4] - MATLAB-like
  * - |1 2; 3 4| - bar notation
+ * @internal
  */
 function parseMatrix(text: string): number[][] | null {
   // Try JSON-like format: [[1,2],[3,4]]
@@ -159,14 +162,15 @@ function parseMatrix(text: string): number[][] | null {
 }
 
 /**
- * Detect if this is a decision/expected value question where percentage
- * represents probability, not a "calculate X% of Y" request.
+ * Detect decision theory / expected value contexts where we should NOT
+ * extract simple percentages or arithmetic.
  *
  * Examples to SKIP:
  * - "100% chance of $50" (probability context)
  * - "expected value" (EV calculation)
  * - "which has higher" (comparison)
  * - "prefers A or B" (preference question)
+ * @internal
  */
 function isDecisionOrExpectedValueContext(lower: string): boolean {
   return (
@@ -182,6 +186,7 @@ function isDecisionOrExpectedValueContext(lower: string): boolean {
 /**
  * TIER 1: Ultra-fast formulas (simple patterns, O(1) compute)
  * - Percentage, factorial, modulo, primality, fibonacci
+ * @internal
  */
 function tryFormulaTier1(text: string, lower: string): ComputeResult | null {
   const start = performance.now();
@@ -593,6 +598,78 @@ function tryFormulaTier4(text: string, lower: string): ComputeResult | null {
   return null;
 }
 
+// =============================================================================
+// EXPRESSION CANONICALIZATION
+// =============================================================================
+
+/**
+ * Extract and canonicalize a math expression from text
+ * Uses simplifyAST to normalize expressions before pattern matching
+ *
+ * Benefits:
+ * - "x + 0" → "x" (identity removal)
+ * - "2 + 3" → "5" (constant folding)
+ * - "x * 1" → "x" (multiplication identity)
+ *
+ * @returns Canonicalized expression string, or null if not parseable
+ */
+export function canonicalizeExpression(expr: string): string | null {
+  const { tokens, errors } = tokenizeMathExpression(expr);
+  if (errors.length > 0) return null;
+
+  const { ast, error } = buildAST(tokens);
+  if (error || !ast) return null;
+
+  const simplified = simplifyAST(ast);
+  return astToString(simplified);
+}
+
+/**
+ * Convert an AST node back to a string representation
+ * @internal
+ */
+function astToString(node: ASTNode): string {
+  switch (node.type) {
+    case "number":
+      return String(node.value);
+    case "variable":
+      return node.name;
+    case "unary":
+      if (node.operator === "²" || node.operator === "³") {
+        return `(${astToString(node.operand)})${node.operator}`;
+      }
+      return `${node.operator}(${astToString(node.operand)})`;
+    case "binary": {
+      const left = astToString(node.left);
+      const right = astToString(node.right);
+      // Add parentheses for clarity
+      return `(${left} ${node.operator} ${right})`;
+    }
+  }
+}
+
+/**
+ * Try to simplify an expression and check if it reduces to a constant
+ * Useful for detecting expressions like "x - x" → 0 or "x/x" → 1
+ *
+ * @returns The constant value if fully reducible, null otherwise
+ */
+export function trySimplifyToConstant(expr: string): number | null {
+  const { tokens, errors } = tokenizeMathExpression(expr);
+  if (errors.length > 0) return null;
+
+  const { ast, error } = buildAST(tokens);
+  if (error || !ast) return null;
+
+  const simplified = simplifyAST(ast);
+
+  if (simplified.type === "number") {
+    return simplified.value;
+  }
+
+  return null;
+}
+
 /**
  * Formula-based computation
  * Recognizes common mathematical formulas from natural language
@@ -616,6 +693,19 @@ export function tryFormula(text: string): ComputeResult {
   // Tier 4: Expensive (pythagorean, trailing zeros, series, matrix, interest)
   const t4 = tryFormulaTier4(text, lower);
   if (t4) return t4;
+
+  // Tier 5: Try algebraic simplification as last resort
+  // Detects patterns like "x - x = ?", "x/x = ?", "x + 0 = ?"
+  const simplifyMatch = text.match(
+    /(?:what is|simplify|evaluate)?\s*([\w\d.+\-*/^×÷−·√²³()\s]+)\s*[=?]/i,
+  );
+  if (simplifyMatch?.[1]) {
+    const start = performance.now();
+    const constant = trySimplifyToConstant(simplifyMatch[1].trim());
+    if (constant !== null) {
+      return solved(constant, "algebraic_simplification", start);
+    }
+  }
 
   return { solved: false, confidence: 0 };
 }

@@ -74,7 +74,7 @@ export function isExplanatoryQuestion(question: string): boolean {
 // TYPES
 // =============================================================================
 
-export type RoutingPath = "trivial" | "direct" | "reasoning" | "reasoning+spot";
+export type RoutingPath = "trivial" | "direct" | "reasoning";
 
 export interface RouteResult {
   /** Which path to take */
@@ -85,28 +85,19 @@ export interface RouteResult {
   score: number;
   /** Verbosity level for prompts */
   verbosity: Verbosity;
-  /** Number of LLM calls this path requires */
-  steps: number;
-  /** Whether this path includes verification */
-  hasVerification: boolean;
-  /** Whether this is an explanatory question (skip verification) */
+  /** Number of LLM calls this path requires (always 1) */
+  steps: 1;
+  /** Whether this is an explanatory question */
   isExplanatory: boolean;
   /** Detected meta-domain (coding, scientific, educational, financial, general) */
   metaDomain: string;
-  /** Prompts to use for each step */
+  /** Prompts to use */
   prompts: RoutePrompts;
 }
 
 export interface RoutePrompts {
-  /** Step 1: Main reasoning/answer prompt */
+  /** Main reasoning/answer prompt */
   main: { system: string; user: string };
-  /** Step 2: Spot-check prompt (only if hasVerification) */
-  spotCheck?: { system: string; userTemplate: string };
-}
-
-export interface SpotCheckInput {
-  question: string;
-  proposedAnswer: string;
 }
 
 // =============================================================================
@@ -117,23 +108,18 @@ export interface SpotCheckInput {
  * Route a question to the appropriate reasoning path.
  *
  * Returns everything the caller needs to execute the path:
- * - Which path to take (trivial, direct, reasoning, reasoning+spot)
- * - Pre-built prompts for each step
- * - Whether verification is included
+ * - Which path to take (trivial, direct, reasoning)
+ * - Pre-built prompts
  *
  * @param question The question/problem to solve
- * @param skipVerify If true, skip verification even for High+ complexity
  */
-export function routeQuestion(question: string, skipVerify = false): RouteResult {
+export function routeQuestion(question: string): RouteResult {
   const complexity = assessPromptComplexity(question);
   const trivial = isTrivialQuestion(question);
   const explanatory = isExplanatoryQuestion(question);
   const verbosity = getVerbosity(question);
   const tier = complexity.tier;
   const metaDomain = detectMetaDomain(question);
-
-  // Explanatory questions skip verification (it hurts quality for open-ended responses)
-  const effectiveSkipVerify = skipVerify || explanatory;
 
   // Domain-aware prompts for explanatory questions (token-light steering)
   const getExplanatoryPrompts = () => ({
@@ -156,7 +142,6 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       score: complexity.score,
       verbosity,
       steps: 1,
-      hasVerification: false,
       isExplanatory: explanatory,
       metaDomain,
       prompts: {
@@ -173,7 +158,6 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
       score: complexity.score,
       verbosity,
       steps: 1,
-      hasVerification: false,
       isExplanatory: explanatory,
       metaDomain,
       prompts: {
@@ -182,121 +166,20 @@ export function routeQuestion(question: string, skipVerify = false): RouteResult
     };
   }
 
-  // === MODERATE: Reasoning prompt (step-by-step) or explanatory (domain-aware) ===
-  if (tier === "Moderate") {
-    return {
-      path: "reasoning",
-      tier,
-      score: complexity.score,
-      verbosity,
-      steps: 1,
-      hasVerification: false,
-      isExplanatory: explanatory,
-      metaDomain,
-      prompts: {
-        main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning"),
-      },
-    };
-  }
-
-  // === HIGH: Reasoning only, UNLESS trap pattern detected ===
-  // Verification adds ~75% latency with marginal accuracy gain at this tier
-  // Exception: Trap patterns (counterintuitive problems) benefit from verification
-  // Exception: Explanatory questions skip verification (hurts open-ended quality)
-  if (tier === "High") {
-    const hasTrapPattern = complexity.explanation.intensity_signals.includes("trap_pattern");
-
-    if (hasTrapPattern && !effectiveSkipVerify) {
-      // Trap-detected High tier questions get verification
-      // These are counterintuitive problems where LLM might fall into naive trap
-      return {
-        path: "reasoning+spot",
-        tier,
-        score: complexity.score,
-        verbosity,
-        steps: 2,
-        hasVerification: true,
-        isExplanatory: false, // Trap patterns with verification are never explanatory
-        metaDomain,
-        prompts: {
-          main: getStandardPrompts("reasoning"),
-          spotCheck: {
-            system: "Verify. Watch for traps.",
-            userTemplate: "Q: {{question}}\nA: {{answer}}\nCorrect? YES/NO + why.",
-          },
-        },
-      };
-    }
-
-    // Standard High tier: no verification
-    return {
-      path: "reasoning",
-      tier,
-      score: complexity.score,
-      verbosity,
-      steps: 1,
-      hasVerification: false,
-      isExplanatory: explanatory,
-      metaDomain,
-      prompts: {
-        main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning"),
-      },
-    };
-  }
-
-  // === VERY HARD / ALMOST IMPOSSIBLE ===
-  // These benefit most from spot-check verification (unless explanatory)
-  const mainPrompt = explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning");
-
-  if (effectiveSkipVerify) {
-    // Skip verification - single reasoning call
-    return {
-      path: "reasoning",
-      tier,
-      score: complexity.score,
-      verbosity,
-      steps: 1,
-      hasVerification: false,
-      isExplanatory: explanatory,
-      metaDomain,
-      prompts: { main: mainPrompt },
-    };
-  }
-
-  // Include spot-check verification for Very Hard / Almost Impossible
+  // === MODERATE+: Reasoning prompt (step-by-step) or explanatory (domain-aware) ===
+  // All higher tiers (Moderate, High, Very Hard, Almost Impossible) use reasoning
   return {
-    path: "reasoning+spot",
+    path: "reasoning",
     tier,
     score: complexity.score,
     verbosity,
-    steps: 2,
-    hasVerification: true,
-    isExplanatory: false, // Verification path is never explanatory
+    steps: 1,
+    isExplanatory: explanatory,
     metaDomain,
     prompts: {
-      main: mainPrompt,
-      spotCheck: {
-        system: "Verify concisely.",
-        userTemplate: "Q: {{question}}\nA: {{answer}}\nCorrect? YES/NO + why.",
-      },
+      main: explanatory ? getExplanatoryPrompts() : getStandardPrompts("reasoning"),
     },
   };
-}
-
-/**
- * Build the spot-check prompt from template
- */
-export function buildSpotCheckPrompt(template: string, input: SpotCheckInput): string {
-  return template
-    .replace("{{question}}", input.question)
-    .replace("{{answer}}", input.proposedAnswer);
-}
-
-/**
- * Parse spot-check response to determine if answer is correct
- */
-export function parseSpotCheckResponse(response: string): boolean {
-  return /^yes\b/i.test(response.trim());
 }
 
 // =============================================================================

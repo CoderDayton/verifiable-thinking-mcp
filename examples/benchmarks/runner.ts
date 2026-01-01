@@ -26,11 +26,8 @@ import {
   type ToolCall,
 } from "./llm-client";
 import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
-import {
-  routeQuestion,
-  buildSpotCheckPrompt,
-  parseSpotCheckResponse,
-} from "../../src/lib/think/index";
+import { routeQuestion } from "../../src/lib/think/index";
+import { detectCommonMistakesFromText, type MistakeType } from "../../src/lib/compute/solvers/derivation";
 
 // Types
 export interface Question {
@@ -58,6 +55,7 @@ export interface RunResult {
     correct: boolean | null; // null for open-ended (judge-only)
     time_ms: number;
     tokens_estimate: number;
+    prompt_tokens?: number; // tokens used by system + user prompt (overhead)
     method?: string;
     raw_response?: string;
     response_length?: number;
@@ -67,6 +65,7 @@ export interface RunResult {
     correct: boolean | null; // null for open-ended (judge-only)
     time_ms: number;
     tokens_estimate: number;
+    prompt_tokens?: number; // tokens used by system + user prompt (overhead)
     steps: number;
     checkpoints: number;
     risk_flags: string[];
@@ -125,6 +124,9 @@ export interface EnhancedMetrics {
     avg_per_question: number;
     avg_per_correct: number;
     efficiency_score: number;
+    prompt_overhead_total?: number; // total tokens spent on prompts (system + user template)
+    prompt_overhead_avg?: number; // average prompt overhead per question
+    prompt_overhead_pct?: number; // percentage of total tokens that are prompt overhead
   };
   steps?: {
     total: number;
@@ -246,41 +248,121 @@ export interface BenchmarkResults {
 // MCP CLIENT
 // ============================================================================
 
-interface ThinkArgs {
+// Scratchpad operation types
+interface ScratchpadStepArgs {
+  operation: "step";
   thought: string;
-  step: number;
-  total: number;
-  is_final?: boolean;
-  guidance?: boolean;
+  purpose?: string;
+  outcome?: string;
+  confidence?: number;
+  context?: string;
   verify?: boolean;
   domain?: string;
-  session_id?: string;
-  compression_level?: string;
   local_compute?: boolean;
-  // Revision support
-  revises_step?: number;
-  revision_reason?: string;
-  // Branching support
-  branch_from?: number;
-  branch_id?: string;
+  session_id?: string;
+  confidence_threshold?: number;
+}
+
+interface ScratchpadCompleteArgs {
+  operation: "complete";
+  session_id: string;
+  summary?: string;
+  final_answer?: string;
+  confidence_threshold?: number;
+}
+
+interface ScratchpadBranchArgs {
+  operation: "branch";
+  session_id: string;
+  from_step?: number;
   branch_name?: string;
-  // Additional context
+  thought: string;
   purpose?: string;
-  context?: string;
-  outcome?: string;
-  next_action?: string;
-  rationale?: string;
+}
+
+interface ScratchpadReviseArgs {
+  operation: "revise";
+  session_id: string;
+  target_step: number;
+  reason: string;
+  thought: string;
   confidence?: number;
 }
 
-interface ThinkResult {
+interface ScratchpadNavigateArgs {
+  operation: "navigate";
+  session_id: string;
+  view: "history" | "branches" | "step" | "path";
+  step_id?: number;
+  branch_id?: string;
+  limit?: number;
+}
+
+interface ScratchpadAugmentArgs {
+  operation: "augment";
+  text: string;
+  system_context?: string;
+  store_as_step?: boolean;
+  session_id?: string;
+}
+
+type ScratchpadArgs =
+  | ScratchpadStepArgs
+  | ScratchpadCompleteArgs
+  | ScratchpadBranchArgs
+  | ScratchpadReviseArgs
+  | ScratchpadNavigateArgs
+  | ScratchpadAugmentArgs;
+
+interface ScratchpadResult {
   raw: string;
   meta: Record<string, unknown>;
-  guidance?: string[];
+  currentStep: number;
+  chainConfidence: number;
+  status: string;
   verification?: {
     passed: boolean;
-    evidence: string;
+    confidence: number;
+    domain: string;
   };
+  localCompute?: {
+    solved: boolean;
+    result: unknown;
+    method: string;
+  };
+  // Navigate results
+  history?: Array<{
+    step: number;
+    branch: string;
+    purpose: string;
+    thought_preview: string;
+    confidence?: number;
+  }>;
+  branches?: Array<{
+    id: string;
+    name: string;
+    from_step: number;
+  }>;
+  // Complete results with compression stats
+  totalSteps?: number;
+  compressionStats?: {
+    totalBytesSaved: number;
+    stepsCompressed: number;
+    tokens?: {
+      original: number;
+      compressed: number;
+      saved: number;
+    };
+  };
+  // Augment results
+  augmentedText?: string;
+  computations?: Array<{
+    expression: string;
+    result: unknown;
+    method: string;
+  }>;
+  filteredCount?: number;
+  detectedDomain?: string;
 }
 
 class MCPClient {
@@ -366,79 +448,46 @@ class MCPClient {
     });
   }
 
-  async think(args: ThinkArgs): Promise<ThinkResult> {
-    // Map simplified args to full ThinkSchema
-    const fullArgs: Record<string, unknown> = {
-      step_number: args.step,
-      estimated_total: args.total,
-      purpose: args.purpose || "analysis",
-      context: args.context || "Benchmark evaluation",
-      thought: args.thought,
-      outcome: args.outcome || "Reasoning recorded",
-      next_action:
-        args.next_action || (args.is_final ? "Complete" : "Continue reasoning"),
-      rationale: args.rationale || "Systematic benchmark evaluation",
-      is_final_step: args.is_final ?? false,
-      guidance: args.guidance ?? false,
-      verify: args.verify ?? false,
-      domain: args.domain,
-      session_id: args.session_id,
-      compression_level: args.compression_level,
-      local_compute: args.local_compute ?? false,
-    };
-
-    // Add revision support
-    if (args.revises_step !== undefined) {
-      fullArgs.revises_step = args.revises_step;
-      fullArgs.revision_reason = args.revision_reason;
-    }
-
-    // Add branching support
-    if (args.branch_from !== undefined) {
-      fullArgs.branch_from = args.branch_from;
-      fullArgs.branch_id = args.branch_id;
-      fullArgs.branch_name = args.branch_name;
-    }
-
-    // Add confidence if provided
-    if (args.confidence !== undefined) {
-      fullArgs.confidence = args.confidence;
-    }
-
+  async scratchpad(args: ScratchpadArgs): Promise<ScratchpadResult> {
     const result = (await this.send("tools/call", {
-      name: "think",
-      arguments: fullArgs,
+      name: "scratchpad",
+      arguments: args,
     })) as { content: Array<{ type: string; text: string }> };
 
     const text = result.content?.[0]?.text || "";
 
     // Parse meta from JSON code block response
     let meta: Record<string, unknown> = {};
-    let guidance: string[] = [];
-    let verification: { passed: boolean; evidence: string } | undefined;
 
     try {
       const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
       if (jsonMatch) {
         meta = JSON.parse(jsonMatch[1]);
-        // Extract guidance from meta
-        if (meta.guidance && Array.isArray(meta.guidance)) {
-          guidance = meta.guidance as string[];
-        }
-        // Extract verification from meta
-        if (meta.verification && typeof meta.verification === "object") {
-          const v = meta.verification as Record<string, unknown>;
-          verification = {
-            passed: v.passed as boolean,
-            evidence: v.evidence as string,
-          };
-        }
       }
     } catch {
       // Ignore meta parse errors
     }
 
-    return { raw: text, meta, guidance, verification };
+    return {
+      raw: text,
+      meta,
+      currentStep: (meta.current_step as number) || 0,
+      chainConfidence: (meta.chain_confidence as number) || 0,
+      status: (meta.status as string) || "unknown",
+      verification: meta.verification as ScratchpadResult["verification"],
+      localCompute: meta.local_compute as ScratchpadResult["localCompute"],
+      // Navigate results
+      history: meta.history as ScratchpadResult["history"],
+      branches: meta.branches as ScratchpadResult["branches"],
+      // Complete results
+      totalSteps: meta.total_steps as number | undefined,
+      compressionStats: meta.compression_stats as ScratchpadResult["compressionStats"],
+      // Augment results
+      augmentedText: meta.augmented_text as string | undefined,
+      computations: meta.computations as ScratchpadResult["computations"],
+      filteredCount: meta.filtered_count as number | undefined,
+      detectedDomain: meta.detected_domain as string | undefined,
+    };
   }
 
   async clearSession(sessionId: string): Promise<void> {
@@ -518,76 +567,112 @@ function normalizeForComparison(answer: string): string {
 }
 
 // ============================================================================
-// THINK TOOL DEFINITION FOR AGENT MODE
+// SCRATCHPAD TOOL DEFINITION FOR AGENT MODE
 // ============================================================================
 
-const THINK_TOOL: ToolDefinition = {
+const SCRATCHPAD_TOOL: ToolDefinition = {
   type: "function",
   function: {
-    name: "think",
-    description: `Record a reasoning step. Use this to structure your thinking process.
+    name: "scratchpad",
+    description: `Unified reasoning scratchpad with auto-step tracking and confidence monitoring.
 
-WHEN TO USE:
-- Breaking down complex problems
-- When you need to verify your reasoning
-- When you want to explore alternative approaches
+OPERATIONS:
+- step: Add a thought (auto-increments step number)
+- navigate: View history, branches, specific step, or path for self-correction
+- branch: Start alternative reasoning path
+- revise: Correct earlier step
+- complete: Finalize reasoning chain
+- augment: Extract math expressions, compute locally, inject results
 
-SPECIAL FEATURES:
-- revises_step: Set this to correct an earlier step if you found an error
-- branch_from: Set this to explore an alternative approach from a previous step
+CONFIDENCE TRACKING:
+- Provide confidence (0-1) on each step
+- Chain confidence is averaged across steps
+- When chain_confidence >= 0.8, consider completing
 
-Return your final answer in the last step with is_final_step=true.`,
+WORKFLOW:
+1. Use operation="step" to add thoughts - no step number needed (auto-incremented)
+2. Use operation="navigate" with view="history" to review your reasoning chain
+3. Use operation="augment" to inject computed values into math-heavy text
+4. Optionally set verify=true to check reasoning
+5. Use operation="complete" when ready to finalize`,
     parameters: {
       type: "object",
       properties: {
-        step_number: {
-          type: "number",
-          description: "Sequential step number (start at 1)",
-        },
-        estimated_total: {
-          type: "number",
-          description: "Estimated total steps needed",
+        operation: {
+          type: "string",
+          enum: ["step", "navigate", "branch", "revise", "complete", "augment"],
+          description: "Operation type",
         },
         thought: { type: "string", description: "Your current reasoning" },
+        purpose: {
+          type: "string",
+          enum: ["analysis", "exploration", "validation", "decision", "summary"],
+          description: "Step category",
+        },
         outcome: {
           type: "string",
           description: "What you concluded or learned",
         },
-        next_action: { type: "string", description: "What to do next" },
-        is_final_step: {
-          type: "boolean",
-          description: "True if this is the final answer",
-        },
         confidence: {
           type: "number",
-          description: "Your confidence 0-1 (optional)",
+          description: "Your confidence 0-1 in this step",
         },
-        revises_step: {
-          type: "number",
-          description:
-            "Step number to revise if correcting an error (optional)",
-        },
-        revision_reason: {
+        // For navigate operation
+        view: {
           type: "string",
-          description: "Why revising (optional)",
+          enum: ["history", "branches", "step", "path"],
+          description: "What to view (for navigate operation)",
         },
-        branch_from: {
+        step_id: {
           type: "number",
-          description:
-            "Step to branch from for alternative approach (optional)",
+          description: "Step number to view (for navigate step/path views)",
         },
-        branch_id: {
+        limit: {
+          type: "number",
+          description: "Max steps to return (for navigate history, default 10)",
+        },
+        // For revise operation
+        target_step: {
+          type: "number",
+          description: "Step number to revise (for revise operation)",
+        },
+        reason: {
           type: "string",
-          description: "Unique ID for this branch (optional)",
+          description: "Why revising (for revise operation)",
+        },
+        // For branch operation
+        from_step: {
+          type: "number",
+          description: "Step to branch from (for branch operation)",
+        },
+        branch_name: {
+          type: "string",
+          description: "Name for alternative branch",
+        },
+        // For complete operation
+        summary: {
+          type: "string",
+          description: "Final summary (for complete operation)",
+        },
+        final_answer: {
+          type: "string",
+          description: "The final answer (for complete operation)",
+        },
+        // For augment operation
+        text: {
+          type: "string",
+          description: "Text containing math expressions to compute (for augment operation)",
+        },
+        system_context: {
+          type: "string",
+          description: "System prompt context for domain filtering (for augment operation)",
+        },
+        store_as_step: {
+          type: "boolean",
+          description: "Store augmented result as a reasoning step (for augment operation)",
         },
       },
-      required: [
-        "step_number",
-        "estimated_total",
-        "thought",
-        "outcome",
-        "next_action",
-      ],
+      required: ["operation"],
     },
   },
 };
@@ -647,7 +732,7 @@ Domain hint: ${domain}`;
   let maxIterations = 10; // Safety limit
 
   while (maxIterations-- > 0) {
-    const response = await llm.askWithTools(messages, [THINK_TOOL], {
+    const response = await llm.askWithTools(messages, [SCRATCHPAD_TOOL], {
       temperature: 0.1,
     });
     totalTokens += estimateTokens(
@@ -665,46 +750,133 @@ Domain hint: ${domain}`;
 
       // Process each tool call
       for (const toolCall of response.tool_calls) {
-        if (toolCall.function.name === "think") {
+        if (toolCall.function.name === "scratchpad") {
           try {
             const args = JSON.parse(toolCall.function.arguments);
 
-            // Track the thought
-            thoughts.push({
-              step: args.step_number,
-              thought: args.thought,
-              outcome: args.outcome,
-              revises: args.revises_step,
-              branch: args.branch_id,
-            });
+            // Track the thought (skip for navigate and augment operations)
+            if (args.operation !== "navigate" && args.operation !== "augment") {
+              thoughts.push({
+                step: args.step_number,
+                thought: args.thought,
+                outcome: args.outcome,
+                revises: args.revises_step || args.target_step,
+                branch: args.branch_id || args.branch_name,
+              });
 
-            if (args.revises_step) revisions++;
-            if (args.branch_id) branches.add(args.branch_id);
-
-            // Call actual MCP tool
-            const mcpResult = await mcp.think({
-              thought: args.thought,
-              step: args.step_number,
-              total: args.estimated_total,
-              is_final: args.is_final_step || false,
-              domain,
-              session_id: sessionId,
-              revises_step: args.revises_step,
-              revision_reason: args.revision_reason,
-              branch_from: args.branch_from,
-              branch_id: args.branch_id,
-              guidance: true,
-              verify: true,
-            });
-
-            // Build tool response
-            let toolResponse = `Step ${args.step_number} recorded.`;
-            if (mcpResult.guidance?.length) {
-              toolResponse += ` Guidance: ${mcpResult.guidance.join("; ")}`;
+              if (args.revises_step || args.target_step) revisions++;
+              if (args.branch_id || args.branch_name) branches.add(args.branch_id || args.branch_name);
             }
-            if (args.is_final_step) {
-              toolResponse +=
-                " This is the final step - provide your answer now.";
+
+            // Call actual MCP tool - route by operation
+            let mcpResult: ScratchpadResult;
+            let toolResponse: string;
+
+            // Check explicit operation first (new schema)
+            if (args.operation === "augment") {
+              // Augment operation - extract and compute math expressions
+              mcpResult = await mcp.scratchpad({
+                operation: "augment",
+                text: args.text || args.thought,
+                system_context: args.system_context,
+                store_as_step: args.store_as_step,
+                session_id: sessionId,
+              });
+
+              // Format augment response
+              if (mcpResult.computations && mcpResult.computations.length > 0) {
+                const compStr = mcpResult.computations
+                  .map((c) => `${c.expression} = ${c.result}`)
+                  .join(", ");
+                toolResponse = `Augmented text with ${mcpResult.computations.length} computations: ${compStr}`;
+                if (mcpResult.augmentedText) {
+                  toolResponse += `\n\nResult: ${mcpResult.augmentedText}`;
+                }
+              } else {
+                toolResponse = "No computable expressions found in text.";
+              }
+              if (args.store_as_step) {
+                toolResponse += ` Stored as step ${mcpResult.currentStep}.`;
+              }
+            } else if (args.operation === "navigate") {
+              // Navigate operation - query history for self-correction
+              mcpResult = await mcp.scratchpad({
+                operation: "navigate",
+                session_id: sessionId,
+                view: args.view || "history",
+                step_id: args.step_id,
+                limit: args.limit || 10,
+              });
+
+              // Format navigate response
+              if (mcpResult.history) {
+                const historyStr = mcpResult.history
+                  .map((h) => `Step ${h.step}: ${h.thought_preview}`)
+                  .join("\n");
+                toolResponse = `History:\n${historyStr}`;
+              } else if (mcpResult.branches) {
+                const branchStr = mcpResult.branches
+                  .map((b) => `${b.id}: ${b.name} (from step ${b.from_step})`)
+                  .join("\n");
+                toolResponse = `Branches:\n${branchStr}`;
+              } else {
+                toolResponse = "Navigate complete.";
+              }
+            } else if (args.operation === "revise" || args.revises_step || args.target_step) {
+              // Revise operation
+              mcpResult = await mcp.scratchpad({
+                operation: "revise",
+                session_id: sessionId,
+                target_step: args.target_step || args.revises_step,
+                reason: args.reason || args.revision_reason || "Correction",
+                thought: args.thought,
+                confidence: args.confidence,
+              });
+              toolResponse = `Revised step ${args.target_step || args.revises_step}. New step ${mcpResult.currentStep} recorded.`;
+            } else if (args.operation === "branch" || args.branch_from || args.from_step) {
+              // Branch operation
+              mcpResult = await mcp.scratchpad({
+                operation: "branch",
+                session_id: sessionId,
+                from_step: args.from_step || args.branch_from,
+                branch_name: args.branch_name || args.branch_id,
+                thought: args.thought,
+                purpose: args.purpose || "exploration",
+              });
+              toolResponse = `Branch created from step ${args.from_step || args.branch_from}. Step ${mcpResult.currentStep} on new branch.`;
+            } else if (args.operation === "complete" || args.is_final_step) {
+              // Complete operation
+              mcpResult = await mcp.scratchpad({
+                operation: "complete",
+                session_id: sessionId,
+                summary: args.summary || args.thought,
+                final_answer: args.final_answer || args.outcome,
+              });
+              toolResponse = `Reasoning complete. ${mcpResult.totalSteps || 0} total steps.`;
+              if (mcpResult.compressionStats?.totalBytesSaved) {
+                toolResponse += ` Compression saved ${mcpResult.compressionStats.totalBytesSaved} bytes.`;
+              }
+            } else {
+              // Step operation (default)
+              mcpResult = await mcp.scratchpad({
+                operation: "step",
+                thought: args.thought,
+                purpose: args.purpose || "analysis",
+                outcome: args.outcome,
+                confidence: args.confidence,
+                domain,
+                session_id: sessionId,
+                verify: true,
+              });
+              toolResponse = `Step ${mcpResult.currentStep} recorded (confidence: ${mcpResult.chainConfidence.toFixed(2)}).`;
+              if (mcpResult.status === "threshold_reached") {
+                toolResponse += " Chain confidence threshold reached - consider completing.";
+              }
+            }
+
+            // Add final step prompt if needed
+            if (args.is_final_step || args.operation === "complete") {
+              toolResponse += " This is the final step - provide your answer now.";
             }
 
             messages.push({
@@ -714,7 +886,7 @@ Domain hint: ${domain}`;
             });
 
             // If final step, ask for the actual answer
-            if (args.is_final_step) {
+            if (args.is_final_step || args.operation === "complete") {
               messages.push({
                 role: "user",
                 content:
@@ -799,19 +971,24 @@ async function runBaseline(
 ): Promise<RunResult["baseline"]> {
   const start = Date.now();
 
-  const prompt = `${question.question}\n\nProvide your answer clearly. If it's a number, state just the number. If it's a choice, state just the choice.`;
+  const system = "You are a helpful assistant. Answer questions directly and concisely.";
+  const userSuffix = "\n\nProvide your answer clearly. If it's a number, state just the number. If it's a choice, state just the choice.";
+  const prompt = `${question.question}${userSuffix}`;
+
+  // Track prompt overhead (system + user template, excluding question content)
+  const promptOverhead = system + userSuffix;
+  const promptTokens = estimateTokens(promptOverhead);
 
   const response = await llm.ask(prompt, {
-    system:
-      "You are a helpful assistant. Answer questions directly and concisely.",
+    system,
     temperature: 0.1,
   });
 
   const time_ms = Date.now() - start;
-  
+
   // Strip thinking tags first (for display and judge comparison)
   const cleanResponse = stripThinkingTags(response);
-  
+
   // For open-ended questions, skip answer extraction - just use full response (cleaned)
   const isOpenEnded = question.expected_answer === null;
   let answer: string;
@@ -822,12 +999,13 @@ async function runBaseline(
     const expectedAnswers = Array.isArray(expected) ? expected : [expected];
     answer = extractAnswer(response, expectedAnswers);
   }
-  
+
   return {
     answer,
     correct: verifyAnswer(question, answer),
     time_ms,
     tokens_estimate: estimateTokens(prompt + response),
+    prompt_tokens: promptTokens,
     method: "llm",
     raw_response: cleanResponse,
     response_length: cleanResponse.length,
@@ -845,12 +1023,12 @@ async function runWithTool(
   question: Question,
   useLocal = true,
   compressionLevel: "none" | "auto" | "aggressive" = "auto",
-  verbose = false,
-  skipVerify = false
+  verbose = false
 ): Promise<RunResult["with_tool"]> {
   const start = Date.now();
   const sessionId = `bench_${question.id}_${Date.now()}`;
   let totalTokens = 0;
+  let promptTokens = 0; // Track prompt overhead
 
   // Latency breakdown tracking
   const latency = {
@@ -905,22 +1083,19 @@ async function runWithTool(
 
   // === ROUTING: Use centralized logic from src/lib/think/route.ts ===
   const routeStart = Date.now();
-  const route = routeQuestion(question.question, skipVerify);
+  const route = routeQuestion(question.question);
   latency.routing_ms = Date.now() - routeStart;
 
   try {
     // STEP 1: Try local compute via MCP tool
     if (useLocal) {
       const localStart = Date.now();
-      const localStep = await mcp.think({
+      const localStep = await mcp.scratchpad({
+        operation: "step",
         thought: question.question,
-        step: 1,
-        total: 1,
-        is_final: true,
-        guidance: false,
+        purpose: "analysis",
         domain,
         session_id: sessionId,
-        compression_level: compressionLevel,
         local_compute: true,
       });
       latency.local_compute_ms = Date.now() - localStart;
@@ -935,6 +1110,7 @@ async function runWithTool(
           correct: verifyAnswer(question, answer),
           time_ms: Date.now() - start,
           tokens_estimate: 0,
+          prompt_tokens: 0, // No prompt overhead for local compute
           steps: 1,
           checkpoints: 0,
           risk_flags: [],
@@ -953,12 +1129,17 @@ async function runWithTool(
       latency.mcp_overhead_ms += Date.now() - clearStart;
     }
 
-    // STEP 2: Execute routed path
+    // STEP 2: Execute routed path (single LLM call - no more spot-check)
     let response: string;
-    let confidence: number;
+    const confidence = 0.9; // Single-call path
 
-    // Step 2a: Main reasoning/answer call
+    // Main reasoning/answer call
     const { system, user } = route.prompts.main;
+    
+    // Track prompt overhead (system + user template minus question content)
+    // user contains question + suffix, so overhead = system + suffix
+    promptTokens = estimateTokens(system) + estimateTokens(user.slice(question.question.length));
+    
     const llmMainStart = Date.now();
     if (verbose) {
       response = await askWithStreaming(
@@ -972,63 +1153,17 @@ async function runWithTool(
     }
     latency.llm_main_ms = Date.now() - llmMainStart;
     totalTokens += estimateTokens(user + response);
-    confidence = route.hasVerification ? 0.8 : 0.9;
-
-    // Step 2b: Spot-check verification (if path includes it)
-    // NOTE: We use spot-check for confidence adjustment only, NOT for answer replacement.
-    // Replacing response with "NO, the correct answer is..." led to extraction bugs
-    // (e.g., extracting "2" from "2^(n+1)" in medium_math_007)
-    // Skip for open-ended questions (no expected answer to verify against)
-    if (route.hasVerification && route.prompts.spotCheck && question.expected_answer !== null) {
-      const expectedAnswers: string[] = Array.isArray(question.expected_answer)
-        ? question.expected_answer
-        : [question.expected_answer];
-      const proposedAnswer = extractAnswer(response, expectedAnswers);
-
-      const spotPrompt = buildSpotCheckPrompt(
-        route.prompts.spotCheck.userTemplate,
-        {
-          question: question.question,
-          proposedAnswer,
-        }
-      );
-
-      const llmVerifyStart = Date.now();
-      let spotCheck: string;
-      if (verbose) {
-        spotCheck = await askWithStreaming(
-          llm,
-          spotPrompt,
-          route.prompts.spotCheck.system,
-          `[${route.tier}] Spot-check`
-        );
-      } else {
-        spotCheck = await llm.ask(spotPrompt, {
-          system: route.prompts.spotCheck.system,
-          temperature: 0,
-        });
-      }
-      latency.llm_verify_ms = Date.now() - llmVerifyStart;
-      totalTokens += estimateTokens(spotPrompt + spotCheck);
-
-      // Spot-check adjusts confidence only - don't replace response with rejection text
-      const isCorrect = parseSpotCheckResponse(spotCheck);
-      confidence = isCorrect ? 0.9 : 0.7;
-    }
 
     // STEP 3: Record in MCP (CRASH-style scratchpad)
     // Skip MCP recording for explanatory questions - no scratchpad benefit, adds overhead
     if (!route.isExplanatory) {
       const mcpRecordStart = Date.now();
-      const stepResult = await mcp.think({
+      const stepResult = await mcp.scratchpad({
+        operation: "step",
         thought: response,
-        step: route.steps,
-        total: route.steps,
-        is_final: true,
-        guidance: false,
+        purpose: "summary",
         domain,
         session_id: sessionId,
-        compression_level: compressionLevel,
       });
       latency.mcp_overhead_ms += Date.now() - mcpRecordStart;
       trackCompression(stepResult.meta);
@@ -1036,7 +1171,7 @@ async function runWithTool(
 
     // Strip thinking tags first (for display and judge comparison)
     const cleanResponse = stripThinkingTags(response);
-    
+
     // For open-ended questions, skip answer extraction - just use full response (cleaned)
     const isOpenEnded = question.expected_answer === null;
     let answer: string;
@@ -1053,6 +1188,7 @@ async function runWithTool(
       correct: verifyAnswer(question, answer),
       time_ms: Date.now() - start,
       tokens_estimate: totalTokens,
+      prompt_tokens: promptTokens,
       steps: route.steps,
       checkpoints: 0,
       risk_flags: [],
@@ -1090,7 +1226,6 @@ export async function runBenchmark(
     compressionLevel?: "none" | "auto" | "aggressive";
     quiet?: boolean;
     verbose?: boolean;
-    skipVerify?: boolean;
     concurrency?: number;
     onProgress?: (completed: number, total: number, result: RunResult) => void;
   } = {}
@@ -1102,7 +1237,6 @@ export async function runBenchmark(
     compressionLevel = "auto",
     quiet = false,
     verbose = false,
-    skipVerify = false,
     concurrency = 1,
     onProgress,
   } = options;
@@ -1175,10 +1309,19 @@ export async function runBenchmark(
       if (concurrency === 1) log("  Running baseline (pure LLM)...");
       result.baseline = await runBaseline(llm, q);
       if (concurrency === 1) {
-        const correctMark = result.baseline.correct === null ? "○" : result.baseline.correct ? "✓" : "✗";
+        const correctMark =
+          result.baseline.correct === null
+            ? "○"
+            : result.baseline.correct
+            ? "✓"
+            : "✗";
         const preview = result.baseline.answer.split("\n")[0].slice(0, 60);
         log(
-          `  Baseline: ${correctMark} (${result.baseline.time_ms.toFixed(2)}ms) → "${preview}${result.baseline.answer.length > 60 ? "..." : ""}"`
+          `  Baseline: ${correctMark} (${result.baseline.time_ms.toFixed(
+            2
+          )}ms) → "${preview}${
+            result.baseline.answer.length > 60 ? "..." : ""
+          }"`
         );
       }
     }
@@ -1191,8 +1334,7 @@ export async function runBenchmark(
         q,
         useLocalCompute,
         compressionLevel,
-        verbose && concurrency === 1,
-        skipVerify
+        verbose && concurrency === 1
       );
       if (concurrency === 1) {
         const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
@@ -1202,10 +1344,19 @@ export async function runBenchmark(
         const pathTag = result.with_tool.complexity_path
           ? ` via ${result.with_tool.complexity_path}`
           : "";
-        const correctMark = result.with_tool.correct === null ? "○" : result.with_tool.correct ? "✓" : "✗";
+        const correctMark =
+          result.with_tool.correct === null
+            ? "○"
+            : result.with_tool.correct
+            ? "✓"
+            : "✗";
         const preview = result.with_tool.answer.split("\n")[0].slice(0, 60);
         log(
-          `  Result: ${correctMark} (${result.with_tool.time_ms.toFixed(0)}ms)${pathTag}${methodTag}${compTag} → "${preview}${result.with_tool.answer.length > 60 ? "..." : ""}"`
+          `  Result: ${correctMark} (${result.with_tool.time_ms.toFixed(
+            0
+          )}ms)${pathTag}${methodTag}${compTag} → "${preview}${
+            result.with_tool.answer.length > 60 ? "..." : ""
+          }"`
         );
       }
     }
@@ -1407,6 +1558,19 @@ function calculateEnhancedMetrics(
       avg_per_question: totalTokens / total,
       avg_per_correct: correct > 0 ? tokensForCorrect / correct : 0,
       efficiency_score: totalTokens > 0 ? (correct / totalTokens) * 1000 : 0,
+      // Prompt overhead metrics
+      ...(() => {
+        const promptTokensList = results
+          .map((r) => r[field].prompt_tokens)
+          .filter((t): t is number => t !== undefined);
+        if (promptTokensList.length === 0) return {};
+        const promptTotal = promptTokensList.reduce((a, b) => a + b, 0);
+        return {
+          prompt_overhead_total: promptTotal,
+          prompt_overhead_avg: promptTotal / promptTokensList.length,
+          prompt_overhead_pct: totalTokens > 0 ? (promptTotal / totalTokens) * 100 : 0,
+        };
+      })(),
     },
     responses: {
       avg_length: lengths.reduce((a, b) => a + b, 0) / total,
@@ -1794,6 +1958,577 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
 }
 
 // ============================================================================
+// MISTAKE DETECTION VALIDATION
+// ============================================================================
+
+/**
+ * Synthetic test cases for mistake detection validation.
+ * Each case has: derivation text, expected mistake type(s), and whether it should detect a mistake.
+ */
+interface MistakeTestCase {
+  id: string;
+  description: string;
+  derivation: string;
+  shouldDetect: boolean;
+  expectedTypes?: MistakeType[];
+}
+
+const MISTAKE_TEST_CASES: MistakeTestCase[] = [
+  // True positives - should detect
+  {
+    id: "sign_error_001",
+    description: "Basic sign error: a - b = b - a",
+    derivation: "a - b = b - a",
+    shouldDetect: true,
+    expectedTypes: ["sign_error"],
+  },
+  {
+    id: "sign_error_002",
+    description: "Sign error with numbers",
+    derivation: "5 - 3 = 3 - 5",
+    shouldDetect: true,
+    expectedTypes: ["sign_error"],
+  },
+  {
+    id: "coefficient_001",
+    description: "Like terms addition error",
+    derivation: "2x + 3x = 6x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+  {
+    id: "coefficient_002",
+    description: "Subtraction coefficient error",
+    derivation: "5x - 2x = 2x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+  {
+    id: "exponent_001",
+    description: "Exponent multiplication error",
+    derivation: "x^2 * x^3 = x^6",
+    shouldDetect: true,
+    expectedTypes: ["exponent_error"],
+  },
+  {
+    id: "exponent_002",
+    description: "Exponent addition instead of multiplication",
+    derivation: "x^2 * x^4 = x^8",
+    shouldDetect: true,
+    expectedTypes: ["exponent_error"],
+  },
+  {
+    id: "distribution_001",
+    description: "Incomplete distribution",
+    derivation: "a * (b + c) = a*b + c",
+    shouldDetect: true,
+    expectedTypes: ["distribution_error"],
+  },
+  {
+    id: "distribution_002",
+    description: "Missing second term in distribution",
+    derivation: "(x + 2)(x + 3) = x^2 + 6",
+    shouldDetect: true,
+    expectedTypes: ["distribution_error"],
+  },
+  {
+    id: "cancellation_001",
+    description: "Invalid fraction cancellation",
+    derivation: "(a + b) / a = b",
+    shouldDetect: true,
+    expectedTypes: ["cancellation_error"],
+  },
+  {
+    id: "sub_dist_001",
+    description: "Subtraction distribution error: simple",
+    derivation: "x - (y + z) = x - y + z",
+    shouldDetect: true,
+    expectedTypes: ["subtraction_distribution_error"],
+  },
+  {
+    id: "sub_dist_002",
+    description: "Subtraction distribution: sign flip error",
+    derivation: "a - (b - c) = a - b - c",
+    shouldDetect: true,
+    expectedTypes: ["subtraction_distribution_error"],
+  },
+  {
+    id: "sub_dist_003",
+    description: "Nested subtraction distribution error",
+    derivation: "a - (b - (c + d)) = a - b - c - d",
+    shouldDetect: true,
+    expectedTypes: ["subtraction_distribution_error"],
+  },
+
+  // Implicit coefficient errors
+  {
+    id: "implicit_001",
+    description: "Implicit coefficient: x + 2x = 4x",
+    derivation: "x + 2x = 4x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+  {
+    id: "implicit_002",
+    description: "Two implicit coefficients: x + x = 3x",
+    derivation: "x + x = 3x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+  {
+    id: "implicit_003",
+    description: "Mixed implicit: 3x + x = 5x",
+    derivation: "3x + x = 5x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+
+  // Negative coefficient errors
+  {
+    id: "negative_001",
+    description: "Leading negative implicit: -x + 3x = 3x",
+    derivation: "-x + 3x = 3x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+  {
+    id: "negative_002",
+    description: "Negative explicit: -2x + 5x = 5x",
+    derivation: "-2x + 5x = 5x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+  {
+    id: "negative_003",
+    description: "Two negatives: -2x - x = -2x",
+    derivation: "-2x - x = -2x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+
+  // FOIL errors with subtraction binomials
+  {
+    id: "foil_sub_001",
+    description: "FOIL error: (x - 2)(x + 3) missing middle term",
+    derivation: "(x - 2)(x + 3) = x^2 - 6",
+    shouldDetect: true,
+    expectedTypes: ["distribution_error"],
+  },
+  {
+    id: "foil_sub_002",
+    description: "FOIL error: (x - 2)(x - 3) missing middle term",
+    derivation: "(x - 2)(x - 3) = x^2 + 6",
+    shouldDetect: true,
+    expectedTypes: ["distribution_error"],
+  },
+  {
+    id: "foil_sub_003",
+    description: "FOIL error: (x + 2)(x - 3) missing middle term",
+    derivation: "(x + 2)(x - 3) = x^2 - 6",
+    shouldDetect: true,
+    expectedTypes: ["distribution_error"],
+  },
+
+  // True negatives - should NOT detect (correct derivations)
+  {
+    id: "correct_001",
+    description: "Correct like terms",
+    derivation: "2x + 3x = 5x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_002",
+    description: "Correct exponent multiplication",
+    derivation: "x^2 * x^3 = x^5",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_003",
+    description: "Correct distribution",
+    derivation: "a * (b + c) = a*b + a*c",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_004",
+    description: "Correct subtraction distribution",
+    derivation: "x - (y + z) = x - y - z",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_005",
+    description: "Correct nested subtraction",
+    derivation: "a - (b - c) = a - b + c",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_006",
+    description: "Correct nested complex",
+    derivation: "a - (b - (c + d)) = a - b + c + d",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_007",
+    description: "Simple equality",
+    derivation: "x = x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_008",
+    description: "Correct implicit coefficient",
+    derivation: "x + 2x = 3x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_009",
+    description: "Correct two implicit coefficients",
+    derivation: "x + x = 2x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_010",
+    description: "Correct negative implicit",
+    derivation: "-x + 3x = 2x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_011",
+    description: "Correct negative explicit",
+    derivation: "-2x + 5x = 3x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_012",
+    description: "Correct two negatives",
+    derivation: "-2x - x = -3x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_013",
+    description: "Correct FOIL: (x - 2)(x + 3) = x^2 + x - 6",
+    derivation: "(x - 2)(x + 3) = x^2 + x - 6",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_014",
+    description: "Correct FOIL: (x - 2)(x - 3) = x^2 - 5x + 6",
+    derivation: "(x - 2)(x - 3) = x^2 - 5x + 6",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_015",
+    description: "Correct FOIL: (x + 2)(x - 3) = x^2 - x - 6",
+    derivation: "(x + 2)(x - 3) = x^2 - x - 6",
+    shouldDetect: false,
+  },
+
+  // Edge cases
+  {
+    id: "edge_001",
+    description: "Not a derivation (no equals)",
+    derivation: "hello world",
+    shouldDetect: false,
+  },
+  {
+    id: "edge_002",
+    description: "Multi-step with coefficient error",
+    derivation: "x^2 + 2x = x^2 + 2x, then 3x + 2x = 6x",
+    shouldDetect: true,
+    expectedTypes: ["coefficient_error"],
+  },
+
+  // Power rule derivative errors
+  {
+    id: "power_rule_001",
+    description: "Power rule error: d/dx x^3 = 3x^3",
+    derivation: "d/dx x^3 = 3x^3",
+    shouldDetect: true,
+    expectedTypes: ["power_rule_error"],
+  },
+  {
+    id: "power_rule_002",
+    description: "Power rule error: derivative of x^4 = 4x^4",
+    derivation: "derivative of x^4 = 4x^4",
+    shouldDetect: true,
+    expectedTypes: ["power_rule_error"],
+  },
+  {
+    id: "power_rule_003",
+    description: "Power rule error: d/dx x^2 = x (missing coefficient)",
+    derivation: "d/dx x^2 = x",
+    shouldDetect: true,
+    expectedTypes: ["power_rule_error"],
+  },
+
+  // Fraction addition errors
+  {
+    id: "fraction_001",
+    description: "Fraction addition error: 1/2 + 1/3 = 2/5",
+    derivation: "1/2 + 1/3 = 2/5",
+    shouldDetect: true,
+    expectedTypes: ["fraction_error"],
+  },
+  {
+    id: "fraction_002",
+    description: "Fraction addition error: 1/4 + 1/4 = 2/8",
+    derivation: "1/4 + 1/4 = 2/8",
+    shouldDetect: true,
+    expectedTypes: ["fraction_error"],
+  },
+  {
+    id: "fraction_003",
+    description: "Fraction addition error: 2/3 + 1/4 = 3/7",
+    derivation: "2/3 + 1/4 = 3/7",
+    shouldDetect: true,
+    expectedTypes: ["fraction_error"],
+  },
+
+  // Correct power rule cases (true negatives)
+  {
+    id: "correct_016",
+    description: "Correct power rule: d/dx x^3 = 3x^2",
+    derivation: "d/dx x^3 = 3x^2",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_017",
+    description: "Correct power rule: derivative of x^4 = 4x^3",
+    derivation: "derivative of x^4 = 4x^3",
+    shouldDetect: false,
+  },
+
+  // Correct fraction addition cases (true negatives)
+  {
+    id: "correct_018",
+    description: "Correct fraction: 1/2 + 1/3 = 5/6",
+    derivation: "1/2 + 1/3 = 5/6",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_019",
+    description: "Correct fraction: 1/4 + 1/4 = 1/2",
+    derivation: "1/4 + 1/4 = 1/2",
+    shouldDetect: false,
+  },
+
+  // Chain rule errors
+  {
+    id: "chain_rule_001",
+    description: "Chain rule error: d/dx sin(x^2) = cos(x^2) (missing * 2x)",
+    derivation: "d/dx sin(x^2) = cos(x^2)",
+    shouldDetect: true,
+    expectedTypes: ["chain_rule_error"],
+  },
+  {
+    id: "chain_rule_002",
+    description: "Chain rule error: d/dx cos(x^2) = -sin(x^2) (missing * 2x)",
+    derivation: "d/dx cos(x^2) = -sin(x^2)",
+    shouldDetect: true,
+    expectedTypes: ["chain_rule_error"],
+  },
+  {
+    id: "chain_rule_003",
+    description: "Chain rule error: d/dx e^(2x) = e^(2x) (missing * 2)",
+    derivation: "d/dx e^(2x) = e^(2x)",
+    shouldDetect: true,
+    expectedTypes: ["chain_rule_error"],
+  },
+  {
+    id: "chain_rule_004",
+    description: "Chain rule error: d/dx sin(2x) = cos(2x) (missing * 2)",
+    derivation: "d/dx sin(2x) = cos(2x)",
+    shouldDetect: true,
+    expectedTypes: ["chain_rule_error"],
+  },
+  {
+    id: "chain_rule_005",
+    description: "Chain rule error: d/dx cos(3x) = -sin(3x) (missing * 3)",
+    derivation: "d/dx cos(3x) = -sin(3x)",
+    shouldDetect: true,
+    expectedTypes: ["chain_rule_error"],
+  },
+  {
+    id: "chain_rule_006",
+    description: "Chain rule error: d/dx e^(3x) = e^(3x) (missing * 3)",
+    derivation: "d/dx e^(3x) = e^(3x)",
+    shouldDetect: true,
+    expectedTypes: ["chain_rule_error"],
+  },
+
+  // Product rule errors
+  {
+    id: "product_rule_001",
+    description: "Product rule error: d/dx x^2 * sin(x) = 2x * cos(x) (multiplied derivatives)",
+    derivation: "d/dx x^2 * sin(x) = 2x * cos(x)",
+    shouldDetect: true,
+    expectedTypes: ["product_rule_error"],
+  },
+  {
+    id: "product_rule_002",
+    description: "Product rule error: derivative of x * e^x = e^x (missing x*e^x term)",
+    derivation: "derivative of x * e^x = e^x",
+    shouldDetect: true,
+    expectedTypes: ["product_rule_error"],
+  },
+  {
+    id: "product_rule_003",
+    description: "Product rule error: d/dx x * sin(x) = cos(x) (missing sin(x) term)",
+    derivation: "d/dx x * sin(x) = cos(x)",
+    shouldDetect: true,
+    expectedTypes: ["product_rule_error"],
+  },
+  {
+    id: "product_rule_004",
+    description: "Product rule error: d/dx x * cos(x) = -sin(x) (missing cos(x) term)",
+    derivation: "d/dx x * cos(x) = -sin(x)",
+    shouldDetect: true,
+    expectedTypes: ["product_rule_error"],
+  },
+
+  // Correct chain rule cases (true negatives)
+  {
+    id: "correct_020",
+    description: "Correct: d/dx sin(x) = cos(x) (no chain rule needed)",
+    derivation: "d/dx sin(x) = cos(x)",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_021",
+    description: "Correct chain rule: d/dx sin(x^2) = 2x*cos(x^2)",
+    derivation: "d/dx sin(x^2) = 2x*cos(x^2)",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_022",
+    description: "Correct chain rule: d/dx e^(2x) = 2*e^(2x)",
+    derivation: "d/dx e^(2x) = 2*e^(2x)",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_023",
+    description: "Correct: d/dx e^x = e^x (no chain rule needed)",
+    derivation: "d/dx e^x = e^x",
+    shouldDetect: false,
+  },
+
+  // Correct product rule cases (true negatives)
+  {
+    id: "correct_024",
+    description: "Correct product rule: d/dx x * e^x = e^x + x*e^x",
+    derivation: "d/dx x * e^x = e^x + x*e^x",
+    shouldDetect: false,
+  },
+  {
+    id: "correct_025",
+    description: "Correct product rule: d/dx x^2 * sin(x) = 2x*sin(x) + x^2*cos(x)",
+    derivation: "d/dx x^2 * sin(x) = 2x*sin(x) + x^2*cos(x)",
+    shouldDetect: false,
+  },
+];
+
+interface MistakeValidationResult {
+  total: number;
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  precision: number;
+  recall: number;
+  f1: number;
+  details: Array<{
+    id: string;
+    description: string;
+    passed: boolean;
+    expected: string;
+    actual: string;
+    detectedTypes?: string[];
+  }>;
+}
+
+/**
+ * Run mistake detection validation
+ */
+function runMistakesOnly(): MistakeValidationResult {
+  const details: MistakeValidationResult["details"] = [];
+  let tp = 0, fp = 0, tn = 0, fn = 0;
+
+  for (const testCase of MISTAKE_TEST_CASES) {
+    const result = detectCommonMistakesFromText(testCase.derivation);
+    const detected = result !== null && result.hasMistakes;
+
+    let passed = false;
+    let expectedStr: string;
+    let actualStr: string;
+    const detectedTypes = result?.mistakes.map(m => m.type);
+
+    if (testCase.shouldDetect) {
+      // Should detect a mistake
+      if (detected) {
+        // Check if expected type matches
+        if (testCase.expectedTypes) {
+          const foundExpected = testCase.expectedTypes.some(
+            t => detectedTypes?.includes(t)
+          );
+          passed = foundExpected;
+          if (passed) tp++;
+          else fp++; // Detected wrong type
+        } else {
+          passed = true;
+          tp++;
+        }
+        expectedStr = `detect: ${testCase.expectedTypes?.join(", ") || "any"}`;
+        actualStr = `detected: ${detectedTypes?.join(", ") || "none"}`;
+      } else {
+        // Should have detected but didn't
+        fn++;
+        passed = false;
+        expectedStr = `detect: ${testCase.expectedTypes?.join(", ") || "any"}`;
+        actualStr = "no detection";
+      }
+    } else {
+      // Should NOT detect a mistake
+      if (detected) {
+        // False positive
+        fp++;
+        passed = false;
+        expectedStr = "no detection";
+        actualStr = `detected: ${detectedTypes?.join(", ")}`;
+      } else {
+        // True negative
+        tn++;
+        passed = true;
+        expectedStr = "no detection";
+        actualStr = "no detection";
+      }
+    }
+
+    details.push({
+      id: testCase.id,
+      description: testCase.description,
+      passed,
+      expected: expectedStr,
+      actual: actualStr,
+      detectedTypes: detectedTypes,
+    });
+  }
+
+  const precision = tp + fp > 0 ? tp / (tp + fp) : 0;
+  const recall = tp + fn > 0 ? tp / (tp + fn) : 0;
+  const f1 = precision + recall > 0 ? 2 * (precision * recall) / (precision + recall) : 0;
+
+  return {
+    total: MISTAKE_TEST_CASES.length,
+    truePositives: tp,
+    falsePositives: fp,
+    trueNegatives: tn,
+    falseNegatives: fn,
+    precision,
+    recall,
+    f1,
+    details,
+  };
+}
+
+// ============================================================================
 // CLI
 // ============================================================================
 
@@ -1814,6 +2549,7 @@ Options:
   --difficulty=DIFF  Filter by difficulty (easy, medium, hard, trap, impossible, sota)
   --baseline-only    Run only baseline (no MCP tool)
   --tool-only        Run only with MCP tool (no baseline)
+  --mistakes-only    Run mistake detection validation (no LLM calls)
   --no-local         Disable local compute
   --aggressive       Force aggressive compression
   --no-compression   Disable compression
@@ -1823,7 +2559,6 @@ Options:
   --threshold=N      Fail if tool accuracy < N (0-1), for CI
   --ci-report        Output CI-friendly summary with exit code
   --verbose, -v      Stream LLM responses in real-time
-  --no-verify        Skip verification pass for High+ complexity (faster)
   --parallel=N       Run N questions concurrently (default: 1, sequential)
   --help, -h         Show this help
 
@@ -1860,7 +2595,6 @@ Environment Variables:
     : undefined;
   const ciReport = args.includes("--ci-report");
   const verboseMode = args.includes("--verbose") || args.includes("-v");
-  const noVerify = args.includes("--no-verify");
   const parallelArg = args.find((a) => a.startsWith("--parallel="));
   const parallel = parallelArg ? parseInt(parallelArg.split("=")[1], 10) : 1;
   const compressionLevel: "none" | "auto" | "aggressive" = noCompression
@@ -1868,8 +2602,56 @@ Environment Variables:
     : aggressive
     ? "aggressive"
     : "auto";
+  const mistakesOnly = args.includes("--mistakes-only");
 
   const log = jsonOutput ? () => {} : console.log.bind(console);
+
+  // Handle --mistakes-only: run mistake detection validation
+  if (mistakesOnly) {
+    console.log("=".repeat(70));
+    console.log("MISTAKE DETECTION VALIDATION");
+    console.log("=".repeat(70));
+    console.log(`\nRunning ${MISTAKE_TEST_CASES.length} test cases...\n`);
+
+    const result = runMistakesOnly();
+
+    // Print details
+    console.log("─".repeat(70));
+    console.log("RESULTS");
+    console.log("─".repeat(70));
+
+    for (const detail of result.details) {
+      const icon = detail.passed ? "✓" : "✗";
+      console.log(`  ${icon} ${detail.id}: ${detail.description}`);
+      if (!detail.passed) {
+        console.log(`      Expected: ${detail.expected}`);
+        console.log(`      Actual:   ${detail.actual}`);
+      }
+    }
+
+    // Print summary
+    console.log("\n" + "─".repeat(70));
+    console.log("SUMMARY");
+    console.log("─".repeat(70));
+    console.log(`  Total:           ${result.total}`);
+    console.log(`  True Positives:  ${result.truePositives}`);
+    console.log(`  False Positives: ${result.falsePositives}`);
+    console.log(`  True Negatives:  ${result.trueNegatives}`);
+    console.log(`  False Negatives: ${result.falseNegatives}`);
+    console.log(`  Precision:       ${(result.precision * 100).toFixed(1)}%`);
+    console.log(`  Recall:          ${(result.recall * 100).toFixed(1)}%`);
+    console.log(`  F1 Score:        ${(result.f1 * 100).toFixed(1)}%`);
+    console.log("=".repeat(70));
+
+    // Exit with error if F1 < 80%
+    if (result.f1 < 0.8) {
+      console.log(`\n✗ FAIL: F1 score ${(result.f1 * 100).toFixed(1)}% < 80% threshold`);
+      process.exit(1);
+    } else {
+      console.log(`\n✓ PASS: F1 score ${(result.f1 * 100).toFixed(1)}% >= 80% threshold`);
+      process.exit(0);
+    }
+  }
 
   log(`Loading questions from ${questionsFile}...`);
   const file = Bun.file(new URL(questionsFile, import.meta.url).pathname);
@@ -1942,16 +2724,14 @@ Environment Variables:
       await mcp.init();
       log("✓ MCP server: initialized successfully");
 
-      const testResult = await mcp.think({
+      const testResult = await mcp.scratchpad({
+        operation: "step",
         thought: "Dry run validation test",
-        step: 1,
-        total: 1,
-        is_final: true,
-        guidance: false,
+        purpose: "validation",
         session_id: `dry-run-${Date.now()}`,
         local_compute: true,
       });
-      log(`✓ MCP think tool: responsive`);
+      log(`✓ MCP scratchpad tool: responsive`);
       log(`  Sample response length: ${testResult.raw.length} chars`);
 
       await mcp.close();
@@ -1968,6 +2748,33 @@ Environment Variables:
     process.exit(0);
   }
 
+  // Incremental results file - saves after each question completes
+  const incrementalFile = `results-${Date.now()}.json`;
+  const incrementalPath = new URL(incrementalFile, import.meta.url).pathname;
+  const incrementalResults: RunResult[] = [];
+  
+  // Progress callback that saves incrementally
+  const saveIncrementally = async (completed: number, total: number, result: RunResult) => {
+    incrementalResults.push(result);
+    
+    // Calculate partial summary for incremental save
+    const partialSummary = calculateSummary(incrementalResults);
+    const partialResults: BenchmarkResults = {
+      timestamp: new Date().toISOString(),
+      model: process.env.LLM_MODEL || "unknown",
+      total_questions: total,
+      results: incrementalResults,
+      summary: partialSummary,
+    };
+    
+    // Save incrementally (non-blocking)
+    try {
+      await Bun.write(incrementalPath, JSON.stringify(partialResults));
+    } catch {
+      // Ignore write errors during benchmark
+    }
+  };
+
   const results = await runBenchmark(questions, {
     runBaseline: !toolOnly,
     runTool: !baselineOnly,
@@ -1975,8 +2782,8 @@ Environment Variables:
     compressionLevel,
     quiet: jsonOutput,
     verbose: verboseMode,
-    skipVerify: noVerify,
     concurrency: parallel,
+    onProgress: saveIncrementally,
   });
 
   if (jsonOutput) {
@@ -2200,11 +3007,9 @@ Environment Variables:
 
   log("\n" + "=".repeat(70));
 
-  const outFile = `results-${Date.now()}.json`;
-  // Save without pretty-printing (faster) and don't block
-  const outPath = new URL(outFile, import.meta.url).pathname;
-  Bun.write(outPath, JSON.stringify(results)).catch(() => {});
-  log(`\nResults saving to ${outFile}`);
+  // Save final results (overwrites incremental file with complete data)
+  await Bun.write(incrementalPath, JSON.stringify(results));
+  log(`\nResults saved to ${incrementalFile}`);
 
   // CI Report mode: concise output with exit code
   if (ciReport) {

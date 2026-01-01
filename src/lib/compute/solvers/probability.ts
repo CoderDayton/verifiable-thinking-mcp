@@ -64,16 +64,19 @@ const PATTERNS = {
 // GUARDS (cheap detection before expensive regex)
 // =============================================================================
 
+/** @internal */
 function hasFairCoin(lower: string): boolean {
   return lower.includes("fair") && lower.includes("coin");
 }
 
+/** @internal */
 function hasIndependent(lower: string): boolean {
   return lower.includes("independent");
 }
 
 /**
  * Detect if this is a birthday paradox question
+ * @internal
  */
 function hasBirthdayContext(lower: string): boolean {
   return (
@@ -86,6 +89,7 @@ function hasBirthdayContext(lower: string): boolean {
 /**
  * Detect if this is asking about probability of next event
  * NOT just mentioning "chance" or "%" in context of expected value
+ * @internal
  */
 function hasProbabilityQuestion(lower: string): boolean {
   // Exclude expected value / decision questions
@@ -102,6 +106,7 @@ function hasProbabilityQuestion(lower: string): boolean {
   );
 }
 
+/** @internal */
 function hasStreakContext(lower: string): boolean {
   return (
     lower.includes("in a row") ||
@@ -118,6 +123,7 @@ function hasStreakContext(lower: string): boolean {
 
 /**
  * Extract stated probability from text (e.g., "50% success rate" → 50)
+ * @internal
  */
 function extractStatedProbability(text: string): number | null {
   // Look for explicit percentage
@@ -136,6 +142,7 @@ function extractStatedProbability(text: string): number | null {
 
 /**
  * Check if question asks about percentage vs decimal
+ * @internal
  */
 function wantsPercentage(text: string): boolean {
   const lower = text.toLowerCase();
@@ -154,6 +161,7 @@ function wantsPercentage(text: string): boolean {
  *
  * @param n - Number of people
  * @returns Probability as percentage (0-100)
+ * @internal
  */
 function birthdayParadoxProbability(n: number): number {
   if (n <= 1) return 0;
@@ -166,7 +174,8 @@ function birthdayParadoxProbability(n: number): number {
   }
 
   // P(at least 2 share) = 1 - P(all different)
-  return (1 - pAllDifferent) * 100;
+  // Clamp to 100 to guard against floating-point precision loss
+  return Math.min(100, (1 - pAllDifferent) * 100);
 }
 
 // =============================================================================

@@ -49,9 +49,13 @@ function hasModusPonens(lower: string): boolean {
 }
 
 function hasModusTollens(lower: string): boolean {
+  // Modus tollens: "If P→Q and ¬Q, then ¬P"
+  // The CONSEQUENT is negated (dry = not wet), asking about the ANTECEDENT
+  // Exclude "therefore" which signals denying antecedent pattern
   return (
     lower.includes("if ") &&
-    (lower.includes(" dry") || lower.includes(" not ") || lower.includes("n't"))
+    (lower.includes(" dry") || lower.includes(" not ") || lower.includes("n't")) &&
+    !lower.includes("therefore") // "therefore" indicates a conclusion claim, not a question
   );
 }
 
@@ -72,13 +76,14 @@ function hasXor(lower: string): boolean {
  * - Lowercase
  * - Remove articles (the, a, an)
  * - Remove "it's", "it is", "it"
- * - Basic stemming (ing → "", s → "" for verbs)
+ * - Basic stemming (ing → "", ed → "", s → "" for verbs)
  */
 function normalize(s: string): string {
   return s
     .toLowerCase()
     .replace(/\b(?:the|a|an|it['']?s|it\s+is|it)\b/gi, "")
     .replace(/ing\b/g, "") // raining → rain
+    .replace(/ed\b/g, "") // rained → rain
     .replace(/s\b/g, "") // rains → rain
     .replace(/\s+/g, " ")
     .trim();
@@ -114,6 +119,7 @@ function matchesConcept(a: string, b: string): boolean {
 // SOLVER
 // =============================================================================
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: logic solver requires exhaustive pattern matching for logical forms
 export function tryLogic(text: string): ComputeResult {
   const start = performance.now();
   const lower = text.toLowerCase();
@@ -204,6 +210,199 @@ export function tryLogic(text: string): ComputeResult {
         confidence: 1.0,
         time_ms: performance.now() - start,
       };
+    }
+  }
+
+  // AFFIRMING THE CONSEQUENT (invalid): If P→Q and Q, cannot conclude P
+  // "If it rains, ground is wet. Ground is wet. Therefore it rained. Valid?" → NO
+  // "If it rains, ground is wet. Ground is wet. Can we conclude it rained?" → NO
+  if (lower.includes("if ") && (lower.includes("valid") || lower.includes("conclude"))) {
+    // Pattern 1: "If P, Q. Q. Therefore P. Valid?"
+    const affirmConseq1 =
+      /if\s+([^,]+),\s*(?:then\s+)?(?:the\s+)?([^.]+)\.\s*(?:the\s+)?([^.]+)\s+is\s+([^.]+)\.\s*therefore\s+(?:it\s+)?([^.]+)\.\s*valid/i;
+    const match1 = text.match(affirmConseq1);
+    if (match1) {
+      const [, premise, consequent, subject, _state, conclusion] = match1;
+      if (
+        premise &&
+        consequent &&
+        conclusion &&
+        matchesConcept(subject || "", consequent) &&
+        matchesConcept(conclusion, premise)
+      ) {
+        return {
+          solved: true,
+          result: "NO",
+          method: "affirming_consequent",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
+    }
+
+    // Pattern 2: "If P, Q. Q. Can we conclude P?" (more natural phrasing)
+    const affirmConseq2 =
+      /if\s+([^,]+),\s*(?:then\s+)?(?:the\s+)?([^.]+)\.\s*(?:the\s+)?([^.]+?)\.\s*(?:can\s+we\s+)?conclude\s+(?:that\s+)?(?:it\s+)?([^?]+)\?/i;
+    const match2 = text.match(affirmConseq2);
+    if (match2) {
+      const [, premise, consequent, assertion, conclusion] = match2;
+      // Check if assertion matches consequent (affirming Q)
+      // And conclusion tries to derive premise (claiming P)
+      if (
+        premise &&
+        consequent &&
+        assertion &&
+        conclusion &&
+        matchesConcept(assertion, consequent) &&
+        matchesConcept(conclusion, premise)
+      ) {
+        return {
+          solved: true,
+          result: "NO",
+          method: "affirming_consequent",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
+    }
+
+    // Pattern 3: "If P then Q. Q is true. Therefore P is true. Valid?"
+    const affirmConseq3 =
+      /if\s+(\w+)\s+then\s+(\w+)\.\s*(\w+)\s+is\s+true\.\s*therefore\s+(\w+)\s+is\s+true\.\s*valid/i;
+    const match3 = text.match(affirmConseq3);
+    if (match3) {
+      const [, P, Q, assertedQ, concludedP] = match3;
+      // Affirming consequent: Q is true, claiming P is true (invalid)
+      if (
+        Q &&
+        assertedQ &&
+        P &&
+        concludedP &&
+        Q.toLowerCase() === assertedQ.toLowerCase() &&
+        P.toLowerCase() === concludedP.toLowerCase()
+      ) {
+        return {
+          solved: true,
+          result: "NO",
+          method: "affirming_consequent",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
+    }
+  }
+
+  // DENYING THE ANTECEDENT (invalid): If P→Q and ¬P, cannot conclude ¬Q
+  // "If it rains, ground is wet. It's not raining. Therefore ground is dry. Valid?" → NO
+  if (lower.includes("valid") && lower.includes("therefore") && lower.includes("not ")) {
+    const denyAntecedent =
+      /if\s+([^,]+),\s*(?:then\s+)?(?:the\s+)?([^.]+)\.\s*(?:it['']?s\s+)?not\s+([^.]+)\.\s*therefore\s+(?:the\s+)?([^.]+)\s+is\s+([^.]+)\.\s*valid/i;
+    const match = text.match(denyAntecedent);
+    if (match) {
+      const [, premise, consequent, negatedPremise, subject, _conclusion] = match;
+      // If negating premise and concluding about consequent, it's invalid
+      if (
+        premise &&
+        consequent &&
+        negatedPremise &&
+        matchesConcept(negatedPremise, premise) &&
+        matchesConcept(subject || "", consequent)
+      ) {
+        return {
+          solved: true,
+          result: "NO",
+          method: "denying_antecedent",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
+    }
+  }
+
+  // DE MORGAN'S LAWS
+  // NOT(A AND B) = (NOT A) OR (NOT B)
+  // NOT(A OR B) = (NOT A) AND (NOT B)
+  if (
+    lower.includes("not") &&
+    (lower.includes("equivalent") || lower.includes("fill") || lower.includes("="))
+  ) {
+    // NOT(A AND B) = (NOT A) ___ (NOT B) → OR
+    // Also matches "is equivalent to"
+    const deMorganAnd = /not\s*\(\s*a\s+and\s+b\s*\).*?\(not\s+a\)\s*(?:_+|and|or)\s*\(not\s+b\)/i;
+    if (deMorganAnd.test(text) && lower.includes("and b")) {
+      // Check if it's NOT(A AND B) pattern
+      if (/not\s*\(\s*a\s+and\s+b\s*\)/i.test(text)) {
+        return {
+          solved: true,
+          result: "OR",
+          method: "de_morgan_and",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
+    }
+
+    // NOT(A OR B) = (NOT A) ___ (NOT B) → AND
+    const deMorganOr = /not\s*\(\s*a\s+or\s+b\s*\).*?\(not\s+a\)\s*(?:_+|and|or)\s*\(not\s+b\)/i;
+    if (deMorganOr.test(text) && lower.includes("or b")) {
+      // Check if it's NOT(A OR B) pattern
+      if (/not\s*\(\s*a\s+or\s+b\s*\)/i.test(text)) {
+        return {
+          solved: true,
+          result: "AND",
+          method: "de_morgan_or",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
+    }
+  }
+
+  // INVALID SYLLOGISM: "Some A are B. Some B are C. Therefore some A are C." → NO
+  if (lower.includes("some") && lower.includes("valid")) {
+    const invalidSyllogism =
+      /some\s+(\w+)\s+are\s+(\w+)\.\s*some\s+(\w+)\s+are\s+(\w+)\.\s*(?:therefore\s+)?some\s+(\w+)\s+are\s+(\w+)\.\s*valid/i;
+    const match = text.match(invalidSyllogism);
+    if (match) {
+      // "Some A are B. Some B are C." does NOT imply "Some A are C"
+      // This is an undistributed middle term fallacy
+      return {
+        solved: true,
+        result: "NO",
+        method: "invalid_syllogism_some",
+        confidence: 1.0,
+        time_ms: performance.now() - start,
+      };
+    }
+  }
+
+  // CONTRAPOSITIVE: "All A are B" is equivalent to "All non-B are non-A" → YES
+  // "All dogs are mammals" = "All non-mammals are non-dogs"
+  if (lower.includes("equivalent") && lower.includes("all ") && lower.includes("non-")) {
+    // Pattern: "All X are Y" is equivalent to "All non-Y are non-X"
+    const contrapositiveMatch = text.match(
+      /["']?all\s+(\w+)\s+are\s+(\w+)["']?\s+is\s+equivalent\s+to\s+["']?all\s+non-(\w+)\s+are\s+non-(\w+)["']?/i,
+    );
+    if (contrapositiveMatch) {
+      const [, A, B, notB, notA] = contrapositiveMatch;
+      // Valid contrapositive: All A→B ≡ All ¬B→¬A
+      // Check if the terms match correctly (B matches notB, A matches notA)
+      if (
+        A &&
+        B &&
+        notB &&
+        notA &&
+        B.toLowerCase() === notB.toLowerCase() &&
+        A.toLowerCase() === notA.toLowerCase()
+      ) {
+        return {
+          solved: true,
+          result: "YES",
+          method: "contrapositive",
+          confidence: 1.0,
+          time_ms: performance.now() - start,
+        };
+      }
     }
   }
 

@@ -32,17 +32,14 @@ export function getVerbosity(question: string): Verbosity {
 // SYSTEM PROMPTS - NORMAL (default)
 // =============================================================================
 
-export const SYSTEM_BASELINE =
-  "You are a helpful assistant. Answer questions directly and concisely. Use plain text, not LaTeX.";
+export const SYSTEM_BASELINE = "Answer directly and concisely. Plain text only.";
 export const SYSTEM_REASONING =
-  "You are a careful reasoning assistant. Show your reasoning, then give the final answer clearly. Use plain text math (e.g., x + 1 = 2), not LaTeX.";
-export const SYSTEM_VERIFICATION =
-  "You are a verification assistant. Double-check reasoning carefully. Use plain text, not LaTeX.";
-export const SYSTEM_ANSWER_ONLY = "Give only the answer, nothing else.";
+  "Show reasoning step-by-step, then give final answer. Plain text math only.";
+export const SYSTEM_VERIFICATION = "Double-check reasoning. Fix errors. Plain text only.";
+export const SYSTEM_ANSWER_ONLY = "Answer only.";
 
 // System prompt for explanatory questions - emphasizes conciseness
-export const SYSTEM_EXPLANATORY =
-  "You are a clear, concise explainer. Explain concepts directly without unnecessary preamble or repetition. Use plain text.";
+export const SYSTEM_EXPLANATORY = "Explain clearly and concisely. Plain text only.";
 
 // =============================================================================
 // DOMAIN-SPECIFIC PROMPTS (token-light steering)
@@ -95,13 +92,13 @@ export const SYSTEM_ANSWER_ONLY_TERSE = "Answer only.";
 export function formatBaselinePrompt(question: string): string {
   return `${question}
 
-Provide your answer clearly. If it's a number, state just the number. If it's a choice, state just the choice.`;
+Answer clearly. Number for numeric, choice letter for multiple choice.`;
 }
 
 export function formatReasoningPrompt(question: string): string {
   return `${question}
 
-Solve this step by step. At the very end, write "Answer: " followed by just the answer (number, letter, or short phrase).`;
+End with "Answer: " followed by just the answer.`;
 }
 
 export function formatVerificationPrompt(
@@ -109,29 +106,22 @@ export function formatVerificationPrompt(
   initialReasoning: string,
   patterns: string[],
 ): string {
-  return `I need to verify my answer to: ${question}
+  return `Verify: ${question}
 
-My initial reasoning:
+Prior reasoning:
 ${initialReasoning}
 
-Risk patterns detected: ${patterns.join(", ")}
+Risk flags: ${patterns.join(", ")}
 
-Please:
-1. Check for errors in the reasoning above
-2. Verify the calculation/logic step by step
-3. Provide the corrected answer if needed
+Check for errors, correct if needed.
 
-Final Answer: [answer]`;
+Answer:`;
 }
 
 export function formatCriticalCheckPrompt(question: string): string {
-  return `CRITICAL CHECK for: ${question}
+  return `${question}
 
-Previous attempts flagged as high risk. 
-
-Provide ONLY the numerical/factual answer, nothing else. Double-check before responding.
-
-Answer:`;
+Double-check. Answer only:`;
 }
 
 /**
@@ -140,7 +130,7 @@ Answer:`;
 export function formatExplanatoryPrompt(question: string): string {
   return `${question}
 
-Be direct and concise. Focus on the key concepts without unnecessary repetition or filler phrases.`;
+Be direct. Focus on key concepts.`;
 }
 
 /**

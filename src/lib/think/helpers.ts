@@ -352,20 +352,13 @@ export async function runVerify(
   if (!args.verify) return null;
 
   const contextStrings = ctx.priorThoughts.map((t) => t.thought);
-  const result = verify(thought, ctx.domain, contextStrings, true, true);
+  const result = verify(thought, ctx.domain, contextStrings, true);
 
   const icon = result.passed ? "✓ PASS" : "✗ FAIL";
   await streamFn({
     type: "text",
     text: `\n**Verification: ${icon}** (${Math.round(result.confidence * 100)}%)\n`,
   });
-
-  if (result.blindspot_marker) {
-    await streamFn({
-      type: "text",
-      text: "**Wait** - Self-correction blind spot detected. Pause and reconsider.\n",
-    });
-  }
 
   return result;
 }

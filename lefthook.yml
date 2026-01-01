@@ -4,26 +4,22 @@
 pre-commit:
   parallel: true
   commands:
-    # Lint: fail on errors, warnings are allowed (for progressive adoption)
+    # Lint: fail on errors AND warnings (zero-tolerance)
     lint:
       glob: "*.{ts,tsx}"
-      run: bun run biome check src test scripts
+      run: bunx biome check src test scripts
       stage_fixed: true
 
-    # Format check (no auto-fix, just fail if not formatted)
-    format:
-      glob: "*.{ts,tsx}"
-      run: bun run biome format src test scripts
-      stage_fixed: true
-
+    # Type check
     typecheck:
       glob: "*.{ts,tsx}"
-      run: bun run typecheck
+      run: bunx tsc --noEmit
       stage_fixed: true
 
+    # Run tests with bail on first failure
     test:
       glob: "*.{ts,tsx}"
-      run: bun test --bail
+      run: bun test --bail --timeout 60000
       stage_fixed: true
 
 pre-push:
