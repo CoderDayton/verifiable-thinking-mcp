@@ -47,6 +47,7 @@ export {
   answersMatch,
   extractAnswer,
   normalizeAnswer,
+  parseFraction,
   shouldStreamStrip,
   stripLLMOutput,
   stripLLMOutputAsync,

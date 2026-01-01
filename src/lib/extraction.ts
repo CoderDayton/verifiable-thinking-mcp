@@ -395,6 +395,12 @@ const STOPWORDS = new Set([
 function extractFromPhrase(phrase: string): string | null {
   const trimmed = phrase.trim();
 
+  // Priority 0: Word fractions at the start ("two-thirds", "one half", "a third")
+  const wordFracMatch = trimmed.match(
+    /^(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/i,
+  );
+  if (wordFracMatch?.[0]) return wordFracMatch[0];
+
   // Priority 1: Leading number (with optional comma separators, decimals, fractions)
   const numMatch = trimmed.match(/^(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)/);
   if (numMatch?.[1]) return cleanNumber(numMatch[1]);
@@ -546,35 +552,140 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
     if (extracted) return extracted;
   }
 
-  // Priority 6: Last equation result "= X" in the text
-  const eqMatches = [...cleaned.matchAll(/=\s*(-?[\d,]+(?:\.\d+)?)/g)];
+  // Priority 6: Last equation result "= X" in the text (including fractions like "= 2/3")
+  const eqMatches = [...cleaned.matchAll(/=\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)/g)];
   if (eqMatches.length > 0) {
     const lastMatch = eqMatches[eqMatches.length - 1];
     if (lastMatch?.[1]) return cleanNumber(lastMatch[1]);
   }
 
-  // Priority 7: Look for standalone numbers in the last few lines
+  // Priority 7: Look for standalone numbers (including fractions) in the last few lines
   const lines = cleaned.trim().split("\n").slice(-5);
   for (const line of lines.reverse()) {
-    // "is NUMBER" pattern
-    const isNumMatch = line.match(/is\s+(-?[\d,]+(?:\.\d+)?)\b/i);
+    // "is NUMBER" pattern (including fractions)
+    const isNumMatch = line.match(/is\s+(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)\b/i);
     if (isNumMatch?.[1]) return cleanNumber(isNumMatch[1]);
 
-    // Standalone number on a line
-    const standaloneNum = line.match(/^\s*(-?[\d,]+(?:\.\d+)?)\s*$/);
+    // Standalone number/fraction on a line
+    const standaloneNum = line.match(/^\s*(-?[\d,]+(?:\.\d+)?(?:\/\d+)?)\s*$/);
     if (standaloneNum?.[1]) return cleanNumber(standaloneNum[1]);
   }
 
-  // Priority 8: Last number in the entire response
-  const allNumbers = cleaned.match(/-?[\d,]+(?:\.\d+)?/g);
+  // Priority 8: Last number/fraction in the entire response
+  const allNumbers = cleaned.match(/-?[\d,]+(?:\.\d+)?(?:\/\d+)?/g);
   if (allNumbers && allNumbers.length > 0) {
     const lastNum = allNumbers[allNumbers.length - 1];
     if (lastNum) return cleanNumber(lastNum);
   }
 
+  // Priority 8b: Word fractions ("two-thirds", "one-half", "three-quarters")
+  // Pattern: (a|one|two|...|twelve)[-\s](half|third|quarter|...)
+  const wordFractionMatch = cleaned.match(
+    /\b(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)\b/gi,
+  );
+  if (wordFractionMatch && wordFractionMatch.length > 0) {
+    // Return last word fraction found (most likely the answer)
+    return wordFractionMatch[wordFractionMatch.length - 1]!;
+  }
+
   // Priority 9: Last meaningful word (for YES/NO/TRUE/FALSE type answers)
   const lastLines = cleaned.trim().split("\n").slice(-3).join(" ");
   return extractLastMeaningfulWord(lastLines);
+}
+
+// =============================================================================
+// FRACTION HANDLING
+// =============================================================================
+
+/** Word-to-number mapping for fraction parsing */
+const WORD_NUMBERS: Record<string, number> = {
+  zero: 0,
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12,
+};
+
+/** Word-to-denominator mapping for common fractions */
+const WORD_DENOMINATORS: Record<string, number> = {
+  half: 2,
+  halves: 2,
+  third: 3,
+  thirds: 3,
+  fourth: 4,
+  fourths: 4,
+  quarter: 4,
+  quarters: 4,
+  fifth: 5,
+  fifths: 5,
+  sixth: 6,
+  sixths: 6,
+  seventh: 7,
+  sevenths: 7,
+  eighth: 8,
+  eighths: 8,
+  ninth: 9,
+  ninths: 9,
+  tenth: 10,
+  tenths: 10,
+};
+
+/**
+ * Parse a fraction string into a decimal number.
+ * Handles:
+ * - Numeric fractions: "2/3", "1/2", "3/4"
+ * - Word fractions: "two-thirds", "one-half", "three-quarters"
+ * - Mixed numbers: "1 1/2", "2 3/4" (whole + fraction)
+ *
+ * @returns The decimal value, or null if not a valid fraction
+ */
+export function parseFraction(input: string): number | null {
+  const trimmed = input.trim().toLowerCase();
+
+  // Pattern 1: Numeric fraction "a/b" or mixed "w a/b"
+  const numericMatch = trimmed.match(/^(-?\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (numericMatch) {
+    const [, num, denom] = numericMatch;
+    const d = Number.parseFloat(denom!);
+    if (d === 0) return null;
+    return Number.parseFloat(num!) / d;
+  }
+
+  // Pattern 2: Mixed number "w a/b" (e.g., "1 1/2" or "2 3/4")
+  const mixedMatch = trimmed.match(/^(-?\d+)\s+(\d+)\s*\/\s*(\d+)$/);
+  if (mixedMatch) {
+    const [, whole, num, denom] = mixedMatch;
+    const w = Number.parseInt(whole!, 10);
+    const n = Number.parseInt(num!, 10);
+    const d = Number.parseInt(denom!, 10);
+    if (d === 0) return null;
+    const sign = w < 0 ? -1 : 1;
+    return w + sign * (n / d);
+  }
+
+  // Pattern 3: Word fraction "one-half", "two-thirds", "three-quarters"
+  // Also handles "a half", "a third", etc.
+  const wordMatch = trimmed.match(
+    /^(a|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[-\s]?(half|halves|third|thirds|fourth|fourths|quarter|quarters|fifth|fifths|sixth|sixths|seventh|sevenths|eighth|eighths|ninth|ninths|tenth|tenths)$/,
+  );
+  if (wordMatch) {
+    const [, numWord, denomWord] = wordMatch;
+    const numerator = numWord === "a" ? 1 : (WORD_NUMBERS[numWord!] ?? 1);
+    const denominator = WORD_DENOMINATORS[denomWord!];
+    if (denominator) {
+      return numerator / denominator;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -594,7 +705,12 @@ export function normalizeAnswer(answer: string): string {
 }
 
 /**
- * Compare two answers for equivalence
+ * Compare two answers for equivalence.
+ * Handles:
+ * - Case-insensitive comparison
+ * - Numeric tolerance (0.01% relative or 0.001 absolute for fraction tolerance)
+ * - Fractions: "2/3" matches "0.667", "two-thirds"
+ * - Partial containment: "45" matches "45 degrees"
  */
 export function answersMatch(extracted: string, expected: string): boolean {
   const normExtracted = normalizeAnswer(extracted);
@@ -603,12 +719,60 @@ export function answersMatch(extracted: string, expected: string): boolean {
   // Exact match
   if (normExtracted === normExpected) return true;
 
-  // Try numeric comparison
-  const numExtracted = Number.parseFloat(normExtracted);
-  const numExpected = Number.parseFloat(normExpected);
+  // Try numeric comparison (including fractions)
+  // First try direct parseFloat, then try fraction parsing
+  let numExtracted = Number.parseFloat(normExtracted);
+  let numExpected = Number.parseFloat(normExpected);
+
+  // Track if we parsed fractions (need wider tolerance for rounding)
+  let hasFraction = false;
+
+  // If parseFloat failed or gave partial result (e.g., "2" from "2/3"), try fraction parsing
+  // Check if original has "/" to detect fractions that parseFloat truncated
+  if (extracted.includes("/")) {
+    const fracExtracted = parseFraction(extracted);
+    if (fracExtracted !== null) {
+      numExtracted = fracExtracted;
+      hasFraction = true;
+    }
+  }
+  if (expected.includes("/")) {
+    const fracExpected = parseFraction(expected);
+    if (fracExpected !== null) {
+      numExpected = fracExpected;
+      hasFraction = true;
+    }
+  }
+
+  // Also try word fractions ("two-thirds", "one-half")
+  if (
+    Number.isNaN(numExtracted) ||
+    extracted.match(/\b(half|third|quarter|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/i)
+  ) {
+    const fracExtracted = parseFraction(extracted);
+    if (fracExtracted !== null) {
+      numExtracted = fracExtracted;
+      hasFraction = true;
+    }
+  }
+  if (
+    Number.isNaN(numExpected) ||
+    expected.match(/\b(half|third|quarter|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/i)
+  ) {
+    const fracExpected = parseFraction(expected);
+    if (fracExpected !== null) {
+      numExpected = fracExpected;
+      hasFraction = true;
+    }
+  }
+
   if (!Number.isNaN(numExtracted) && !Number.isNaN(numExpected)) {
-    // Allow small floating point tolerance
-    if (Math.abs(numExtracted - numExpected) < 0.0001) return true;
+    // Use wider tolerance for fractions (0.001 absolute) to handle rounding in 3-digit decimals
+    // For non-fractions, use tighter tolerance (0.0001 absolute or 0.01% relative)
+    const absDiff = Math.abs(numExtracted - numExpected);
+    const absTol = hasFraction ? 0.001 : 0.0001;
+    const relTol = Math.abs(numExpected) * 0.0001;
+    if (absDiff < Math.max(absTol, relTol)) return true;
   }
 
   // Check if one contains the other (for partial matches like "45" vs "45 degrees")

@@ -3132,6 +3132,7 @@ import {
   answersMatch,
   extractAnswer,
   normalizeAnswer,
+  parseFraction,
   shouldStreamStrip,
   stripLLMOutput,
   stripLLMOutputAsync,
@@ -3861,6 +3862,10 @@ describe("AnswerExtraction - extractAnswer", () => {
     test("handles single equation", () => {
       expect(extractAnswer("The sum = 45")).toBe("45");
     });
+
+    test("extracts fraction from equation", () => {
+      expect(extractAnswer("The probability = 2/3")).toBe("2/3");
+    });
   });
 
   describe("Priority 7-8: Number extraction", () => {
@@ -3874,6 +3879,34 @@ describe("AnswerExtraction - extractAnswer", () => {
 
     test("extracts last number as fallback", () => {
       expect(extractAnswer("Numbers 5, 10, 15, 20 in the sequence")).toBe("20");
+    });
+
+    test("extracts fraction from 'is X' pattern", () => {
+      expect(extractAnswer("The probability is 2/3")).toBe("2/3");
+    });
+
+    test("extracts standalone fraction on line", () => {
+      expect(extractAnswer("The answer:\n3/4")).toBe("3/4");
+    });
+
+    test("extracts fraction as last number fallback", () => {
+      expect(extractAnswer("2/3 is the probability")).toBe("2/3");
+    });
+
+    test("extracts word fraction with hyphen", () => {
+      expect(extractAnswer("The answer is two-thirds")).toBe("two-thirds");
+    });
+
+    test("extracts word fraction with space", () => {
+      expect(extractAnswer("The answer is two thirds")).toBe("two thirds");
+    });
+
+    test("extracts word fraction 'a half'", () => {
+      expect(extractAnswer("The answer is a half")).toBe("a half");
+    });
+
+    test("extracts word fraction as fallback", () => {
+      expect(extractAnswer("one-fourth of the total")).toBe("one-fourth");
     });
   });
 
@@ -3954,6 +3987,127 @@ describe("AnswerExtraction - answersMatch", () => {
   test("rejects non-matching", () => {
     expect(answersMatch("42", "43")).toBe(false);
     expect(answersMatch("YES", "NO")).toBe(false);
+  });
+
+  // Fraction matching tests
+  test("fraction to decimal: 1/2 matches 0.5", () => {
+    expect(answersMatch("1/2", "0.5")).toBe(true);
+    expect(answersMatch("0.5", "1/2")).toBe(true);
+  });
+
+  test("fraction to decimal: 2/3 matches 0.667", () => {
+    expect(answersMatch("2/3", "0.6667")).toBe(true);
+    expect(answersMatch("2/3", "0.667")).toBe(true);
+  });
+
+  test("fraction to decimal: 3/4 matches 0.75", () => {
+    expect(answersMatch("3/4", "0.75")).toBe(true);
+  });
+
+  test("fraction to fraction: equivalent fractions match", () => {
+    expect(answersMatch("1/2", "2/4")).toBe(true);
+    expect(answersMatch("2/3", "4/6")).toBe(true);
+    expect(answersMatch("3/9", "1/3")).toBe(true);
+  });
+
+  test("word fractions match numeric: one-half matches 0.5", () => {
+    expect(answersMatch("one-half", "0.5")).toBe(true);
+    expect(answersMatch("one half", "0.5")).toBe(true);
+    expect(answersMatch("a half", "0.5")).toBe(true);
+  });
+
+  test("word fractions match numeric: two-thirds matches 2/3", () => {
+    expect(answersMatch("two-thirds", "2/3")).toBe(true);
+    expect(answersMatch("two thirds", "0.6667")).toBe(true);
+  });
+
+  test("word fractions match numeric: three-quarters matches 0.75", () => {
+    expect(answersMatch("three-quarters", "0.75")).toBe(true);
+    expect(answersMatch("three quarters", "3/4")).toBe(true);
+    expect(answersMatch("three-fourths", "0.75")).toBe(true);
+  });
+
+  test("various word fractions", () => {
+    expect(answersMatch("one-third", "1/3")).toBe(true);
+    expect(answersMatch("one-fourth", "0.25")).toBe(true);
+    expect(answersMatch("one-quarter", "0.25")).toBe(true);
+    expect(answersMatch("two-fifths", "0.4")).toBe(true);
+    expect(answersMatch("three-tenths", "0.3")).toBe(true);
+  });
+
+  test("mixed numbers: 1 1/2 matches 1.5", () => {
+    expect(answersMatch("1 1/2", "1.5")).toBe(true);
+    expect(answersMatch("2 3/4", "2.75")).toBe(true);
+  });
+});
+
+describe("AnswerExtraction - parseFraction", () => {
+  test("parses simple numeric fractions", () => {
+    expect(parseFraction("1/2")).toBe(0.5);
+    expect(parseFraction("2/3")).toBeCloseTo(0.6667, 3);
+    expect(parseFraction("3/4")).toBe(0.75);
+    expect(parseFraction("1/4")).toBe(0.25);
+    expect(parseFraction("5/8")).toBe(0.625);
+  });
+
+  test("parses fractions with whitespace", () => {
+    expect(parseFraction(" 1/2 ")).toBe(0.5);
+    expect(parseFraction("1 / 2")).toBe(0.5);
+    expect(parseFraction("  2/3  ")).toBeCloseTo(0.6667, 3);
+  });
+
+  test("parses mixed numbers", () => {
+    expect(parseFraction("1 1/2")).toBe(1.5);
+    expect(parseFraction("2 3/4")).toBe(2.75);
+    expect(parseFraction("3 1/4")).toBe(3.25);
+  });
+
+  test("parses negative fractions", () => {
+    expect(parseFraction("-1/2")).toBe(-0.5);
+    expect(parseFraction("-3/4")).toBe(-0.75);
+  });
+
+  test("parses word fractions with hyphen", () => {
+    expect(parseFraction("one-half")).toBe(0.5);
+    expect(parseFraction("two-thirds")).toBeCloseTo(0.6667, 3);
+    expect(parseFraction("three-quarters")).toBe(0.75);
+    expect(parseFraction("one-fourth")).toBe(0.25);
+    expect(parseFraction("three-fourths")).toBe(0.75);
+  });
+
+  test("parses word fractions with space", () => {
+    expect(parseFraction("one half")).toBe(0.5);
+    expect(parseFraction("two thirds")).toBeCloseTo(0.6667, 3);
+    expect(parseFraction("three quarters")).toBe(0.75);
+  });
+
+  test("parses 'a half' and 'a third' forms", () => {
+    expect(parseFraction("a half")).toBe(0.5);
+    expect(parseFraction("a third")).toBeCloseTo(0.3333, 3);
+    expect(parseFraction("a quarter")).toBe(0.25);
+  });
+
+  test("parses various denominator words", () => {
+    expect(parseFraction("one-fifth")).toBe(0.2);
+    expect(parseFraction("two-fifths")).toBe(0.4);
+    expect(parseFraction("one-sixth")).toBeCloseTo(0.1667, 3);
+    expect(parseFraction("one-seventh")).toBeCloseTo(0.1429, 3);
+    expect(parseFraction("one-eighth")).toBe(0.125);
+    expect(parseFraction("one-ninth")).toBeCloseTo(0.1111, 3);
+    expect(parseFraction("one-tenth")).toBe(0.1);
+  });
+
+  test("returns null for invalid input", () => {
+    expect(parseFraction("hello")).toBeNull();
+    expect(parseFraction("42")).toBeNull();
+    expect(parseFraction("1/0")).toBeNull(); // division by zero
+    expect(parseFraction("")).toBeNull();
+  });
+
+  test("handles case insensitivity", () => {
+    expect(parseFraction("ONE-HALF")).toBe(0.5);
+    expect(parseFraction("Two-Thirds")).toBeCloseTo(0.6667, 3);
+    expect(parseFraction("THREE-QUARTERS")).toBe(0.75);
   });
 });
 
