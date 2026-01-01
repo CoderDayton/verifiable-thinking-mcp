@@ -4,6 +4,71 @@
  * Based on HuggingFace Math-Verify patterns
  */
 
+// =============================================================================
+// PRE-COMPILED REGEX PATTERNS
+// Module-level constants avoid recompilation on every stripLLMOutput call
+// =============================================================================
+
+// Thinking/Reasoning Tags
+const RE_THINK = /<think>[\s\S]*?<\/think>/gi;
+const RE_THINKING = /<thinking>[\s\S]*?<\/thinking>/gi;
+const RE_REASONING = /<reasoning>[\s\S]*?<\/reasoning>/gi;
+const RE_ANTITHINK = /<antithink>[\s\S]*?<\/antithink>/gi;
+const RE_THOUGHT = /<thought>[\s\S]*?<\/thought>/gi;
+const RE_THOUGHTS = /<thoughts>[\s\S]*?<\/thoughts>/gi;
+const RE_REFLECTION = /<reflection>[\s\S]*?<\/reflection>/gi;
+const RE_INTERNAL_MONOLOGUE = /<internal_monologue>[\s\S]*?<\/internal_monologue>/gi;
+
+// Tool/Artifact Containers
+const RE_TOOL_CALL = /<tool_call>[\s\S]*?<\/tool_call>/gi;
+const RE_TOOL_RESULT = /<tool_result>[\s\S]*?<\/tool_result>/gi;
+const RE_ARTIFACTS = /<ARTIFACTS>[\s\S]*?<\/ARTIFACTS>/gi;
+const RE_DOCUMENT_CONTENT = /<document_content>[\s\S]*?<\/document_content>/gi;
+const RE_CONTEXT = /<context>[\s\S]*?<\/context>/gi;
+
+// Model-Specific Tokens
+const RE_BEGIN_BOX = /<\|begin_of_box\|>/gi;
+const RE_END_BOX = /<\|end_of_box\|>/gi;
+const RE_IM_BLOCK = /<\|im_start\|>[\s\S]*?<\|im_end\|>/gi;
+const RE_ENDOFTEXT = /<\|endoftext\|>/gi;
+const RE_PAD = /<\|pad\|>/gi;
+
+// Markdown
+const RE_CODE_BLOCK = /```[\s\S]*?```/g;
+const RE_BOLD_ASTERISK = /\*\*([^*]+)\*\*/g;
+const RE_BOLD_UNDERSCORE = /__([^_]+)__/g;
+const RE_ITALIC_ASTERISK = /\*([^*]+)\*/g;
+const RE_ITALIC_UNDERSCORE = /_([^_]+)_/g;
+const RE_INLINE_CODE = /`([^`]+)`/g;
+const RE_HEADINGS = /^#{1,6}\s*/gm;
+const RE_STRIKETHROUGH = /~~([^~]+)~~/g;
+const RE_IMAGES = /!\[[^\]]*\]\([^)]+\)/g;
+const RE_LINKS = /\[([^\]]+)\]\([^)]+\)/g;
+const RE_BLOCKQUOTE = /^>\s*/gm;
+const RE_HORIZONTAL_RULE = /^[-*_]{3,}\s*$/gm;
+const RE_UNORDERED_LIST = /^[\s]*[-*+]\s+/gm;
+const RE_ORDERED_LIST = /^[\s]*\d+\.\s+/gm;
+
+// LaTeX
+const RE_BOXED_DOLLAR = /\$\\boxed\{([^}]+)\}\$/g;
+const RE_BOXED = /\\boxed\{([^}]+)\}/g;
+const RE_INLINE_MATH = /\$([^$]+)\$/g;
+
+// HTML
+const RE_NBSP = /&nbsp;/gi;
+const RE_AMP = /&amp;/gi;
+const RE_LT = /&lt;/gi;
+const RE_GT = /&gt;/gi;
+const RE_QUOT = /&quot;/gi;
+const RE_APOS = /&#39;/gi;
+const RE_BR = /<br\s*\/?>/gi;
+const RE_SIMPLE_TAGS = /<\/?(?:p|div|span|b|i|u|em|strong)>/gi;
+
+// Whitespace
+const RE_MULTI_NEWLINE = /\n{3,}/g;
+const RE_TRAILING_WHITESPACE = /[ \t]+$/gm;
+const RE_MULTI_SPACE = /[ \t]{2,}/g;
+
 /**
  * Strip all LLM output artifacts for clean display/comparison.
  * Handles:
@@ -13,94 +78,71 @@
  * - Markdown formatting
  * - HTML entities
  * - Excess whitespace
+ *
+ * Performance: Regex patterns are pre-compiled at module load time.
  */
 export function stripLLMOutput(text: string): string {
   return (
     text
       // === THINKING/REASONING TAGS ===
-      // Standard
-      .replace(/<think>[\s\S]*?<\/think>/gi, "")
-      .replace(/<thinking>[\s\S]*?<\/thinking>/gi, "")
-      .replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "")
-      // Claude
-      .replace(/<antithink>[\s\S]*?<\/antithink>/gi, "")
-      // Gemini
-      .replace(/<thought>[\s\S]*?<\/thought>/gi, "")
-      .replace(/<thoughts>[\s\S]*?<\/thoughts>/gi, "")
-      // Llama
-      .replace(/<reflection>[\s\S]*?<\/reflection>/gi, "")
-      // Mistral
-      .replace(/<internal_monologue>[\s\S]*?<\/internal_monologue>/gi, "")
+      .replace(RE_THINK, "")
+      .replace(RE_THINKING, "")
+      .replace(RE_REASONING, "")
+      .replace(RE_ANTITHINK, "")
+      .replace(RE_THOUGHT, "")
+      .replace(RE_THOUGHTS, "")
+      .replace(RE_REFLECTION, "")
+      .replace(RE_INTERNAL_MONOLOGUE, "")
 
       // === TOOL/ARTIFACT CONTAINERS ===
-      .replace(/<tool_call>[\s\S]*?<\/tool_call>/gi, "")
-      .replace(/<tool_result>[\s\S]*?<\/tool_result>/gi, "")
-      .replace(/<ARTIFACTS>[\s\S]*?<\/ARTIFACTS>/gi, "")
-      .replace(/<document_content>[\s\S]*?<\/document_content>/gi, "")
-      .replace(/<context>[\s\S]*?<\/context>/gi, "")
+      .replace(RE_TOOL_CALL, "")
+      .replace(RE_TOOL_RESULT, "")
+      .replace(RE_ARTIFACTS, "")
+      .replace(RE_DOCUMENT_CONTENT, "")
+      .replace(RE_CONTEXT, "")
 
       // === MODEL-SPECIFIC TOKENS ===
-      // GLM box tokens (answer markers)
-      .replace(/<\|begin_of_box\|>/gi, "")
-      .replace(/<\|end_of_box\|>/gi, "")
-      // Common special tokens
-      .replace(/<\|im_start\|>[\s\S]*?<\|im_end\|>/gi, "")
-      .replace(/<\|endoftext\|>/gi, "")
-      .replace(/<\|pad\|>/gi, "")
+      .replace(RE_BEGIN_BOX, "")
+      .replace(RE_END_BOX, "")
+      .replace(RE_IM_BLOCK, "")
+      .replace(RE_ENDOFTEXT, "")
+      .replace(RE_PAD, "")
 
       // === MARKDOWN ===
-      // Code blocks (remove entirely - not useful for answer extraction)
-      .replace(/```[\s\S]*?```/g, "")
-      // Bold **text** or __text__ -> text
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      .replace(/__([^_]+)__/g, "$1")
-      // Italic *text* or _text_ -> text
-      .replace(/\*([^*]+)\*/g, "$1")
-      .replace(/_([^_]+)_/g, "$1")
-      // Inline code `text` -> text
-      .replace(/`([^`]+)`/g, "$1")
-      // Headings: # ## ### etc -> remove marker
-      .replace(/^#{1,6}\s*/gm, "")
-      // Strikethrough ~~text~~ -> text
-      .replace(/~~([^~]+)~~/g, "$1")
-      // Images ![alt](url) -> remove
-      .replace(/!\[[^\]]*\]\([^)]+\)/g, "")
-      // Links [text](url) -> text
-      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-      // Blockquotes > text -> text
-      .replace(/^>\s*/gm, "")
-      // Horizontal rules
-      .replace(/^[-*_]{3,}\s*$/gm, "")
-      // List markers - * + or numbered -> remove marker
-      .replace(/^[\s]*[-*+]\s+/gm, "")
-      .replace(/^[\s]*\d+\.\s+/gm, "")
+      .replace(RE_CODE_BLOCK, "")
+      .replace(RE_BOLD_ASTERISK, "$1")
+      .replace(RE_BOLD_UNDERSCORE, "$1")
+      .replace(RE_ITALIC_ASTERISK, "$1")
+      .replace(RE_ITALIC_UNDERSCORE, "$1")
+      .replace(RE_INLINE_CODE, "$1")
+      .replace(RE_HEADINGS, "")
+      .replace(RE_STRIKETHROUGH, "$1")
+      .replace(RE_IMAGES, "")
+      .replace(RE_LINKS, "$1")
+      .replace(RE_BLOCKQUOTE, "")
+      .replace(RE_HORIZONTAL_RULE, "")
+      .replace(RE_UNORDERED_LIST, "")
+      .replace(RE_ORDERED_LIST, "")
 
       // === LATEX (extract content) ===
-      // $\boxed{...}$ or \boxed{...} -> content
-      .replace(/\$\\boxed\{([^}]+)\}\$/g, "$1")
-      .replace(/\\boxed\{([^}]+)\}/g, "$1")
-      // $...$ inline math -> content (simple cases)
-      .replace(/\$([^$]+)\$/g, "$1")
+      .replace(RE_BOXED_DOLLAR, "$1")
+      .replace(RE_BOXED, "$1")
+      .replace(RE_INLINE_MATH, "$1")
 
       // === HTML ===
-      // Common entities
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/&lt;/gi, "<")
-      .replace(/&gt;/gi, ">")
-      .replace(/&quot;/gi, '"')
-      .replace(/&#39;/gi, "'")
-      // Generic HTML tags (careful - only simple cases)
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/?(?:p|div|span|b|i|u|em|strong)>/gi, "")
+      .replace(RE_NBSP, " ")
+      .replace(RE_AMP, "&")
+      .replace(RE_LT, "<")
+      .replace(RE_GT, ">")
+      .replace(RE_QUOT, '"')
+      .replace(RE_APOS, "'")
+      .replace(RE_BR, "\n")
+      .replace(RE_SIMPLE_TAGS, "")
 
       // === WHITESPACE CLEANUP ===
-      // Multiple newlines -> double newline
-      .replace(/\n{3,}/g, "\n\n")
-      // Trailing whitespace per line
-      .replace(/[ \t]+$/gm, "")
-      // Multiple spaces -> single
-      .replace(/[ \t]{2,}/g, " ")
+      .replace(RE_MULTI_NEWLINE, "\n\n")
+      .replace(RE_TRAILING_WHITESPACE, "")
+      .replace(RE_MULTI_SPACE, " ")
 
       .trim()
   );
@@ -109,6 +151,209 @@ export function stripLLMOutput(text: string): string {
 // Keep legacy function names as aliases for backward compatibility
 export const stripThinkingTags = stripLLMOutput;
 export const stripMarkdown = stripLLMOutput;
+
+// =============================================================================
+// FAST PATH: Only thinking tags + model tokens (no markdown/HTML cleanup)
+// =============================================================================
+
+/**
+ * Model tokens that commonly appear with thinking tags.
+ */
+const RE_MODEL_TOKENS_FAST = /<\|(?:endoftext|pad|begin_of_box|end_of_box)\|>/gi;
+
+/**
+ * Fast variant that only strips thinking tags and model tokens.
+ * Use when you only need to remove reasoning artifacts, not full markdown cleanup.
+ *
+ * Uses the same individual regex approach as stripLLMOutput (faster than backreference).
+ *
+ * @example
+ * ```ts
+ * // Hot path: just need visible content
+ * const visible = stripThinkingTagsFast(response);
+ *
+ * // Full cleanup needed for comparison
+ * const clean = stripLLMOutput(response);
+ * ```
+ */
+export function stripThinkingTagsFast(text: string): string {
+  return text
+    .replace(RE_THINK, "")
+    .replace(RE_THINKING, "")
+    .replace(RE_REASONING, "")
+    .replace(RE_ANTITHINK, "")
+    .replace(RE_THOUGHT, "")
+    .replace(RE_THOUGHTS, "")
+    .replace(RE_REFLECTION, "")
+    .replace(RE_INTERNAL_MONOLOGUE, "")
+    .replace(RE_MODEL_TOKENS_FAST, "")
+    .replace(RE_MULTI_NEWLINE, "\n\n")
+    .replace(RE_MULTI_SPACE, " ")
+    .trim();
+}
+
+// =============================================================================
+// STREAMING: For very large responses (>100KB)
+// =============================================================================
+
+/** Threshold above which streaming is recommended (100KB) */
+const STREAMING_THRESHOLD = 100 * 1024;
+
+/** Chunk size for streaming processing (32KB with overlap) */
+const CHUNK_SIZE = 32 * 1024;
+
+/** Overlap to handle tags split across chunk boundaries */
+const CHUNK_OVERLAP = 1024;
+
+/**
+ * Check if a response is large enough to benefit from streaming.
+ */
+export function shouldStreamStrip(text: string): boolean {
+  return text.length > STREAMING_THRESHOLD;
+}
+
+/**
+ * Generator that yields cleaned chunks for very large responses.
+ *
+ * Two-phase approach:
+ * 1. Strip all thinking/reasoning tags first (single regex pass)
+ * 2. Chunk the cleaned result for memory-friendly processing
+ *
+ * Use for responses >100KB to avoid memory spikes during markdown/entity cleanup.
+ *
+ * @example
+ * ```ts
+ * if (shouldStreamStrip(hugeResponse)) {
+ *   const chunks: string[] = [];
+ *   for (const chunk of stripLLMOutputStreaming(hugeResponse)) {
+ *     chunks.push(chunk);
+ *   }
+ *   const result = chunks.join('');
+ * } else {
+ *   const result = stripLLMOutput(hugeResponse);
+ * }
+ * ```
+ */
+export function* stripLLMOutputStreaming(text: string): Generator<string, void, unknown> {
+  const len = text.length;
+
+  // For small inputs, just yield the full result
+  if (len <= STREAMING_THRESHOLD) {
+    yield stripLLMOutput(text);
+    return;
+  }
+
+  // Phase 1: Strip all thinking tags first (they can span chunks)
+  // Uses individual patterns (faster than combined backreference regex)
+  const withoutThinking = text
+    .replace(RE_THINK, "")
+    .replace(RE_THINKING, "")
+    .replace(RE_REASONING, "")
+    .replace(RE_ANTITHINK, "")
+    .replace(RE_THOUGHT, "")
+    .replace(RE_THOUGHTS, "")
+    .replace(RE_REFLECTION, "")
+    .replace(RE_INTERNAL_MONOLOGUE, "")
+    .replace(RE_MODEL_TOKENS_FAST, "");
+
+  // Phase 2: Chunk the remaining content for markdown/entity cleanup
+  const cleanedLen = withoutThinking.length;
+  let pos = 0;
+
+  while (pos < cleanedLen) {
+    // Calculate chunk boundaries
+    const chunkEnd = Math.min(pos + CHUNK_SIZE, cleanedLen);
+    const isLastChunk = chunkEnd >= cleanedLen;
+
+    let chunk = withoutThinking.slice(pos, chunkEnd);
+
+    // For non-last chunks, find a safe break point (newline or space)
+    if (!isLastChunk) {
+      const searchStart = Math.max(0, chunk.length - CHUNK_OVERLAP);
+      const lastNewline = chunk.lastIndexOf("\n", searchStart);
+      const lastSpace = chunk.lastIndexOf(" ", searchStart);
+      // Guard against -1 from lastIndexOf when no match found
+      const safeEnd = Math.max(
+        lastNewline >= 0 ? lastNewline : 0,
+        lastSpace >= 0 ? lastSpace : 0,
+        searchStart,
+      );
+
+      // Adjust next position to continue from safe point
+      pos += safeEnd;
+      chunk = chunk.slice(0, safeEnd);
+    } else {
+      pos = chunkEnd;
+    }
+
+    // Apply remaining cleanup (markdown, entities, whitespace)
+    const processed = chunk
+      // Tool/artifact containers
+      .replace(RE_TOOL_CALL, "")
+      .replace(RE_TOOL_RESULT, "")
+      .replace(RE_ARTIFACTS, "")
+      .replace(RE_DOCUMENT_CONTENT, "")
+      .replace(RE_CONTEXT, "")
+      // Markdown
+      .replace(RE_CODE_BLOCK, "")
+      .replace(RE_HEADINGS, "")
+      .replace(RE_BOLD_ASTERISK, "$1")
+      .replace(RE_BOLD_UNDERSCORE, "$1")
+      .replace(RE_ITALIC_ASTERISK, "$1")
+      .replace(RE_ITALIC_UNDERSCORE, "$1")
+      .replace(RE_STRIKETHROUGH, "$1")
+      .replace(RE_IMAGES, "")
+      .replace(RE_LINKS, "$1")
+      .replace(RE_INLINE_CODE, "$1")
+      .replace(RE_BLOCKQUOTE, "")
+      .replace(RE_HORIZONTAL_RULE, "")
+      .replace(RE_UNORDERED_LIST, "")
+      .replace(RE_ORDERED_LIST, "")
+      // HTML
+      .replace(RE_NBSP, " ")
+      .replace(RE_LT, "<")
+      .replace(RE_GT, ">")
+      .replace(RE_AMP, "&")
+      .replace(RE_QUOT, '"')
+      .replace(RE_APOS, "'")
+      .replace(RE_BR, "\n")
+      .replace(RE_SIMPLE_TAGS, "")
+      // Whitespace
+      .replace(RE_MULTI_NEWLINE, "\n\n")
+      .replace(RE_MULTI_SPACE, " ")
+      .trim();
+
+    // Yield non-empty results
+    if (processed) {
+      yield processed;
+    }
+  }
+}
+
+/**
+ * Streaming version that returns a Promise for async contexts.
+ * Processes chunks with yielding to avoid blocking the event loop.
+ */
+export async function stripLLMOutputAsync(text: string): Promise<string> {
+  if (text.length <= STREAMING_THRESHOLD) {
+    return stripLLMOutput(text);
+  }
+
+  const chunks: string[] = [];
+  let chunkCount = 0;
+
+  for (const chunk of stripLLMOutputStreaming(text)) {
+    chunks.push(chunk);
+    chunkCount++;
+
+    // Yield to event loop every 10 chunks to avoid blocking
+    if (chunkCount % 10 === 0) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  return chunks.join(" ");
+}
 
 /** Clean number: remove commas, trim whitespace */
 function cleanNumber(s: string): string {
@@ -276,6 +521,22 @@ export function extractAnswer(response: string, expectedAnswers?: string[]): str
       .replace(/\s+and\s+/gi, ",")
       .replace(/\s+/g, "");
     if (cards) return cards;
+  }
+
+  // Priority 4d: "conclusion is X" or "I conclude X"
+  const concludeMatch = cleaned.match(
+    /(?:conclusion|conclude|I\s+conclude)\s+(?:is\s+|that\s+)?([^\n.]+)/i,
+  );
+  if (concludeMatch?.[1]) {
+    const extracted = extractFromPhrase(concludeMatch[1].trim());
+    if (extracted) return extracted;
+  }
+
+  // Priority 4e: "therefore X" or "thus X" at sentence start
+  const thereforeMatch = cleaned.match(/(?:^|\n)\s*(?:therefore|thus|hence|so)\s+([^\n.]+)/im);
+  if (thereforeMatch?.[1]) {
+    const extracted = extractFromPhrase(thereforeMatch[1].trim());
+    if (extracted) return extracted;
   }
 
   // Priority 5: "Result: X"

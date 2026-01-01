@@ -341,7 +341,7 @@ export function computeNCD(a: string, b: string): number {
   try {
     const Ca = gzipSync(Buffer.from(a)).length;
     const Cb = gzipSync(Buffer.from(b)).length;
-    const Cab = gzipSync(Buffer.from(a + " " + b)).length;
+    const Cab = gzipSync(Buffer.from(`${a} ${b}`)).length;
 
     const ncd = (Cab - Math.min(Ca, Cb)) / Math.max(Ca, Cb);
     return Math.min(1, Math.max(0, ncd)); // Clamp to [0, 1]
@@ -382,187 +382,32 @@ export function compress(
   options: CompressionOptions = {},
 ): CompressionResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
-
-  // Split into sentences
   const rawSentences = splitSentences(context);
 
   // Early exit for short text
   if (rawSentences.length <= opts.min_sentences) {
-    return {
-      compressed: context,
-      original_tokens: estimateTokens(context),
-      compressed_tokens: estimateTokens(context),
-      ratio: 1.0,
-      kept_sentences: rawSentences.length,
-      dropped_sentences: [],
-      enhancements: {
-        fillers_removed: 0,
-        coref_constraints_applied: 0,
-        causal_constraints_applied: 0,
-        repetitions_penalized: 0,
-        ncd_boost_applied: false,
-      },
-    };
+    return createShortTextResult(context, rawSentences.length);
   }
 
   // Phase 1: Pre-processing - Build metadata
-  let fillersRemoved = 0;
-  let repetitionsPenalized = 0;
-
-  const metadata: SentenceMetadata[] = rawSentences.map((sentence, index) => {
-    // Check for pure meta-sentences
-    if (opts.removeFillers && isMetaSentence(sentence)) {
-      fillersRemoved++;
-      return {
-        index,
-        original: sentence,
-        cleaned: "",
-        score: -1000, // Effectively remove
-        ncdScore: 1,
-        startsWithPronoun: false,
-        hasCausalConnective: false,
-        repeatSimilarity: 0,
-        requiredBy: null,
-      };
-    }
-
-    // Clean fillers
-    const { cleaned, removedCount } = opts.removeFillers
-      ? cleanFillers(sentence)
-      : { cleaned: sentence, removedCount: 0 };
-    fillersRemoved += removedCount;
-
-    // Compute NCD score (lower = more relevant to query)
-    const ncdScore = opts.useNCD ? computeNCD(cleaned, query) : 0.5;
-
-    // Check for coreference markers
-    const startsWithPronoun = PRONOUN_START.test(cleaned);
-
-    // Check for causal/contrastive connectives
-    const hasCausalConnective =
-      CAUSAL_CONNECTIVES.test(cleaned) || CONTRASTIVE_CONNECTIVES.test(cleaned);
-
-    return {
-      index,
-      original: sentence,
-      cleaned,
-      score: 0, // Will be computed below
-      ncdScore,
-      startsWithPronoun,
-      hasCausalConnective,
-      repeatSimilarity: 0,
-      requiredBy: null,
-    };
-  });
-
-  // Compute repetition similarity (compared to previous sentence)
-  for (let i = 1; i < metadata.length; i++) {
-    const current = metadata[i];
-    const previous = metadata[i - 1];
-    if (current && previous) {
-      const sim = jaccardSimilarity(current.cleaned, previous.cleaned);
-      current.repeatSimilarity = sim;
-      if (sim > opts.repeatThreshold) {
-        repetitionsPenalized++;
-      }
-    }
-  }
-
-  // Mark coreference dependencies
-  for (let i = 1; i < metadata.length; i++) {
-    const current = metadata[i];
-    const previous = metadata[i - 1];
-    if (current && previous && current.startsWithPronoun) {
-      previous.requiredBy = i;
-    }
-  }
-
-  // Mark causal chain dependencies
-  for (let i = 1; i < metadata.length; i++) {
-    const current = metadata[i];
-    const previous = metadata[i - 1];
-    if (current && previous && current.hasCausalConnective) {
-      previous.requiredBy = i;
-    }
-  }
+  const { metadata, fillersRemoved, repetitionsPenalized } = buildSentenceMetadata(
+    rawSentences,
+    query,
+    opts,
+  );
 
   // Phase 2: Compute scores
-  const totalSentences = metadata.filter((m) => m.cleaned.length > 0).length;
-
-  for (const m of metadata) {
-    if (m.cleaned.length === 0) continue;
-
-    // Base score from TF-IDF relevance
-    let score = relevanceScore(m.cleaned, query, m.index, totalSentences, opts.boost_reasoning);
-
-    // NCD boost: lower NCD = higher relevance (adds up to 0.5)
-    if (opts.useNCD) {
-      score += (1 - m.ncdScore) * 0.5;
-    }
-
-    // Repetition penalty
-    if (m.repeatSimilarity > opts.repeatThreshold) {
-      score *= 0.3;
-    }
-
-    // Boost sentences that are required by others (important context)
-    if (m.requiredBy !== null) {
-      score *= 1.2;
-    }
-
-    m.score = score;
-  }
+  computeSentenceScores(metadata, query, opts);
 
   // Phase 3: Select sentences
   const keepCount = Math.max(
     opts.min_sentences,
     Math.ceil(rawSentences.length * opts.target_ratio),
   );
-
-  // Sort by score and select top-k
-  const validMetadata = metadata.filter((m) => m.cleaned.length > 0);
-  const sorted = [...validMetadata].sort((a, b) => b.score - a.score);
-  const selected = new Set(sorted.slice(0, keepCount).map((m) => m.index));
+  const selected = selectTopSentences(metadata, keepCount);
 
   // Phase 4: Enforce constraints
-  let corefConstraints = 0;
-  let causalConstraints = 0;
-
-  if (opts.enforceCoref || opts.enforceCausalChains) {
-    // Iteratively add required sentences
-    let changed = true;
-    let iterations = 0;
-    const maxIterations = 10;
-
-    while (changed && iterations < maxIterations) {
-      changed = false;
-      iterations++;
-
-      for (const m of metadata) {
-        if (!selected.has(m.index)) continue;
-
-        // Check coreference constraint
-        if (opts.enforceCoref && m.startsWithPronoun && m.index > 0) {
-          const antecedent = m.index - 1;
-          if (!selected.has(antecedent)) {
-            selected.add(antecedent);
-            corefConstraints++;
-            changed = true;
-          }
-        }
-
-        // Check causal chain constraint
-        if (opts.enforceCausalChains && m.hasCausalConnective && m.index > 0) {
-          const premise = m.index - 1;
-          if (!selected.has(premise)) {
-            selected.add(premise);
-            causalConstraints++;
-            changed = true;
-          }
-        }
-      }
-    }
-  }
+  const constraints = enforceConstraints(metadata, selected, opts);
 
   // Reconstruct in original order
   const kept = rawSentences.filter((_, i) => selected.has(i));
@@ -578,12 +423,167 @@ export function compress(
     dropped_sentences: dropped,
     enhancements: {
       fillers_removed: fillersRemoved,
-      coref_constraints_applied: corefConstraints,
-      causal_constraints_applied: causalConstraints,
+      coref_constraints_applied: constraints.coref,
+      causal_constraints_applied: constraints.causal,
       repetitions_penalized: repetitionsPenalized,
       ncd_boost_applied: opts.useNCD,
     },
   };
+}
+
+/** Create result for text too short to compress */
+function createShortTextResult(context: string, sentenceCount: number): CompressionResult {
+  return {
+    compressed: context,
+    original_tokens: estimateTokens(context),
+    compressed_tokens: estimateTokens(context),
+    ratio: 1.0,
+    kept_sentences: sentenceCount,
+    dropped_sentences: [],
+    enhancements: {
+      fillers_removed: 0,
+      coref_constraints_applied: 0,
+      causal_constraints_applied: 0,
+      repetitions_penalized: 0,
+      ncd_boost_applied: false,
+    },
+  };
+}
+
+/** Build metadata for all sentences */
+function buildSentenceMetadata(
+  rawSentences: string[],
+  query: string,
+  opts: Required<CompressionOptions>,
+): { metadata: SentenceMetadata[]; fillersRemoved: number; repetitionsPenalized: number } {
+  let fillersRemoved = 0;
+  let repetitionsPenalized = 0;
+
+  const metadata: SentenceMetadata[] = rawSentences.map((sentence, index) => {
+    if (opts.removeFillers && isMetaSentence(sentence)) {
+      fillersRemoved++;
+      return {
+        index,
+        original: sentence,
+        cleaned: "",
+        score: -1000,
+        ncdScore: 1,
+        startsWithPronoun: false,
+        hasCausalConnective: false,
+        repeatSimilarity: 0,
+        requiredBy: null,
+      };
+    }
+
+    const { cleaned, removedCount } = opts.removeFillers
+      ? cleanFillers(sentence)
+      : { cleaned: sentence, removedCount: 0 };
+    fillersRemoved += removedCount;
+
+    const ncdScore = opts.useNCD ? computeNCD(cleaned, query) : 0.5;
+    const startsWithPronoun = PRONOUN_START.test(cleaned);
+    const hasCausalConnective =
+      CAUSAL_CONNECTIVES.test(cleaned) || CONTRASTIVE_CONNECTIVES.test(cleaned);
+
+    return {
+      index,
+      original: sentence,
+      cleaned,
+      score: 0,
+      ncdScore,
+      startsWithPronoun,
+      hasCausalConnective,
+      repeatSimilarity: 0,
+      requiredBy: null,
+    };
+  });
+
+  // Compute repetition similarity and mark dependencies
+  for (let i = 1; i < metadata.length; i++) {
+    const current = metadata[i];
+    const previous = metadata[i - 1];
+    if (current && previous) {
+      const sim = jaccardSimilarity(current.cleaned, previous.cleaned);
+      current.repeatSimilarity = sim;
+      if (sim > opts.repeatThreshold) repetitionsPenalized++;
+      if (current.startsWithPronoun) previous.requiredBy = i;
+      if (current.hasCausalConnective) previous.requiredBy = i;
+    }
+  }
+
+  return { metadata, fillersRemoved, repetitionsPenalized };
+}
+
+/** Compute relevance scores for sentences */
+function computeSentenceScores(
+  metadata: SentenceMetadata[],
+  query: string,
+  opts: Required<CompressionOptions>,
+): void {
+  const totalSentences = metadata.filter((m) => m.cleaned.length > 0).length;
+
+  for (const m of metadata) {
+    if (m.cleaned.length === 0) continue;
+
+    let score = relevanceScore(m.cleaned, query, m.index, totalSentences, opts.boost_reasoning);
+    if (opts.useNCD) score += (1 - m.ncdScore) * 0.5;
+    if (m.repeatSimilarity > opts.repeatThreshold) score *= 0.3;
+    if (m.requiredBy !== null) score *= 1.2;
+    m.score = score;
+  }
+}
+
+/** Select top sentences by score */
+function selectTopSentences(metadata: SentenceMetadata[], keepCount: number): Set<number> {
+  const validMetadata = metadata.filter((m) => m.cleaned.length > 0);
+  const sorted = [...validMetadata].sort((a, b) => b.score - a.score);
+  return new Set(sorted.slice(0, keepCount).map((m) => m.index));
+}
+
+/** Enforce coreference and causal chain constraints */
+function enforceConstraints(
+  metadata: SentenceMetadata[],
+  selected: Set<number>,
+  opts: Required<CompressionOptions>,
+): { coref: number; causal: number } {
+  let corefConstraints = 0;
+  let causalConstraints = 0;
+
+  if (!opts.enforceCoref && !opts.enforceCausalChains) {
+    return { coref: 0, causal: 0 };
+  }
+
+  let changed = true;
+  let iterations = 0;
+  const maxIterations = 10;
+
+  while (changed && iterations < maxIterations) {
+    changed = false;
+    iterations++;
+
+    for (const m of metadata) {
+      if (!selected.has(m.index)) continue;
+
+      if (opts.enforceCoref && m.startsWithPronoun && m.index > 0 && !selected.has(m.index - 1)) {
+        selected.add(m.index - 1);
+        corefConstraints++;
+        changed = true;
+      }
+
+      if (
+        opts.enforceCausalChains &&
+        m.hasCausalConnective &&
+        m.index > 0 &&
+        !selected.has(m.index - 1)
+      ) {
+        selected.add(m.index - 1);
+        causalConstraints++;
+        changed = true;
+      }
+    }
+  }
+
+  return { coref: corefConstraints, causal: causalConstraints };
 }
 
 /**
