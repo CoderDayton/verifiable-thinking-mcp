@@ -200,6 +200,16 @@ const MistakesOperationSchema = z.object({
     .describe("Text containing math derivation steps to check for common algebraic mistakes"),
 });
 
+const SpotCheckOperationSchema = z.object({
+  operation: z.literal("spot_check"),
+
+  // The original question being answered
+  question: z.string().describe("The original question/problem being answered"),
+
+  // The proposed answer to check
+  answer: z.string().describe("The proposed answer to check for trap patterns"),
+});
+
 // ============================================================================
 // UNIFIED SCHEMA
 // ============================================================================
@@ -215,6 +225,7 @@ export const ScratchpadSchema = z
     OverrideOperationSchema,
     HintOperationSchema,
     MistakesOperationSchema,
+    SpotCheckOperationSchema,
   ])
   .and(
     z.object({
@@ -249,6 +260,7 @@ export type AugmentOperation = z.infer<typeof AugmentOperationSchema>;
 export type OverrideOperation = z.infer<typeof OverrideOperationSchema>;
 export type HintOperation = z.infer<typeof HintOperationSchema>;
 export type MistakesOperation = z.infer<typeof MistakesOperationSchema>;
+export type SpotCheckOperation = z.infer<typeof SpotCheckOperationSchema>;
 
 // ============================================================================
 // RESPONSE TYPES
@@ -447,5 +459,14 @@ export interface ScratchpadResponse {
     text_checked: string;
     mistakes_found: number;
     mistakes: DetectedMistakeInfo[];
+  };
+
+  // For spot_check operation - trap pattern detection
+  spot_check_result?: {
+    passed: boolean;
+    trap_type: string | null;
+    warning: string | null;
+    hint: string | null;
+    confidence: number;
   };
 }

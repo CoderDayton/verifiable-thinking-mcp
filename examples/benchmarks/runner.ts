@@ -26,7 +26,7 @@ import {
   type ToolCall,
 } from "./llm-client";
 import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
-import { routeQuestion } from "../../src/lib/think/index";
+import { routeQuestion, spotCheck, type SpotCheckResult } from "../../src/lib/think/index";
 import { detectCommonMistakesFromText, type MistakeType } from "../../src/lib/compute/solvers/derivation";
 
 // Types
@@ -89,6 +89,7 @@ export interface RunResult {
       llm_verify_ms: number;
       mcp_overhead_ms: number;
     };
+    spot_check?: SpotCheckResult;
   };
 }
 
@@ -1183,6 +1184,9 @@ async function runWithTool(
       answer = extractAnswer(response, expectedAnswers);
     }
 
+    // Run spot-check if routing suggests it (for trap detection diagnostics)
+    const spotCheckResult = route.shouldSpotCheck ? spotCheck(question.question, answer) : undefined;
+
     return {
       answer,
       correct: verifyAnswer(question, answer),
@@ -1206,6 +1210,7 @@ async function runWithTool(
       raw_response: cleanResponse,
       response_length: cleanResponse.length,
       latency_breakdown: latency,
+      spot_check: spotCheckResult,
     };
   } finally {
     await mcp.clearSession(sessionId);
@@ -1227,6 +1232,7 @@ export async function runBenchmark(
     quiet?: boolean;
     verbose?: boolean;
     concurrency?: number;
+    spotCheckDiagnostics?: boolean;
     onProgress?: (completed: number, total: number, result: RunResult) => void;
   } = {}
 ): Promise<BenchmarkResults> {
@@ -1238,6 +1244,7 @@ export async function runBenchmark(
     quiet = false,
     verbose = false,
     concurrency = 1,
+    spotCheckDiagnostics = false,
     onProgress,
   } = options;
 
@@ -1358,6 +1365,13 @@ export async function runBenchmark(
             result.with_tool.answer.length > 60 ? "..." : ""
           }"`
         );
+        // Show spot-check diagnostics if enabled and trap detected
+        if (spotCheckDiagnostics && result.with_tool.spot_check && !result.with_tool.spot_check.passed) {
+          const sc = result.with_tool.spot_check;
+          log(`    ⚠️  TRAP DETECTED: ${sc.trapType || "unknown"}`);
+          if (sc.warning) log(`       Warning: ${sc.warning}`);
+          if (sc.hint) log(`       Hint: ${sc.hint}`);
+        }
       }
     }
 
@@ -2550,6 +2564,7 @@ Options:
   --baseline-only    Run only baseline (no MCP tool)
   --tool-only        Run only with MCP tool (no baseline)
   --mistakes-only    Run mistake detection validation (no LLM calls)
+  --spot-check       Show spot-check diagnostics for trap questions
   --no-local         Disable local compute
   --aggressive       Force aggressive compression
   --no-compression   Disable compression
@@ -2603,6 +2618,7 @@ Environment Variables:
     ? "aggressive"
     : "auto";
   const mistakesOnly = args.includes("--mistakes-only");
+  const spotCheckDiag = args.includes("--spot-check");
 
   const log = jsonOutput ? () => {} : console.log.bind(console);
 
@@ -2783,6 +2799,7 @@ Environment Variables:
     quiet: jsonOutput,
     verbose: verboseMode,
     concurrency: parallel,
+    spotCheckDiagnostics: spotCheckDiag,
     onProgress: saveIncrementally,
   });
 
@@ -2971,6 +2988,35 @@ Environment Variables:
     log(`  LLM Verify:    ${lb.avg_llm_verify_ms}ms avg`);
     log(`  MCP Overhead:  ${lb.avg_mcp_overhead_ms}ms avg`);
     log(`  LLM %:         ${lb.llm_percentage}% of total time`);
+  }
+
+  // Spot-check diagnostics summary (when enabled)
+  if (spotCheckDiag) {
+    const withSpotCheck = results.results.filter(r => r.with_tool.spot_check);
+    const trapsDetected = withSpotCheck.filter(r => !r.with_tool.spot_check?.passed);
+    const trapsCorrect = trapsDetected.filter(r => r.with_tool.correct);
+    const trapsWrong = trapsDetected.filter(r => !r.with_tool.correct);
+    
+    log(`\n${"─".repeat(70)}`);
+    log("SPOT-CHECK DIAGNOSTICS");
+    log("─".repeat(70));
+    log(`  Questions checked: ${withSpotCheck.length}`);
+    log(`  Traps detected:    ${trapsDetected.length}`);
+    if (trapsDetected.length > 0) {
+      log(`    Correct despite trap: ${trapsCorrect.length}`);
+      log(`    Wrong (trap worked):  ${trapsWrong.length}`);
+      
+      // Group by trap type
+      const byType = new Map<string, number>();
+      for (const r of trapsDetected) {
+        const type = r.with_tool.spot_check?.trapType || "unknown";
+        byType.set(type, (byType.get(type) || 0) + 1);
+      }
+      log(`  By trap type:`);
+      for (const [type, count] of byType.entries()) {
+        log(`    ${type}: ${count}`);
+      }
+    }
   }
 
   // Question-level analysis

@@ -30,6 +30,7 @@ import {
   type ScratchpadResponse,
   ScratchpadSchema,
 } from "../lib/think/scratchpad-schema.ts";
+import { spotCheck } from "../lib/think/spot-check.ts";
 import { verify } from "../lib/verification.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
@@ -1524,6 +1525,72 @@ async function handleMistakes(
   };
 }
 
+/** Handle spot_check operation - detect trap patterns in answers */
+async function handleSpotCheck(
+  args: Extract<ScratchpadArgs, { operation: "spot_check" }> & {
+    session_id?: string;
+    confidence_threshold?: number;
+  },
+  ctx: MCPContext,
+): Promise<ScratchpadResponse> {
+  const { streamContent } = ctx;
+  const sessionId = args.session_id || `spot-check-${Date.now()}`;
+  const threshold = args.confidence_threshold ?? 0.8;
+
+  // Run spot-check
+  const result = spotCheck(args.question, args.answer);
+
+  // Stream results
+  if (result.passed) {
+    await streamContent({
+      type: "text",
+      text: `✓ **No trap patterns detected**\n\n_Answer "${args.answer}" does not match known cognitive trap patterns for this question type._\n`,
+    });
+  } else {
+    await streamContent({
+      type: "text",
+      text: `⚠️ **Potential trap detected: ${result.trapType}**\n\n`,
+    });
+    if (result.warning) {
+      await streamContent({
+        type: "text",
+        text: `**Warning:** ${result.warning}\n`,
+      });
+    }
+    if (result.hint) {
+      await streamContent({
+        type: "text",
+        text: `**Hint:** ${result.hint}\n`,
+      });
+    }
+    await streamContent({
+      type: "text",
+      text: `\n_Consider rechecking your reasoning before finalizing this answer._\n`,
+    });
+  }
+
+  return {
+    session_id: sessionId,
+    current_step: 0,
+    branch: "main",
+    operation: "spot_check",
+    chain_confidence: 0,
+    confidence_threshold: threshold,
+    steps_with_confidence: 0,
+    status: result.passed ? "continue" : "review",
+    suggested_action: result.passed
+      ? "No trap patterns detected. Answer appears safe."
+      : `Potential ${result.trapType} trap detected. Review reasoning before finalizing.`,
+    spot_check_result: {
+      passed: result.passed,
+      trap_type: result.trapType,
+      warning: result.warning,
+      hint: result.hint,
+      confidence: result.confidence,
+    },
+  };
+}
+
 // ============================================================================
 // SCRATCHPAD TOOL
 // ============================================================================
@@ -1542,6 +1609,12 @@ OPERATIONS:
 - override: Force-commit a step that failed verification (use sparingly)
 - hint: Get progressive simplification hints for math expressions (session-stateful)
 - mistakes: Proactively check text for common algebraic errors (without needing verification to fail)
+- spot_check: Check if your answer may have fallen for a cognitive trap (bat-ball, lily pad, etc.)
+
+SPOT-CHECK (use before finalizing tricky answers):
+- Detects structural trap patterns: additive systems, exponential growth, rate problems, etc.
+- Call with operation="spot_check", question="<original question>", answer="<your answer>"
+- If warning returned, reconsider your reasoning
 
 AUTO-VERIFICATION:
 - Verification is AUTO-ENABLED for chains with >3 steps (errors compound)
@@ -1605,6 +1678,9 @@ WORKFLOW:
           break;
         case "mistakes":
           response = await handleMistakes(args, ctx);
+          break;
+        case "spot_check":
+          response = await handleSpotCheck(args, ctx);
           break;
         default:
           throw new Error(`Unknown operation: ${(args as { operation: string }).operation}`);
