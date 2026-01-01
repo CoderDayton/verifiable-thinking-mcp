@@ -162,6 +162,38 @@ export function needsSpotCheck(question: string): NeedsSpotCheckResult {
     categories.push("conditional_probability");
   }
 
+  // 11. CONJUNCTION FALLACY: "and" probability vs single event
+  // Structure: specific description → trap is thinking more detail = more likely
+  if (
+    /(?:more likely|which.*probable|what.*probability)/i.test(lower) &&
+    /(?:and|both|also)/i.test(lower) &&
+    /(?:bank teller|feminist|active|personality|description)/i.test(lower)
+  ) {
+    score += 0.8;
+    categories.push("conjunction_fallacy");
+  }
+
+  // 12. MONTY HALL: switch vs stay, doors/boxes/curtains
+  // Structure: revealed option → trap is thinking 50/50
+  if (
+    /(?:door|box|curtain|envelope)/i.test(lower) &&
+    /(?:switch|stay|change|keep)/i.test(lower) &&
+    /(?:reveal|open|show)/i.test(lower)
+  ) {
+    score += 0.85;
+    categories.push("monty_hall");
+  }
+
+  // 13. ANCHORING: estimation after seeing a number
+  // Structure: irrelevant number shown before estimation task
+  if (
+    /(?:estimate|guess|how (?:many|much|long))/i.test(lower) &&
+    /(?:spin|wheel|number|digit|wrote|shown)/i.test(lower)
+  ) {
+    score += 0.6;
+    categories.push("anchoring");
+  }
+
   return {
     required: score >= 0.6,
     score: Math.min(1, score),
@@ -180,13 +212,17 @@ export function needsSpotCheck(question: string): NeedsSpotCheckResult {
 export function spotCheck(question: string, answer: string): SpotCheckResult {
   const qNums = extractNumbers(question);
   const aNum = extractFloat(answer);
+  const lower = question.toLowerCase();
 
-  // Can't analyze without numbers
+  // Text-based checks (don't require numbers in answer)
+  const textCheck = checkConjunctionFallacy(lower, answer) || checkMontyHall(lower, aNum, answer);
+
+  if (textCheck) return textCheck;
+
+  // Number-based checks require numbers
   if (aNum === null || qNums.length === 0) {
     return passed();
   }
-
-  const lower = question.toLowerCase();
 
   // Run structural checks in order of specificity
   return (
@@ -533,6 +569,80 @@ function checkClockOverlap(q: string, ans: number): SpotCheckResult | null {
       `11 overlaps per 12-hour period × 2 = 22 total.`,
       0.9,
     );
+  }
+
+  return null;
+}
+
+/**
+ * CONJUNCTION FALLACY: Linda problem structure
+ * Trap: thinking specific conjunction is more likely than general case
+ */
+function checkConjunctionFallacy(q: string, answer: string): SpotCheckResult | null {
+  if (!/(?:more likely|which.*probable|what.*probability)/i.test(q)) return null;
+
+  const ansLower = answer.toLowerCase();
+
+  // Check if question has an "and" option (conjunction)
+  const hasConjunctionOption = /(?:and|both|as well)/i.test(q);
+  if (!hasConjunctionOption) return null;
+
+  // Check if answer chooses the conjunction option
+  // Match patterns like: "B", "option B", "bank teller and", "and feminist", etc.
+  const choosesConjunction =
+    /\b[bB]\b/.test(answer) || // Chose option B (common format)
+    /(?:and|both|as well)/i.test(ansLower); // Answer contains conjunction
+
+  if (choosesConjunction) {
+    return trap(
+      "conjunction_fallacy",
+      `Potential conjunction fallacy: P(A and B) ≤ P(A) always`,
+      `A conjunction cannot be more probable than either of its parts. The more specific option is LESS likely.`,
+      0.85,
+    );
+  }
+
+  return null;
+}
+
+/**
+ * MONTY HALL: switch vs stay
+ * Trap: thinking it's 50/50 after door is revealed
+ */
+function checkMontyHall(q: string, ans: number | null, answer: string): SpotCheckResult | null {
+  // Detect Monty Hall by name OR by structure
+  const isMontyHall =
+    /monty\s*hall/i.test(q) ||
+    (/(?:door|box|curtain)/i.test(q) &&
+      /(?:switch|stay|change|keep)/i.test(q) &&
+      /(?:reveal|open|show|goat)/i.test(q));
+
+  if (!isMontyHall) return null;
+
+  const ansLower = answer.toLowerCase();
+
+  // If question asks for probability and answer is 50%
+  if (/(?:probability|chance)/i.test(q) && ans !== null) {
+    if (Math.abs(ans - 50) < 2 || Math.abs(ans - 0.5) < 0.02) {
+      return trap(
+        "monty_hall",
+        `Potential Monty Hall trap: it's NOT 50/50 after a door is revealed`,
+        `Switching wins 2/3 of the time, staying wins 1/3. The reveal gives you information.`,
+        0.9,
+      );
+    }
+  }
+
+  // If question asks whether to switch, and answer is "stay" or "doesn't matter"
+  if (/(?:should|better|strategy)/i.test(q)) {
+    if (/(?:stay|keep|doesn't matter|50.?50|same|either)/i.test(ansLower)) {
+      return trap(
+        "monty_hall",
+        `Potential Monty Hall trap: switching is actually the better strategy`,
+        `Switching wins 2/3 of the time. The host's reveal changes the odds.`,
+        0.85,
+      );
+    }
   }
 
   return null;

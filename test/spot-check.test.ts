@@ -409,6 +409,50 @@ describe("Spot-check performance", () => {
 });
 
 // =============================================================================
+// COMPLETE OPERATION INTEGRATION
+// =============================================================================
+
+describe("Complete operation spot-check integration", () => {
+  test("spotCheck is called with question and final_answer", () => {
+    // Simulate the complete operation flow
+    const question =
+      "A bat and ball cost $1.10 total. The bat costs $1.00 more than the ball. How much does the ball cost?";
+    const wrongAnswer = "10 cents";
+    const correctAnswer = "5 cents";
+
+    // Wrong answer should trigger warning
+    const wrongResult = spotCheck(question, wrongAnswer);
+    expect(wrongResult.passed).toBe(false);
+    expect(wrongResult.trapType).toBe("additive_system");
+
+    // Correct answer should pass
+    const correctResult = spotCheck(question, correctAnswer);
+    expect(correctResult.passed).toBe(true);
+  });
+
+  test("spot-check result structure matches ScratchpadResponse.spot_check_result", () => {
+    const result = spotCheck("A lily pad doubles daily. Lake full day 48. Half full?", "24");
+
+    // Verify structure matches what handleComplete returns
+    expect(typeof result.passed).toBe("boolean");
+    expect(result.trapType === null || typeof result.trapType === "string").toBe(true);
+    expect(result.warning === null || typeof result.warning === "string").toBe(true);
+    expect(result.hint === null || typeof result.hint === "string").toBe(true);
+    expect(typeof result.confidence).toBe("number");
+  });
+
+  test("no spot-check needed for non-trap questions", () => {
+    const simpleQuestion = "What is 2 + 2?";
+    const result = needsSpotCheck(simpleQuestion);
+    expect(result.required).toBe(false);
+
+    // Even if we run spotCheck, it should pass
+    const checkResult = spotCheck(simpleQuestion, "4");
+    expect(checkResult.passed).toBe(true);
+  });
+});
+
+// =============================================================================
 // EDGE CASES
 // =============================================================================
 
@@ -452,6 +496,12 @@ describe("Structural category coverage", () => {
     { name: "factorial_counting", q: "100! trailing zeros" },
     { name: "clock_overlap", q: "Clock hands overlap coincide" },
     { name: "conditional_probability", q: "Given probability if knowing" },
+    {
+      name: "conjunction_fallacy",
+      q: "Which is more likely: bank teller, or bank teller and feminist?",
+    },
+    { name: "monty_hall", q: "Three doors, host reveals goat, should you switch or stay?" },
+    { name: "anchoring", q: "Spin wheel number 65, estimate how many countries in Africa" },
   ];
 
   for (const { name, q } of categories) {
@@ -460,4 +510,71 @@ describe("Structural category coverage", () => {
       expect(result.categories).toContain(name);
     });
   }
+});
+
+// =============================================================================
+// CONJUNCTION FALLACY (Linda Problem structure)
+// =============================================================================
+
+describe("Conjunction Fallacy trap detection", () => {
+  const question =
+    "Linda is 31, single, outspoken, and very bright. She majored in philosophy. Which is more likely: (A) Linda is a bank teller, or (B) Linda is a bank teller and active in the feminist movement?";
+
+  test("detects wrong answer (choosing the conjunction)", () => {
+    const result = spotCheck(question, "B - bank teller and feminist");
+    expectTrap(result, "conjunction_fallacy");
+  });
+
+  test("detects wrong answer variant", () => {
+    const result = spotCheck(question, "bank teller and active in feminist movement");
+    expectTrap(result, "conjunction_fallacy");
+  });
+
+  test("passes correct answer (A - just bank teller)", () => {
+    const result = spotCheck(question, "A - bank teller");
+    expectPass(result);
+  });
+
+  test("needsSpotCheck identifies conjunction_fallacy category", () => {
+    const result = needsSpotCheck(question);
+    expect(result.required).toBe(true);
+    expect(result.categories).toContain("conjunction_fallacy");
+  });
+});
+
+// =============================================================================
+// MONTY HALL
+// =============================================================================
+
+describe("Monty Hall trap detection", () => {
+  const question =
+    "You pick door 1 out of 3 doors. The host, who knows what's behind each door, opens door 3 to reveal a goat. Should you switch to door 2 or stay with door 1?";
+
+  test("detects wrong answer (stay)", () => {
+    const result = spotCheck(question, "stay with door 1");
+    expectTrap(result, "monty_hall");
+  });
+
+  test("detects wrong answer (doesn't matter)", () => {
+    const result = spotCheck(question, "doesn't matter, it's 50/50");
+    expectTrap(result, "monty_hall");
+  });
+
+  test("passes correct answer (switch)", () => {
+    const result = spotCheck(question, "switch to door 2");
+    expectPass(result);
+  });
+
+  test("needsSpotCheck identifies monty_hall category", () => {
+    const result = needsSpotCheck(question);
+    expect(result.required).toBe(true);
+    expect(result.categories).toContain("monty_hall");
+  });
+
+  test("detects 50% probability trap", () => {
+    const probQuestion =
+      "In Monty Hall, after the host reveals a goat, what's the probability of winning if you stay?";
+    const result = spotCheck(probQuestion, "50%");
+    expectTrap(result, "monty_hall");
+  });
 });
