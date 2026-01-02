@@ -16,6 +16,12 @@ pre-commit:
       run: bunx tsc --noEmit
       stage_fixed: true
 
+    # MCP schema compliance (fast, <1s) - catches discriminatedUnion regressions
+    mcp-schema:
+      glob: "*.{ts,tsx}"
+      run: bun test test/mcp-schema.test.ts --bail --timeout 10000
+      fail_text: "MCP schema validation failed. Tool schemas must have type='object' at root (no discriminatedUnion)."
+
     # Run tests with bail on first failure
     test:
       glob: "*.{ts,tsx}"
