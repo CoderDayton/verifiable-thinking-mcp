@@ -1,18 +1,25 @@
 /**
- * Solver Registry - Auto-discovery and registration of compute solvers
+ * Solver Registry - Registration of compute solvers
  *
- * Enables drop-in new solvers without editing this file.
  * Each solver declares its type mask and priority.
  *
  * To add a new solver:
  * 1. Create a file in ./solvers/
  * 2. Export `solver` (single) or `solvers` (array) with Solver interface
- * 3. Done - it auto-registers on import
+ * 3. Import and register it below
  */
 
-import { dirname, join } from "node:path";
-import { Glob } from "bun";
 import { type SolverMask, SolverType, shouldTrySolver } from "./classifier.ts";
+// Import all solver modules
+import * as arithmeticModule from "./solvers/arithmetic.ts";
+import * as calculusModule from "./solvers/calculus.ts";
+import * as derivationModule from "./solvers/derivation.ts";
+import * as factsModule from "./solvers/facts.ts";
+import * as formulaModule from "./solvers/formula.ts";
+import * as logicModule from "./solvers/logic.ts";
+import * as probabilityModule from "./solvers/probability.ts";
+import * as statisticsModule from "./solvers/statistics.ts";
+import * as wordProblemsModule from "./solvers/word-problems.ts";
 import type { ComputeResult, Solver } from "./types.ts";
 
 // Re-export Solver type for convenience
@@ -107,30 +114,32 @@ export function listSolvers(): Array<{ name: string; description: string; priori
 }
 
 // =============================================================================
-// AUTO-DISCOVERY
-// Glob all .ts files in ./solvers/ and import them
-// Each file exports `solver` or `solvers` array
+// EXPLICIT SOLVER REGISTRATION
+// Register all solvers from modules (no Bun.Glob needed - works with Node.js too)
 // =============================================================================
 
-const solversDir = join(dirname(import.meta.path), "solvers");
-const glob = new Glob("*.ts");
-
-for await (const file of glob.scan(solversDir)) {
-  // Skip index.ts barrel file
-  if (file === "index.ts") continue;
-
-  const modulePath = join(solversDir, file);
-  const mod = await import(modulePath);
-
+// Helper to register solvers from a module
+function registerFromModule(mod: Record<string, unknown>): void {
   // Register single solver
-  if (mod.solver) {
-    registerSolver(mod.solver);
+  if (mod.solver && typeof mod.solver === "object") {
+    registerSolver(mod.solver as Solver);
   }
 
   // Register multiple solvers
   if (mod.solvers && Array.isArray(mod.solvers)) {
     for (const s of mod.solvers) {
-      registerSolver(s);
+      registerSolver(s as Solver);
     }
   }
 }
+
+// Register all solver modules
+registerFromModule(arithmeticModule);
+registerFromModule(calculusModule);
+registerFromModule(derivationModule);
+registerFromModule(factsModule);
+registerFromModule(formulaModule);
+registerFromModule(logicModule);
+registerFromModule(probabilityModule);
+registerFromModule(statisticsModule);
+registerFromModule(wordProblemsModule);

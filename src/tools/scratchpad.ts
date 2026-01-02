@@ -350,17 +350,15 @@ async function applyCompression(
 // ============================================================================
 
 /** Handle step operation - add a new thought */
-async function handleStep(
-  args: Extract<ScratchpadArgs, { operation: "step" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-    token_budget?: number;
-    max_step_tokens?: number;
-    force_large?: boolean;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
+
+  // Runtime validation: thought is required for step operation
+  if (!args.thought) {
+    throw new Error("thought is required for step operation");
+  }
+  const thought = args.thought;
+
   const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
   const branchId = "main"; // Default branch for step operation
   const threshold = args.confidence_threshold ?? 0.8;
@@ -370,7 +368,7 @@ async function handleStep(
   const maxStepTokens = args.max_step_tokens;
   if (maxStepTokens !== undefined && !args.force_large) {
     // Estimate tokens: ~4 chars per token
-    const estimatedTokens = Math.ceil(args.thought.length / 4);
+    const estimatedTokens = Math.ceil(thought.length / 4);
     if (estimatedTokens > maxStepTokens) {
       throw new Error(
         `Step exceeds max_step_tokens limit: ${estimatedTokens} > ${maxStepTokens}. ` +
@@ -383,7 +381,7 @@ async function handleStep(
   const stepNumber = SessionManager.getNextStep(sessionId, branchId);
 
   // Strip markdown and detect domain
-  let strippedThought = stripMarkdown(args.thought);
+  let strippedThought = stripMarkdown(thought);
   const domain = args.domain || detectDomain(strippedThought);
 
   // Pre-compute next step suggestion for math domain (before augmentation modifies text)
@@ -626,13 +624,7 @@ async function handleStep(
 }
 
 /** Handle navigate operation - view history/branches/steps/paths */
-async function handleNavigate(
-  args: Extract<ScratchpadArgs, { operation: "navigate" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  _ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<ScratchpadResponse> {
   const sessionId = args.session_id;
   if (!sessionId) {
     throw new Error("session_id required for navigate operation");
@@ -725,18 +717,18 @@ async function handleNavigate(
 }
 
 /** Handle branch operation - start alternative reasoning path */
-async function handleBranch(
-  args: Extract<ScratchpadArgs, { operation: "branch" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
-  if (!sessionId) {
+
+  // Runtime validation: session_id and thought are required for branch operation
+  if (!args.session_id) {
     throw new Error("session_id required for branch operation");
   }
+  if (!args.thought) {
+    throw new Error("thought is required for branch operation");
+  }
+  const sessionId = args.session_id;
+  const thought = args.thought;
 
   const session = SessionManager.get(sessionId);
   if (!session) {
@@ -757,7 +749,7 @@ async function handleBranch(
   const stepNumber = fromStep + 1;
 
   // Strip markdown and detect domain BEFORE augmentation
-  let strippedThought = stripMarkdown(args.thought);
+  let strippedThought = stripMarkdown(thought);
   const domain = detectDomain(strippedThought);
 
   // Pre-compute next step suggestion for math domain (before augmentation modifies text)
@@ -868,18 +860,22 @@ async function handleBranch(
 }
 
 /** Handle revise operation - correct earlier step */
-async function handleRevise(
-  args: Extract<ScratchpadArgs, { operation: "revise" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
-  if (!sessionId) {
+
+  // Runtime validation: required fields for revise operation
+  if (!args.session_id) {
     throw new Error("session_id required for revise operation");
   }
+  if (!args.thought) {
+    throw new Error("thought is required for revise operation");
+  }
+  if (args.target_step === undefined) {
+    throw new Error("target_step is required for revise operation");
+  }
+  const sessionId = args.session_id;
+  const thought = args.thought;
+  const targetStep = args.target_step;
 
   const session = SessionManager.get(sessionId);
   if (!session) {
@@ -891,13 +887,13 @@ async function handleRevise(
 
   // Check if revising a pending (failed verification) step
   const pending = SessionManager.getPendingThought(sessionId);
-  const isRevisingPending = pending && args.target_step === pending.thought.step_number;
+  const isRevisingPending = pending && targetStep === pending.thought.step_number;
 
   // If not revising pending, validate target step exists in stored thoughts
   if (!isRevisingPending) {
-    const targetStep = SessionManager.getStep(sessionId, args.target_step);
-    if (!targetStep) {
-      throw new Error(`Target step not found: ${args.target_step}`);
+    const existingStep = SessionManager.getStep(sessionId, targetStep);
+    if (!existingStep) {
+      throw new Error(`Target step not found: ${targetStep}`);
     }
   }
 
@@ -912,7 +908,7 @@ async function handleRevise(
     : SessionManager.getNextStep(sessionId, branchId);
 
   // Strip markdown
-  let strippedThought = stripMarkdown(args.thought);
+  let strippedThought = stripMarkdown(thought);
   const domain = detectDomain(strippedThought);
 
   // Pre-compute next step suggestion for math domain (before augmentation modifies text)
@@ -960,8 +956,8 @@ async function handleRevise(
   await streamContent({
     type: "text",
     text:
-      `📝 **Revising Step ${args.target_step}**${revisingLabel}\n` +
-      `   Reason: ${args.reason}\n\n` +
+      `📝 **Revising Step ${targetStep}**${revisingLabel}\n` +
+      `   Reason: ${args.reason ?? "correction"}\n\n` +
       `**Step ${stepNumber}** [correction]\n${strippedThought}\n`,
   });
 
@@ -972,7 +968,7 @@ async function handleRevise(
     thought: strippedThought,
     timestamp: Date.now(),
     branch_id: branchId,
-    revises_step: isRevisingPending ? undefined : args.target_step, // Don't mark as revision if replacing pending
+    revises_step: isRevisingPending ? undefined : targetStep, // Don't mark as revision if replacing pending
     revision_reason: args.reason,
     verification:
       args.confidence !== undefined
@@ -1004,7 +1000,7 @@ async function handleRevise(
     confidence_threshold: threshold,
     steps_with_confidence: confState.stepsWithConfidence,
     status,
-    suggested_action: `Revised step ${args.target_step}. Continue reasoning with corrected understanding.`,
+    suggested_action: `Revised step ${targetStep}. Continue reasoning with corrected understanding.`,
   };
 
   // Add augmentation info
@@ -1027,13 +1023,7 @@ async function handleRevise(
 }
 
 /** Handle complete operation - finalize reasoning chain */
-async function handleComplete(
-  args: Extract<ScratchpadArgs, { operation: "complete" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
   const sessionId = args.session_id;
   if (!sessionId) {
@@ -1167,21 +1157,22 @@ async function handleComplete(
 }
 
 /** Handle augment operation - extract, compute, and inject math results */
-async function handleAugment(
-  args: Extract<ScratchpadArgs, { operation: "augment" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
+
+  // Runtime validation: text is required for augment operation
+  if (!args.text) {
+    throw new Error("text is required for augment operation");
+  }
+  const text = args.text;
+
   const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
   const threshold = args.confidence_threshold ?? 0.8;
   const branchId = "main";
 
   // Run context-aware computation
   const computeResult = contextAwareCompute({
-    thought: args.text,
+    thought: text,
     systemPrompt: args.system_context,
   });
 
@@ -1247,13 +1238,7 @@ async function handleAugment(
 }
 
 /** Handle override operation - commit a failed verification step anyway */
-async function handleOverride(
-  args: Extract<ScratchpadArgs, { operation: "override" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleOverride(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
   const sessionId = args.session_id;
   if (!sessionId) {
@@ -1319,13 +1304,7 @@ async function handleOverride(
 }
 
 /** Handle hint operation - progressive simplification hints with session state */
-async function handleHint(
-  args: Extract<ScratchpadArgs, { operation: "hint" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleHint(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
   const sessionId = args.session_id || `hint-${Date.now()}`;
   const threshold = args.confidence_threshold ?? 0.8;
@@ -1509,19 +1488,20 @@ async function handleHint(
 }
 
 /** Handle mistakes operation - proactive error checking for math derivations */
-async function handleMistakes(
-  args: Extract<ScratchpadArgs, { operation: "mistakes" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
+
+  // Runtime validation: text is required for mistakes operation
+  if (!args.text) {
+    throw new Error("text is required for mistakes operation");
+  }
+  const text = args.text;
+
   const sessionId = args.session_id || `mistakes-${Date.now()}`;
   const threshold = args.confidence_threshold ?? 0.8;
 
   // Run mistake detection
-  const result = detectCommonMistakesFromText(args.text);
+  const result = detectCommonMistakesFromText(text);
   const mistakes = result?.mistakes ?? [];
   const mistakesFound = mistakes.length;
 
@@ -1570,7 +1550,7 @@ async function handleMistakes(
         ? `Found ${mistakesFound} potential mistake(s). Review and revise if needed.`
         : "No common mistakes detected.",
     mistakes_result: {
-      text_checked: args.text.slice(0, 200) + (args.text.length > 200 ? "..." : ""),
+      text_checked: text.slice(0, 200) + (text.length > 200 ? "..." : ""),
       mistakes_found: mistakesFound,
       mistakes: mistakes.map((m: DetectedMistake) => ({
         type: m.type,
@@ -1583,25 +1563,30 @@ async function handleMistakes(
 }
 
 /** Handle spot_check operation - detect trap patterns in answers */
-async function handleSpotCheck(
-  args: Extract<ScratchpadArgs, { operation: "spot_check" }> & {
-    session_id?: string;
-    confidence_threshold?: number;
-  },
-  ctx: MCPContext,
-): Promise<ScratchpadResponse> {
+async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
+
+  // Runtime validation: question and answer are required for spot_check operation
+  if (!args.question) {
+    throw new Error("question is required for spot_check operation");
+  }
+  if (!args.answer) {
+    throw new Error("answer is required for spot_check operation");
+  }
+  const question = args.question;
+  const answer = args.answer;
+
   const sessionId = args.session_id || `spot-check-${Date.now()}`;
   const threshold = args.confidence_threshold ?? 0.8;
 
   // Run spot-check
-  const result = spotCheck(args.question, args.answer);
+  const result = spotCheck(question, answer);
 
   // Stream results
   if (result.passed) {
     await streamContent({
       type: "text",
-      text: `✓ **No trap patterns detected**\n\n_Answer "${args.answer}" does not match known cognitive trap patterns for this question type._\n`,
+      text: `✓ **No trap patterns detected**\n\n_Answer "${answer}" does not match known cognitive trap patterns for this question type._\n`,
     });
   } else {
     await streamContent({
