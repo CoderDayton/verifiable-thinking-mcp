@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: write
-  id-token: write
 
 jobs:
   validate:
@@ -67,19 +66,18 @@ jobs:
         with:
           bun-version: latest
 
-      # Node.js 24+ required for npm OIDC trusted publishing
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: '22'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # OIDC trusted publishing - no token needed!
-      # Configure at: https://www.npmjs.com/package/verifiable-thinking-mcp/access
-      - name: Publish to npm with provenance
-        run: npm publish --access public --provenance
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Summary
         run: |
