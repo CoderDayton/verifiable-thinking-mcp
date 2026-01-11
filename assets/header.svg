@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 200" width="800" height="200">
+  <defs>
+    <!-- Grid Pattern Background -->
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#2a2a35" stroke-width="1"/>
+    </pattern>
+    
+    <!-- Glow Filter -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="200" fill="#0d1117" />
+  <rect width="800" height="200" fill="url(#grid)" opacity="0.4" />
+
+  <!-- Central Graphic: Brain Circuit + Shield -->
+  <g transform="translate(400, 100)">
+    <!-- Shield Outline -->
+    <path d="M-40,-50 C-40,-50 40,-50 40,-50 C40,-50 40,10 40,10 C40,40 0,60 0,60 C0,60 -40,40 -40,10 Z" 
+          fill="none" stroke="#3fb950" stroke-width="3" filter="url(#glow)"/>
+    
+    <!-- Brain Nodes (Abstract) -->
+    <circle cx="-15" cy="-15" r="4" fill="#58a6ff" />
+    <circle cx="15" cy="-15" r="4" fill="#58a6ff" />
+    <circle cx="0" cy="10" r="4" fill="#58a6ff" />
+    <circle cx="-10" cy="30" r="4" fill="#58a6ff" />
+    <circle cx="10" cy="30" r="4" fill="#58a6ff" />
+    
+    <!-- Connections -->
+    <path d="M-15,-15 L15,-15 L0,10 L-15,-15 M0,10 L-10,30 M0,10 L10,30" 
+          stroke="#58a6ff" stroke-width="2" opacity="0.6"/>
+          
+    <!-- Checkmark (Verification) -->
+    <path d="M25,-40 L35,-30 L55,-50" 
+          stroke="#3fb950" stroke-width="3" fill="none" filter="url(#glow)" transform="scale(0.8) translate(10, 10)"/>
+  </g>
+
+  <!-- Left Side: Trap Detection -->
+  <g transform="translate(150, 100)">
+    <text x="0" y="-20" fill="#8b949e" font-family="monospace" font-size="14" text-anchor="middle">TRAP DETECTION</text>
+    <path d="M-40,10 L40,10" stroke="#f85149" stroke-width="2" stroke-dasharray="5,5"/>
+    <text x="0" y="30" fill="#f85149" font-family="monospace" font-size="12" text-anchor="middle">&lt;1ms O(n)</text>
+  </g>
+
+  <!-- Right Side: Verification -->
+  <g transform="translate(650, 100)">
+    <text x="0" y="-20" fill="#8b949e" font-family="monospace" font-size="14" text-anchor="middle">VERIFICATION</text>
+    <path d="M-40,10 L-10,10 L0,0 L10,10 L40,10" stroke="#a371f7" stroke-width="2"/>
+    <text x="0" y="30" fill="#a371f7" font-family="monospace" font-size="12" text-anchor="middle">Auto-Gate</text>
+  </g>
+
+  <!-- Title Text -->
+  <text x="400" y="180" fill="#c9d1d9" font-family="sans-serif" font-weight="bold" font-size="24" text-anchor="middle" letter-spacing="2">VERIFIABLE THINKING</text>
+</svg>

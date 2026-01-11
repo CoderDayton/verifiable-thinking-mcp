@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧠 Verifiable Thinking MCP
+<img src="assets/header.svg" alt="Verifiable Thinking MCP" width="800" />
 
 **LLMs fail predictably on cognitive traps. This catches them.**
 
