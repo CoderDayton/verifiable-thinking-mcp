@@ -149,7 +149,8 @@ Unified reasoning tool with operation-based dispatch.
 | `confidence` | 0-1 | Step confidence (accumulates to chain average) |
 | `verify` | boolean | Enable domain verification (auto-enabled after step 3) |
 | `domain` | enum | math, logic, code, general |
-| `warn_at_tokens` | number | Warn when cumulative session tokens exceed threshold (cost control) |
+| `warn_at_tokens` | number | Soft limit: warn when session tokens exceed threshold |
+| `hard_limit_tokens` | number | Hard limit: block operations when exceeded |
 
 **Token Tracking:**
 
@@ -162,15 +163,25 @@ Every response includes token usage metadata:
 }
 ```
 
-Set `warn_at_tokens` to get alerts when costs accumulate:
+**Cost Control:**
+
+Use `warn_at_tokens` for soft warnings, or `hard_limit_tokens` to block operations:
 
 ```typescript
+// Soft limit: warns but allows operation
 scratchpad({
   operation: "step",
   thought: "...",
-  warn_at_tokens: 2000  // Warn when session exceeds 2000 tokens
+  warn_at_tokens: 2000  // Adds token_warning to response
 })
-// Response includes token_warning when threshold exceeded
+
+// Hard limit: blocks operation entirely
+scratchpad({
+  operation: "step",
+  thought: "...",
+  hard_limit_tokens: 5000  // Returns status="budget_exhausted" if exceeded
+})
+// Response includes budget_exhausted with recommendation to complete or start new session
 ```
 
 **Workflow:**

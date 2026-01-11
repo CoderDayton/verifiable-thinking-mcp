@@ -168,3 +168,43 @@ describe("Session token tracking", () => {
     expect(usage?.operations).toBe(2);
   });
 });
+
+describe("Hard limit budget check", () => {
+  afterEach(() => {
+    clearAllSessionTokens();
+  });
+
+  test("getSessionTokens returns usage for budget check", () => {
+    const sessionId = "budget-check-session";
+
+    // Simulate several operations accumulating tokens
+    trackSessionTokens(sessionId, { input_tokens: 100, output_tokens: 200, total_tokens: 300 });
+    trackSessionTokens(sessionId, { input_tokens: 150, output_tokens: 250, total_tokens: 400 });
+    trackSessionTokens(sessionId, { input_tokens: 100, output_tokens: 200, total_tokens: 300 });
+
+    const usage = getSessionTokens(sessionId);
+    expect(usage).not.toBeNull();
+    expect(usage?.total).toBe(1000); // 300 + 400 + 300
+
+    // This pattern is used by hard_limit_tokens check
+    const hardLimit = 800;
+    expect(usage!.total >= hardLimit).toBe(true);
+  });
+
+  test("budget check returns null for non-existent session", () => {
+    // New sessions have no prior usage - should not trigger hard limit
+    const usage = getSessionTokens("new-session-no-history");
+    expect(usage).toBeNull();
+  });
+
+  test("budget check allows operations under limit", () => {
+    const sessionId = "under-limit-session";
+    trackSessionTokens(sessionId, { input_tokens: 50, output_tokens: 100, total_tokens: 150 });
+
+    const usage = getSessionTokens(sessionId);
+    const hardLimit = 1000;
+
+    // Under limit - should allow
+    expect(usage!.total < hardLimit).toBe(true);
+  });
+});

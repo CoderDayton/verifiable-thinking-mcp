@@ -99,11 +99,16 @@ const DEFAULT_CONFIG: SessionManagerConfig = {
   cleanup_batch_size: 10, // Check cleanup every 10 steps
 };
 
+/** Max pooled sessions to keep for reuse (avoids GC pressure from Map/Set allocations) */
+const MAX_POOL_SIZE = 20;
+
 class SessionManagerImpl {
   private sessions: Map<string, Session> = new Map();
   private config: SessionManagerConfig;
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
   private stepsSinceCleanup = 0;
+  /** Pool of recycled sessions to avoid allocation churn */
+  private sessionPool: Session[] = [];
 
   constructor(config: Partial<SessionManagerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -117,6 +122,55 @@ class SessionManagerImpl {
     }, this.config.cleanup_interval_ms);
   }
 
+  /**
+   * Recycle a session by clearing its data structures without deallocating.
+   * This avoids GC pressure from repeatedly creating new Map/Set instances.
+   */
+  private recycleSession(session: Session): void {
+    if (this.sessionPool.length >= MAX_POOL_SIZE) {
+      // Pool full, let GC handle it
+      return;
+    }
+
+    // Clear data structures without deallocating
+    session.thoughts.length = 0;
+    session.branches.clear();
+    session.stepIndex.clear();
+    session.stepNumbers.clear();
+    session.stepToBranchMap.clear();
+    session.toolsUsedSet.clear();
+    session.metadata = {};
+    session.question = undefined;
+    session.pendingThought = undefined;
+
+    this.sessionPool.push(session);
+  }
+
+  /**
+   * Get a pooled session if available, otherwise create new.
+   * Reusing sessions avoids Map/Set allocation overhead.
+   */
+  private getPooledSession(sessionId: string): Session {
+    const pooled = this.sessionPool.pop();
+    if (pooled) {
+      // Reinitialize pooled session with new id
+      pooled.id = sessionId;
+      pooled.created_at = Date.now();
+      pooled.updated_at = Date.now();
+      pooled.branches.set("main", {
+        id: "main",
+        name: "Main",
+        from_step: 0,
+        depth: 0,
+        created_at: Date.now(),
+      });
+      return pooled;
+    }
+
+    // No pooled session available, create new
+    return this.createSession(sessionId);
+  }
+
   private cleanup(): void {
     const now = Date.now();
     const expired: string[] = [];
@@ -128,6 +182,10 @@ class SessionManagerImpl {
     }
 
     for (const id of expired) {
+      const session = this.sessions.get(id);
+      if (session) {
+        this.recycleSession(session);
+      }
       this.sessions.delete(id);
     }
   }
@@ -171,10 +229,16 @@ class SessionManagerImpl {
             oldest = entry;
           }
         }
-        if (oldest) this.sessions.delete(oldest[0]);
+        if (oldest) {
+          const oldSession = this.sessions.get(oldest[0]);
+          if (oldSession) {
+            this.recycleSession(oldSession);
+          }
+          this.sessions.delete(oldest[0]);
+        }
       }
 
-      session = this.createSession(sessionId);
+      session = this.getPooledSession(sessionId);
       this.sessions.set(sessionId, session);
     }
 

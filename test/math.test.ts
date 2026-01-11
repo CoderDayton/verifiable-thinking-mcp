@@ -782,3 +782,123 @@ describe("performance", () => {
     expect(elapsed).toBeLessThan(100);
   });
 });
+
+// =============================================================================
+// CROSS-EVALUATOR CONSISTENCY TESTS
+// =============================================================================
+
+import { safeEvaluate } from "../src/lib/compute/math.ts";
+
+describe("cross-evaluator consistency", () => {
+  // Expressions that both evaluators should handle identically
+  const compatibleExpressions = [
+    // Basic arithmetic
+    { expr: "2 + 3", expected: 5 },
+    { expr: "10 - 4", expected: 6 },
+    { expr: "3 * 7", expected: 21 },
+    { expr: "20 / 4", expected: 5 },
+    { expr: "2 ^ 3", expected: 8 },
+    { expr: "2^3^2", expected: 512 }, // Right-associative: 2^(3^2) = 2^9 = 512
+
+    // Parentheses
+    { expr: "(2 + 3) * 4", expected: 20 },
+    { expr: "2 * (3 + 4)", expected: 14 },
+    { expr: "((2 + 3) * (4 - 1))", expected: 15 },
+
+    // Operator precedence
+    { expr: "2 + 3 * 4", expected: 14 }, // 2 + 12, not 20
+    { expr: "10 - 6 / 2", expected: 7 }, // 10 - 3, not 2
+    { expr: "2 * 3 + 4 * 5", expected: 26 }, // 6 + 20
+    { expr: "2^2*3", expected: 12 }, // (2^2) * 3
+
+    // Negative numbers
+    { expr: "-5", expected: -5 },
+    { expr: "--5", expected: 5 },
+    { expr: "5 + -3", expected: 2 },
+    { expr: "-2 * -3", expected: 6 },
+    { expr: "-(2 + 3)", expected: -5 },
+
+    // Decimals
+    { expr: "3.14 * 2", expected: 6.28 },
+    { expr: "1.5 + 2.5", expected: 4 },
+    { expr: "10.0 / 4", expected: 2.5 },
+
+    // Edge cases
+    { expr: "0 + 0", expected: 0 },
+    { expr: "1", expected: 1 },
+    { expr: "(((5)))", expected: 5 },
+    { expr: "2^0", expected: 1 },
+    { expr: "0^5", expected: 0 },
+  ];
+
+  for (const { expr, expected } of compatibleExpressions) {
+    test(`AST evaluator and safeEvaluate agree on: ${expr}`, () => {
+      const astResult = evaluateExpression(expr);
+      const safeResult = safeEvaluate(expr);
+
+      // Both should succeed
+      expect(astResult.error).toBeUndefined();
+      expect(safeResult.success).toBe(true);
+
+      // Both should produce the same result
+      expect(astResult.value).toBeCloseTo(expected, 10);
+      expect(safeResult.value).toBeCloseTo(expected, 10);
+
+      // Results should match each other
+      expect(astResult.value).toBeCloseTo(safeResult.value!, 10);
+    });
+  }
+
+  // Randomized property-based tests
+  test("evaluators agree on random arithmetic expressions", () => {
+    const ops = ["+", "-", "*", "/"];
+
+    for (let i = 0; i < 100; i++) {
+      // Generate random expression: a op b op c
+      const a = Math.floor(Math.random() * 100) + 1;
+      const b = Math.floor(Math.random() * 100) + 1;
+      const c = Math.floor(Math.random() * 100) + 1;
+      const op1 = ops[Math.floor(Math.random() * 4)];
+      const op2 = ops[Math.floor(Math.random() * 4)];
+
+      const expr = `${a} ${op1} ${b} ${op2} ${c}`;
+
+      const astResult = evaluateExpression(expr);
+      const safeResult = safeEvaluate(expr);
+
+      // Both should succeed (we avoided division by zero by using non-zero values)
+      if (astResult.error || !safeResult.success) {
+        // Skip if either fails (e.g., division by result of previous op)
+        continue;
+      }
+
+      // Results should match
+      expect(astResult.value).toBeCloseTo(safeResult.value!, 6);
+    }
+  });
+
+  // Error consistency: both should fail on invalid expressions
+  const invalidExpressions = [
+    "", // Empty
+    "()", // Empty parens
+    "2 +", // Trailing operator
+    "* 2", // Leading multiplicative operator
+    // Note: "2 3" is NOT included - AST interprets as implicit multiplication (2*3=6),
+    // while safeEvaluate removes whitespace and parses as 23. Both "succeed" differently.
+    "((2 + 3)", // Unbalanced parens
+  ];
+
+  for (const expr of invalidExpressions) {
+    test(`both evaluators reject invalid: "${expr}"`, () => {
+      const astResult = evaluateExpression(expr);
+      const safeResult = safeEvaluate(expr);
+
+      // Both should fail
+      const astFailed = astResult.error !== undefined || astResult.value === null;
+      const safeFailed = !safeResult.success;
+
+      expect(astFailed).toBe(true);
+      expect(safeFailed).toBe(true);
+    });
+  }
+});

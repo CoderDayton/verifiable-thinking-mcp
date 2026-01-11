@@ -24,6 +24,7 @@ import {
 } from "../lib/compute/index.ts";
 import { stripMarkdown } from "../lib/extraction.ts";
 import { SessionManager, type ThoughtRecord } from "../lib/session.ts";
+import { analyzeConfidenceDrift } from "../lib/think/confidence-drift.ts";
 import { detectDomain } from "../lib/think/guidance.ts";
 import {
   type ScratchpadArgs,
@@ -31,7 +32,7 @@ import {
   ScratchpadSchema,
 } from "../lib/think/scratchpad-schema.ts";
 import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
-import { calculateTokenUsage, trackSessionTokens } from "../lib/tokens.ts";
+import { calculateTokenUsage, getSessionTokens, trackSessionTokens } from "../lib/tokens.ts";
 import { verify } from "../lib/verification.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
@@ -122,6 +123,8 @@ function getSuggestedAction(status: ScratchpadResponse["status"], chainConfidenc
       return `Continue reasoning. Chain confidence: ${(chainConfidence * 100).toFixed(0)}%`;
     case "verification_failed":
       return "Verification failed. Use revise, branch, or override to continue.";
+    case "budget_exhausted":
+      return "Token budget exhausted. Complete your reasoning or start a new session.";
   }
 }
 
@@ -1186,11 +1189,42 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
     }
   }
 
-  // Determine final status - "review" if spot-check failed, otherwise "complete"
+  // Confidence Drift Detection (CDD) - analyze trajectory for unresolved uncertainty
+  const driftAnalysis = analyzeConfidenceDrift(thoughts);
+  if (driftAnalysis.pattern !== "insufficient") {
+    // Stream drift analysis if concerning
+    if (driftAnalysis.unresolved) {
+      needsReconsideration = true;
+      await streamContent({
+        type: "text",
+        text:
+          `\n⚠️ **Confidence Drift Warning:** ${driftAnalysis.explanation}\n` +
+          (driftAnalysis.suggestion ? `   💡 ${driftAnalysis.suggestion}\n` : "") +
+          `   Pattern: ${driftAnalysis.pattern}, Drift score: ${(driftAnalysis.drift_score * 100).toFixed(0)}%\n`,
+      });
+    } else if (driftAnalysis.pattern !== "stable") {
+      // Informational for non-stable patterns
+      await streamContent({
+        type: "text",
+        text: `   Confidence pattern: ${driftAnalysis.pattern}\n`,
+      });
+    }
+  }
+
+  // Determine final status - "review" if spot-check failed or unresolved drift, otherwise "complete"
   const finalStatus = needsReconsideration ? "review" : "complete";
-  const suggestedAction = needsReconsideration
-    ? `Potential ${spotCheckResult?.trapType} trap detected. Call revise(target_step=${thoughts.length}, reason="${spotCheckResult?.hint || "Reconsider approach"}") to fix.`
-    : "Reasoning chain finalized.";
+  let suggestedAction: string;
+  if (needsReconsideration) {
+    if (driftAnalysis.unresolved) {
+      suggestedAction = `Unresolved confidence drift detected (${driftAnalysis.pattern} pattern). ${driftAnalysis.suggestion || `Review step ${driftAnalysis.min_step} where confidence dropped.`}`;
+    } else if (spotCheckResult?.trapType) {
+      suggestedAction = `Potential ${spotCheckResult.trapType} trap detected. Call revise(target_step=${thoughts.length}, reason="${spotCheckResult.hint || "Reconsider approach"}") to fix.`;
+    } else {
+      suggestedAction = "Review recommended before finalizing.";
+    }
+  } else {
+    suggestedAction = "Reasoning chain finalized.";
+  }
 
   const response: ScratchpadResponse = {
     session_id: sessionId,
@@ -1242,6 +1276,22 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
               saved: compressionStats.tokens.saved,
             }
           : undefined,
+    };
+  }
+
+  // Add confidence drift analysis (always include for complete operation)
+  if (driftAnalysis.pattern !== "insufficient") {
+    response.confidence_drift = {
+      drift_score: driftAnalysis.drift_score,
+      unresolved: driftAnalysis.unresolved,
+      min_confidence: driftAnalysis.min_confidence,
+      min_step: driftAnalysis.min_step,
+      max_drop: driftAnalysis.max_drop,
+      recovery: driftAnalysis.recovery,
+      has_revision_after_drop: driftAnalysis.has_revision_after_drop,
+      pattern: driftAnalysis.pattern,
+      explanation: driftAnalysis.explanation,
+      suggestion: driftAnalysis.suggestion,
     };
   }
 
@@ -1731,31 +1781,39 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
 
 export const scratchpadTool = {
   name: "scratchpad",
-  description: `Unified reasoning scratchpad with verification, trap detection, and step tracking.
+  description: `Reasoning scratchpad: step tracking, verification, trap detection.
 
-OPERATIONS:
-- step: Add thought. Pass question= on first step for trap priming → get trap_analysis. Auto-verifies after 3 steps.
-- complete: Finalize chain. Auto spot-checks final_answer against stored question.
-- revise: Fix earlier step (after verification failure or trap warning)
-- branch: Start alternative path from earlier step
-- navigate: View history/branches/steps/paths
-- augment|hint|mistakes|spot_check|override: Math helpers and manual controls
+OPS:
+step      → Add thought. question= on 1st enables trap priming. Auto-verify after step 3.
+complete  → Finalize. Spot-checks final_answer vs stored question.
+revise    → Fix step (verification fail | trap warning). target_step + reason.
+branch    → Alt path. from_step + branch_name.
+navigate  → View: history|branches|step|path
+augment   → Compute math in text, inject results
+hint      → Progressive math simplification steps
+mistakes  → Check text for algebraic errors
+spot_check→ Manual trap detection on answer
+override  → Force-commit after verification fail (acknowledge=true)
 
-VERIFICATION FLOW (auto-enabled at step 4+):
-- If fails: status="verification_failed", step held pending
-- Recover: revise (fix) | branch (try different approach) | override (force-commit)
+VERIFY (auto step 4+):
+Fail → status="verification_failed", step pending
+Fix  → revise | branch | override
 
-TRAP DETECTION (15 patterns: bat-ball, lily pad, Monty Hall, etc.):
-- Enabled by passing question= to first step
-- Auto spot-check at complete if question + final_answer provided
-- If trap caught: status="review", use reconsideration.suggested_revise
+TRAPS (15 patterns: bat-ball, Monty Hall, etc):
+Prime: question= on step 1
+Check: auto at complete if question + final_answer
+Caught: status="review" → use reconsideration.suggested_revise
 
-WORKFLOW:
-1. step(question="...", thought="...") → trap_analysis if patterns detected
-2. Continue with step(thought="...") → auto-verify kicks in after step 3
-3. If verification fails → revise or branch
-4. complete(final_answer="...") → auto spot-check
-5. If status="review" → revise per suggested_revise`,
+BUDGET:
+warn_at_tokens  → Soft. token_warning in response, op continues.
+hard_limit_tokens → Hard. status="budget_exhausted", op blocked. Complete or new session.
+
+FLOW:
+1. step(question=, thought=) → trap_analysis
+2. step(thought=) ... auto-verify at 4+
+3. Fail? → revise | branch
+4. complete(final_answer=) → spot-check
+5. status="review"? → revise`,
 
   parameters: ScratchpadSchema,
 
@@ -1765,6 +1823,42 @@ WORKFLOW:
 
   execute: async (args: ScratchpadArgs, ctx: MCPContext) => {
     try {
+      // Check hard budget limit BEFORE processing operation
+      if (args.hard_limit_tokens && args.session_id) {
+        const existingTokens = getSessionTokens(args.session_id);
+        if (existingTokens && existingTokens.total >= args.hard_limit_tokens) {
+          const budgetExhaustedResponse: ScratchpadResponse = {
+            session_id: args.session_id,
+            current_step: 0,
+            branch: "main",
+            operation: args.operation,
+            chain_confidence: 0,
+            confidence_threshold: args.confidence_threshold,
+            steps_with_confidence: 0,
+            status: "budget_exhausted",
+            suggested_action:
+              "Token budget exhausted. Complete the reasoning chain with your current answer or start a new session.",
+            session_tokens: existingTokens,
+            budget_exhausted: {
+              limit: args.hard_limit_tokens,
+              current: existingTokens.total,
+              exceeded_by: existingTokens.total - args.hard_limit_tokens,
+              message: `Session has used ${existingTokens.total} tokens, exceeding hard limit of ${args.hard_limit_tokens}.`,
+              recommendation:
+                "Use complete operation to finalize your answer, or start a fresh session for new reasoning.",
+            },
+          };
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `\n\`\`\`json\n${JSON.stringify(budgetExhaustedResponse, null, 2)}\n\`\`\``,
+              },
+            ],
+          };
+        }
+      }
+
       let response: ScratchpadResponse;
 
       switch (args.operation) {

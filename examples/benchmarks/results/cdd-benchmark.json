@@ -1,0 +1,86 @@
+{
+  "total_questions": 48,
+  "correct_answers": 24,
+  "wrong_answers": 24,
+  "cdd_flagged": 8,
+  "true_positives": 8,
+  "true_negatives": 24,
+  "false_positives": 0,
+  "false_negatives": 16,
+  "precision": 1,
+  "recall": 0.3333333333333333,
+  "f1_score": 0.5,
+  "accuracy": 0.6666666666666666,
+  "by_trap_type": {
+    "additive_intuition": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "exponential_thinking": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "rate_confusion": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "pigeonhole_principle": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "harmonic_mean": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "sunk_cost_fallacy": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "gamblers_fallacy": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    },
+    "conditional_probability": {
+      "total": 6,
+      "correct": 3,
+      "cdd_flagged": 1,
+      "cdd_accuracy": 0.6666666666666666
+    }
+  },
+  "by_pattern": {
+    "v_shaped": {
+      "count": 24,
+      "correct_rate": 0.6666666666666666,
+      "flagged_rate": 0.3333333333333333
+    },
+    "improving": {
+      "count": 8,
+      "correct_rate": 1,
+      "flagged_rate": 0
+    },
+    "stable": {
+      "count": 8,
+      "correct_rate": 0,
+      "flagged_rate": 0
+    },
+    "declining": {
+      "count": 8,
+      "correct_rate": 0,
+      "flagged_rate": 0
+    }
+  }
+}

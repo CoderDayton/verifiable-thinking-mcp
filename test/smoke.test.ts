@@ -2189,6 +2189,84 @@ describe("Agent Mode Integration Tests", () => {
     // This has an exponent error: 2^3 * 2^4 = 2^7, not 2^12
     expect(mistakesResult.mistakes_found).toBeGreaterThan(0);
   });
+
+  test("scratchpad: hard_limit_tokens blocks operations when budget exhausted", async () => {
+    const sessionId = "hard-limit-test";
+    const hardLimit = 500; // Set a low limit
+
+    // First step should succeed (no prior tokens)
+    const step1 = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "First reasoning step with enough content to generate some tokens",
+        purpose: "analysis",
+        session_id: sessionId,
+        hard_limit_tokens: hardLimit,
+      },
+    });
+    expect(step1.error).toBeUndefined();
+    const step1Data = extractJson(
+      (step1.result as { content: Array<{ text: string }> }).content[0]?.text || "",
+    );
+    expect(step1Data?.status).not.toBe("budget_exhausted");
+    expect(step1Data?.current_step).toBe(1);
+
+    // Add more steps to accumulate tokens and exceed the limit
+    for (let i = 2; i <= 5; i++) {
+      await client.request("tools/call", {
+        name: "scratchpad",
+        arguments: {
+          operation: "step",
+          thought:
+            `Step ${i}: Additional reasoning with substantial content to accumulate tokens in the session.`.repeat(
+              3,
+            ),
+          purpose: "analysis",
+          session_id: sessionId,
+          // Don't pass hard_limit yet - let tokens accumulate
+        },
+      });
+    }
+
+    // Now try another operation with hard_limit - should be blocked
+    const blockedStep = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "This step should be blocked due to budget exhaustion",
+        purpose: "analysis",
+        session_id: sessionId,
+        hard_limit_tokens: hardLimit,
+      },
+    });
+    expect(blockedStep.error).toBeUndefined();
+    const blockedData = extractJson(
+      (blockedStep.result as { content: Array<{ text: string }> }).content[0]?.text || "",
+    );
+
+    // Should have budget_exhausted status
+    expect(blockedData?.status).toBe("budget_exhausted");
+    expect(blockedData?.budget_exhausted).toBeDefined();
+    const exhaustedInfo = blockedData?.budget_exhausted as {
+      limit: number;
+      current: number;
+      exceeded_by: number;
+      message: string;
+      recommendation: string;
+    };
+    expect(exhaustedInfo.limit).toBe(hardLimit);
+    expect(exhaustedInfo.current).toBeGreaterThan(hardLimit);
+    expect(exhaustedInfo.exceeded_by).toBeGreaterThan(0);
+    expect(exhaustedInfo.message).toContain("exceeding hard limit");
+    expect(exhaustedInfo.recommendation).toContain("complete");
+
+    // Cleanup
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { session_id: sessionId },
+    });
+  });
 });
 
 // ============================================================================
