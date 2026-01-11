@@ -713,6 +713,37 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     }
   }
 
+  // S3: Step-level Confidence Drift Detection (CDD)
+  // Analyze trajectory so far and warn about concerning patterns early
+  const allThoughts = SessionManager.getThoughts(sessionId, branchId);
+  if (allThoughts.length >= 3) {
+    const stepDriftAnalysis = analyzeConfidenceDrift(allThoughts);
+
+    // Only stream warnings for concerning patterns (not just informational)
+    if (stepDriftAnalysis.unresolved && stepDriftAnalysis.pattern !== "insufficient") {
+      await streamContent({
+        type: "text",
+        text:
+          `\n⚠️ **Early Drift Warning:** ${stepDriftAnalysis.explanation}\n` +
+          (stepDriftAnalysis.suggestion ? `   💡 ${stepDriftAnalysis.suggestion}\n` : ""),
+      });
+
+      // Add drift info to response for programmatic access
+      response.confidence_drift = {
+        drift_score: stepDriftAnalysis.drift_score,
+        unresolved: stepDriftAnalysis.unresolved,
+        min_confidence: stepDriftAnalysis.min_confidence,
+        min_step: stepDriftAnalysis.min_step,
+        max_drop: stepDriftAnalysis.max_drop,
+        recovery: stepDriftAnalysis.recovery,
+        has_revision_after_drop: stepDriftAnalysis.has_revision_after_drop,
+        pattern: stepDriftAnalysis.pattern,
+        explanation: stepDriftAnalysis.explanation,
+        suggestion: stepDriftAnalysis.suggestion,
+      };
+    }
+  }
+
   return response;
 }
 

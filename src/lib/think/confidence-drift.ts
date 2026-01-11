@@ -49,6 +49,7 @@ export interface DriftAnalysis {
 
 export type DriftPattern =
   | "stable" // Confidence stays relatively flat
+  | "stable_overconfident" // All confidence values ≥0.85 with low variance (trap risk)
   | "declining" // Monotonic decrease (getting less confident)
   | "improving" // Monotonic increase (getting more confident)
   | "v_shaped" // Drop then recovery (the concerning pattern)
@@ -65,6 +66,10 @@ export interface DriftConfig {
   unresolved_threshold: number;
   /** Minimum steps required for analysis (default: 3) */
   min_steps: number;
+  /** Minimum confidence threshold for "overconfident" detection (default: 0.85) */
+  overconfident_threshold: number;
+  /** Maximum variance allowed for "stable overconfident" pattern (default: 0.05) */
+  overconfident_max_variance: number;
 }
 
 const DEFAULT_CONFIG: DriftConfig = {
@@ -72,6 +77,8 @@ const DEFAULT_CONFIG: DriftConfig = {
   min_significant_recovery: 0.15,
   unresolved_threshold: 0.3,
   min_steps: 3,
+  overconfident_threshold: 0.85,
+  overconfident_max_variance: 0.05,
 };
 
 // ============================================================================
@@ -174,16 +181,28 @@ export function analyzeConfidenceDrift(
   // Clamp to 0-1
   const normalizedDriftScore = Math.min(1, Math.max(0, driftScore));
 
-  // Determine if unresolved
+  // Determine if unresolved (concerning pattern without remediation)
   const isVShaped = pattern === "v_shaped";
+  const isStableOverconfident = pattern === "stable_overconfident";
   const significantDrop = maxDropFromPeak >= cfg.min_significant_drop;
   const significantRecovery = recovery >= cfg.min_significant_recovery;
-  const unresolved =
+
+  // V-shaped is unresolved if: significant drop + recovery, no revision, above threshold
+  const vShapedUnresolved =
     isVShaped &&
     significantDrop &&
     significantRecovery &&
     !hasRevisionAfterDrop &&
     normalizedDriftScore >= cfg.unresolved_threshold;
+
+  // Stable overconfident is always flagged as unresolved (warrants review)
+  // This catches trap questions where LLM is confidently wrong
+  const unresolved = vShapedUnresolved || isStableOverconfident;
+
+  // For stable_overconfident, use a moderate drift score to indicate concern
+  const finalDriftScore = isStableOverconfident
+    ? Math.max(normalizedDriftScore, 0.4) // Ensure visible concern level
+    : normalizedDriftScore;
 
   // Generate explanation
   const explanation = generateExplanation(
@@ -193,13 +212,16 @@ export function analyzeConfidenceDrift(
     minIdx,
     stepNumbers,
     hasRevisionAfterDrop,
+    minConf,
   );
 
   // Generate suggestion if unresolved
-  const suggestion = unresolved ? generateSuggestion(stepNumbers[minIdx]!, maxDropFromPeak) : null;
+  const suggestion = unresolved
+    ? generateSuggestion(stepNumbers[minIdx]!, maxDropFromPeak, pattern, minConf)
+    : null;
 
   return {
-    drift_score: normalizedDriftScore,
+    drift_score: finalDriftScore,
     unresolved,
     min_confidence: minConf,
     min_step: stepNumbers[minIdx]!,
@@ -256,6 +278,14 @@ function classifyPattern(
     }
   }
 
+  // Stable overconfident: all values ≥ threshold with low variance
+  // This is a concerning pattern on trap questions where LLMs are confidently wrong
+  // Check BEFORE generic stable to catch this specific concerning case
+  const minConf = Math.min(...confidences);
+  if (minConf >= cfg.overconfident_threshold && range <= cfg.overconfident_max_variance) {
+    return "stable_overconfident";
+  }
+
   // Stable: low variance throughout (check AFTER V-shaped so custom configs work)
   if (range < 0.1) {
     return "stable";
@@ -307,6 +337,7 @@ function generateExplanation(
   minIdx: number,
   stepNumbers: number[],
   hasRevision: boolean,
+  minConfidence?: number,
 ): string {
   const dropPct = (maxDrop * 100).toFixed(0);
   const recoveryPct = (recovery * 100).toFixed(0);
@@ -315,6 +346,9 @@ function generateExplanation(
   switch (pattern) {
     case "stable":
       return "Confidence remained stable throughout reasoning chain.";
+
+    case "stable_overconfident":
+      return `⚠️ Stable high confidence (≥${((minConfidence ?? 0.85) * 100).toFixed(0)}%) throughout chain. On complex/trap questions, consistent high confidence without doubt often correlates with incorrect answers.`;
 
     case "declining":
       return `Confidence declined steadily (${dropPct}% total drop). This may indicate increasing uncertainty or problem difficulty.`;
@@ -346,7 +380,18 @@ function generateExplanation(
 /**
  * Generate actionable suggestion for unresolved drift.
  */
-function generateSuggestion(minStep: number, dropMagnitude: number): string {
+function generateSuggestion(
+  minStep: number,
+  dropMagnitude: number,
+  pattern?: DriftPattern,
+  minConfidence?: number,
+): string {
+  // Special handling for stable overconfident pattern
+  if (pattern === "stable_overconfident") {
+    const confPct = ((minConfidence ?? 0.85) * 100).toFixed(0);
+    return `High confidence (${confPct}%+) throughout suggests possible overconfidence. Consider: Is this a trick question? Have you verified assumptions? Adding a self-check step could help catch errors.`;
+  }
+
   if (dropMagnitude >= 0.3) {
     return `Consider revising from step ${minStep} where confidence dropped significantly. The recovery without explicit revision suggests the uncertainty was not properly addressed.`;
   } else {

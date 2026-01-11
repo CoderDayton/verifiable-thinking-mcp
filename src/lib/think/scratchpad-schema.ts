@@ -478,6 +478,7 @@ export interface ScratchpadResponse {
     /** Pattern classification */
     pattern:
       | "stable"
+      | "stable_overconfident"
       | "declining"
       | "improving"
       | "v_shaped"

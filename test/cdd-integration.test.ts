@@ -315,3 +315,104 @@ describe("CDD Edge Cases", () => {
     expect(drift.unresolved).toBe(false);
   });
 });
+
+// ============================================================================
+// STEP-LEVEL CDD TESTS (S3)
+// ============================================================================
+
+describe("Step-Level CDD Analysis", () => {
+  let sessionId: string;
+
+  beforeEach(() => {
+    sessionId = createSession();
+  });
+
+  afterEach(() => {
+    SessionManager.clear(sessionId);
+  });
+
+  test("step-level CDD triggers on V-shaped pattern at step 3+", () => {
+    // Build a V-shaped pattern
+    addThoughtWithConfidence(sessionId, 1, 0.9);
+    addThoughtWithConfidence(sessionId, 2, 0.4);
+    addThoughtWithConfidence(sessionId, 3, 0.85);
+
+    const thoughts = SessionManager.getThoughts(sessionId);
+    expect(thoughts.length).toBe(3);
+
+    const drift = analyzeConfidenceDrift(thoughts);
+    expect(drift.pattern).toBe("v_shaped");
+    expect(drift.unresolved).toBe(true);
+  });
+
+  test("step-level CDD triggers on stable_overconfident pattern", () => {
+    addThoughtWithConfidence(sessionId, 1, 0.92);
+    addThoughtWithConfidence(sessionId, 2, 0.9);
+    addThoughtWithConfidence(sessionId, 3, 0.91);
+
+    const thoughts = SessionManager.getThoughts(sessionId);
+    const drift = analyzeConfidenceDrift(thoughts);
+
+    expect(drift.pattern).toBe("stable_overconfident");
+    expect(drift.unresolved).toBe(true);
+    expect(drift.explanation).toContain("high confidence");
+  });
+
+  test("step-level CDD does not trigger on improving pattern", () => {
+    addThoughtWithConfidence(sessionId, 1, 0.5);
+    addThoughtWithConfidence(sessionId, 2, 0.7);
+    addThoughtWithConfidence(sessionId, 3, 0.85);
+
+    const thoughts = SessionManager.getThoughts(sessionId);
+    const drift = analyzeConfidenceDrift(thoughts);
+
+    expect(drift.pattern).toBe("improving");
+    expect(drift.unresolved).toBe(false);
+  });
+
+  test("step-level CDD accumulates over multiple steps", () => {
+    // Start with good pattern
+    addThoughtWithConfidence(sessionId, 1, 0.7);
+    addThoughtWithConfidence(sessionId, 2, 0.75);
+    addThoughtWithConfidence(sessionId, 3, 0.8);
+
+    let thoughts = SessionManager.getThoughts(sessionId);
+    let drift = analyzeConfidenceDrift(thoughts);
+    expect(drift.pattern).toBe("improving");
+    expect(drift.unresolved).toBe(false);
+
+    // Add problematic step that creates V-shape
+    addThoughtWithConfidence(sessionId, 4, 0.4); // Drop
+
+    thoughts = SessionManager.getThoughts(sessionId);
+    drift = analyzeConfidenceDrift(thoughts);
+    expect(drift.pattern).toBe("cliff"); // Ends at minimum
+
+    // Add recovery without revision - now V-shaped
+    addThoughtWithConfidence(sessionId, 5, 0.85);
+
+    thoughts = SessionManager.getThoughts(sessionId);
+    drift = analyzeConfidenceDrift(thoughts);
+    expect(drift.pattern).toBe("v_shaped");
+    expect(drift.unresolved).toBe(true);
+  });
+
+  test("adding revision step resolves step-level CDD warning", () => {
+    // Create V-shaped pattern
+    addThoughtWithConfidence(sessionId, 1, 0.9);
+    addThoughtWithConfidence(sessionId, 2, 0.4);
+    addThoughtWithConfidence(sessionId, 3, 0.85);
+
+    let thoughts = SessionManager.getThoughts(sessionId);
+    let drift = analyzeConfidenceDrift(thoughts);
+    expect(drift.unresolved).toBe(true);
+
+    // Add revision step
+    addThoughtWithConfidence(sessionId, 4, 0.9, { revisesStep: 2 });
+
+    thoughts = SessionManager.getThoughts(sessionId);
+    drift = analyzeConfidenceDrift(thoughts);
+    expect(drift.has_revision_after_drop).toBe(true);
+    expect(drift.unresolved).toBe(false);
+  });
+});

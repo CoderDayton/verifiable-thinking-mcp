@@ -464,4 +464,95 @@ describe("Confidence Drift Detection", () => {
       expect(result.unresolved).toBe(false);
     });
   });
+
+  // ============================================================================
+  // STABLE OVERCONFIDENT PATTERN (S2)
+  // ============================================================================
+
+  describe("Stable Overconfident Pattern", () => {
+    test("detects stable_overconfident when all confidence >= 0.85 with low variance", () => {
+      // This is concerning on trap questions - LLM is confidently wrong
+      const steps = makeSteps([0.9, 0.88, 0.92, 0.89, 0.91]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("stable_overconfident");
+      expect(result.unresolved).toBe(true);
+      expect(result.drift_score).toBeGreaterThanOrEqual(0.4); // Moderate concern
+    });
+
+    test("stable_overconfident includes warning in explanation", () => {
+      const steps = makeSteps([0.9, 0.88, 0.9, 0.87, 0.9]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.explanation).toContain("⚠️");
+      expect(result.explanation).toContain("high confidence");
+      expect(result.explanation).toContain("incorrect answers");
+    });
+
+    test("stable_overconfident suggestion mentions self-check", () => {
+      const steps = makeSteps([0.92, 0.9, 0.91, 0.93]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.suggestion).not.toBeNull();
+      expect(result.suggestion).toContain("self-check");
+    });
+
+    test("does NOT flag stable_overconfident when variance is high", () => {
+      // High variance means doubt existed - not stable overconfident
+      const steps = makeSteps([0.95, 0.85, 0.95, 0.87, 0.93]);
+      const result = analyzeConfidenceDrift(steps);
+
+      // Range is 0.1, exceeds max variance threshold of 0.05
+      expect(result.pattern).not.toBe("stable_overconfident");
+    });
+
+    test("does NOT flag stable_overconfident when any confidence is below threshold", () => {
+      // One step with 0.8 breaks the pattern
+      const steps = makeSteps([0.9, 0.88, 0.8, 0.9, 0.89]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).not.toBe("stable_overconfident");
+    });
+
+    test("stable_overconfident is flagged regardless of revision steps", () => {
+      // Even with revision, stable overconfidence is concerning
+      const steps = makeSteps([0.9, 0.88, 0.91, 0.9], { revisesAt: [3] });
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("stable_overconfident");
+      expect(result.unresolved).toBe(true);
+    });
+
+    test("custom threshold for overconfident detection", () => {
+      // Default threshold is 0.85
+      const steps = makeSteps([0.8, 0.78, 0.82, 0.79]);
+
+      // With default config, not flagged (below 0.85)
+      const defaultResult = analyzeConfidenceDrift(steps);
+      expect(defaultResult.pattern).not.toBe("stable_overconfident");
+
+      // With lower threshold, becomes flagged
+      const customResult = analyzeConfidenceDrift(steps, {
+        overconfident_threshold: 0.75,
+        overconfident_max_variance: 0.05,
+      });
+      expect(customResult.pattern).toBe("stable_overconfident");
+    });
+
+    test("V-shaped takes precedence over stable_overconfident", () => {
+      // Even if all values are high, V-shaped pattern is more specific
+      const steps = makeSteps([0.95, 0.92, 0.7, 0.75, 0.93]);
+      const result = analyzeConfidenceDrift(steps);
+
+      // V-shaped is checked first because it indicates a specific uncertainty event
+      expect(result.pattern).toBe("v_shaped");
+    });
+
+    test("exactly at threshold boundary is flagged", () => {
+      const steps = makeSteps([0.85, 0.85, 0.85, 0.85]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("stable_overconfident");
+    });
+  });
 });
