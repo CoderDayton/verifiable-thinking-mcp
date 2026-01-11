@@ -1,26 +1,68 @@
-# Verifiable Thinking MCP
+<div align="center">
 
-> LLMs fail predictably on cognitive traps—bat-and-ball, lily pad, Monty Hall. This MCP server catches those mistakes *before* the final answer.
+# 🧠 Verifiable Thinking MCP
 
-An MCP server for structured reasoning with trap detection, verification, and context compression.
+**LLMs fail predictably on cognitive traps. This catches them.**
+
+[![npm version](https://img.shields.io/npm/v/verifiable-thinking-mcp?color=blue&label=npm)](https://www.npmjs.com/package/verifiable-thinking-mcp)
+[![CI](https://img.shields.io/github/actions/workflow/status/CoderDayton/verifiable-thinking-mcp/ci.yml?label=CI)](https://github.com/CoderDayton/verifiable-thinking-mcp/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/CoderDayton/verifiable-thinking-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/CoderDayton/verifiable-thinking-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+*Bat-and-ball, lily pad doubling, Monty Hall—15 trap patterns detected in <1ms, no LLM calls.*
+
+[Quick Start](#quick-start) • [Features](#features) • [Trap Detection](#trap-detection) • [API](#tools)
+
+</div>
+
+---
+
+An MCP server for structured reasoning with cognitive trap detection, verification gates, and context compression.
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  "A bat and ball cost $1.10. The bat costs $1 more..."         │
+│                              ↓                                  │
+│  🚨 TRAP DETECTED: additive_system                              │
+│  ⚠️  Don't subtract $1 from $1.10. Set up: x + (x+1) = 1.10    │
+│                              ↓                                  │
+│  ✅ Answer: $0.05 (not $0.10)                                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Why This Exists
+
+| The Problem | Our Solution |
+|-------------|--------------|
+| LLMs answer "$0.10" to bat-ball ~40% of the time | Trap priming catches it before reasoning starts |
+| Verification requires another LLM call | O(n) heuristics, zero LLM overhead |
+| Reasoning chains drift without structure | Scratchpad with confidence tracking & auto-verification |
 
 ## Quick Stats
 
 | Metric | Value |
 |--------|-------|
-| Cognitive trap patterns | 15 structural detectors |
-| Detection latency | <1ms (O(n) single-pass) |
-| Test coverage | 1496+ tests, 100% line threshold |
-| Dependencies | 3 runtime (fastmcp, zod, dotenv) |
+| 🎯 Cognitive trap patterns | 15 structural detectors |
+| ⚡ Detection latency | <1ms (O(n) single-pass) |
+| 🧪 Test coverage | 1496+ tests, 100% line coverage |
+| 📦 Dependencies | 3 runtime (fastmcp, zod, dotenv) |
 
 ## Features
 
-- **Trap Detection** — Catches 15 cognitive trap patterns (additive systems, exponential growth, Monty Hall, base rate neglect, etc.) using structural heuristics, no LLM calls
-- **Scratchpad** — Structured reasoning with auto step tracking, confidence monitoring, and verification gates
-- **Local Compute** — Math expression evaluation without LLM round-trips
-- **CPC Compression** — Sentence-level context compression with query-aware relevance scoring
+| Feature | What It Does |
+|---------|--------------|
+| 🎯 **Trap Detection** | 15 cognitive trap patterns (bat-ball, Monty Hall, base rate...) via O(n) heuristics |
+| 📝 **Scratchpad** | Structured reasoning with step tracking, confidence, and verification gates |
+| 🔢 **Local Compute** | Math expression evaluation without LLM round-trips |
+| 🗜️ **CPC Compression** | Query-aware context compression for long reasoning chains |
 
 ## Quick Start
+
+**Zero config install:**
+
+```bash
+npx -y verifiable-thinking-mcp
+```
 
 ### Claude Desktop
 
@@ -230,3 +272,13 @@ bun run priming-bench.ts --full
 ## License
 
 MIT
+
+---
+
+<div align="center">
+
+**[Report Bug](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Request Feature](https://github.com/CoderDayton/verifiable-thinking-mcp/issues)**
+
+Made with 🧠 for more reliable AI reasoning
+
+</div>
