@@ -50,6 +50,12 @@ export const ScratchpadSchema = z.object({
     .min(100)
     .default(3000)
     .describe("Max tokens before auto-compressing new steps"),
+  warn_at_tokens: z
+    .number()
+    .int()
+    .min(100)
+    .optional()
+    .describe("Warn when cumulative session tokens exceed this threshold (cost control)"),
 
   // Step operation fields
   thought: z.string().optional().describe("Current reasoning/analysis (step/branch/revise)"),
@@ -402,5 +408,28 @@ export interface ScratchpadResponse {
     primed_count: number; // How many traps were actually primed (≤ types.length)
     note: string | null;
     confidence: number;
+  };
+
+  // Token usage metadata (always added by execute wrapper)
+  tokens?: {
+    input_tokens: number;
+    output_tokens: number;
+    total_tokens: number;
+  };
+
+  // Cumulative session token usage (always added by execute wrapper)
+  session_tokens?: {
+    total_input: number;
+    total_output: number;
+    total: number;
+    operations: number;
+  };
+
+  // Token budget warning (when warn_at_tokens threshold exceeded)
+  token_warning?: {
+    threshold: number;
+    current: number;
+    exceeded_by: number;
+    message: string;
   };
 }

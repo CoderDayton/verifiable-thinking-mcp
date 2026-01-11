@@ -31,6 +31,7 @@ import {
   ScratchpadSchema,
 } from "../lib/think/scratchpad-schema.ts";
 import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
+import { calculateTokenUsage, trackSessionTokens } from "../lib/tokens.ts";
 import { verify } from "../lib/verification.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
@@ -1801,6 +1802,24 @@ WORKFLOW:
           throw new Error(`Unknown operation: ${(args as { operation: string }).operation}`);
       }
 
+      // Add token usage to response
+      const tokens = calculateTokenUsage(args, response);
+      response.tokens = tokens;
+
+      // Track cumulative session tokens
+      const sessionTokens = trackSessionTokens(response.session_id, tokens);
+      response.session_tokens = sessionTokens;
+
+      // Check token budget warning threshold
+      if (args.warn_at_tokens && sessionTokens.total > args.warn_at_tokens) {
+        response.token_warning = {
+          threshold: args.warn_at_tokens,
+          current: sessionTokens.total,
+          exceeded_by: sessionTokens.total - args.warn_at_tokens,
+          message: `Session token usage (${sessionTokens.total}) exceeds threshold (${args.warn_at_tokens}). Consider completing or compressing.`,
+        };
+      }
+
       return {
         content: [
           {
@@ -1811,8 +1830,10 @@ WORKFLOW:
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
+      const errorResponse = { error: message };
+      const tokens = calculateTokenUsage(args, errorResponse);
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ error: message }) }],
+        content: [{ type: "text" as const, text: JSON.stringify({ ...errorResponse, tokens }) }],
       };
     }
   },

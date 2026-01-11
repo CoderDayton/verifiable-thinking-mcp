@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { type CompressionResult, compress, quickCompress } from "../lib/compression.ts";
+import { calculateTokenUsage } from "../lib/tokens.ts";
 
 /**
  * Standalone compress tool - Enhanced CPC-style context compression
@@ -72,33 +73,38 @@ Use this to reduce token costs before sending large contexts to LLMs.`,
     enforce_causal?: boolean;
     remove_fillers?: boolean;
   }): Promise<string> => {
+    let result: CompressionResult;
+
     // Use max_tokens mode if specified
     if (args.max_tokens) {
       const compressed = quickCompress(args.context, args.query, args.max_tokens);
       const originalTokens = Math.ceil(args.context.length / 4);
       const compressedTokens = Math.ceil(compressed.length / 4);
 
-      return formatCompressResult({
+      result = {
         compressed,
         original_tokens: originalTokens,
         compressed_tokens: compressedTokens,
         ratio: compressed.length / args.context.length,
         kept_sentences: compressed.split(/(?<=[.!?])\s+/).length,
         dropped_sentences: [],
+      };
+    } else {
+      // Standard ratio-based compression with all options
+      result = compress(args.context, args.query, {
+        target_ratio: args.target_ratio ?? 0.5,
+        boost_reasoning: args.boost_reasoning ?? true,
+        useNCD: args.use_ncd ?? true,
+        enforceCoref: args.enforce_coref ?? true,
+        enforceCausalChains: args.enforce_causal ?? true,
+        removeFillers: args.remove_fillers ?? true,
       });
     }
 
-    // Standard ratio-based compression with all options
-    const result = compress(args.context, args.query, {
-      target_ratio: args.target_ratio ?? 0.5,
-      boost_reasoning: args.boost_reasoning ?? true,
-      useNCD: args.use_ncd ?? true,
-      enforceCoref: args.enforce_coref ?? true,
-      enforceCausalChains: args.enforce_causal ?? true,
-      removeFillers: args.remove_fillers ?? true,
-    });
+    const output = formatCompressResult(result);
+    const tokens = calculateTokenUsage(args, output);
 
-    return formatCompressResult(result);
+    return `${output}\n\n---\n_tokens: ${tokens.input_tokens} in, ${tokens.output_tokens} out, ${tokens.total_tokens} total_`;
   },
 };
 

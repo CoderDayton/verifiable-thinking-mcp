@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { clearTracker } from "../lib/concepts.ts";
 import { SessionManager } from "../lib/session.ts";
+import { calculateTokenUsage, clearAllSessionTokens, clearSessionTokens } from "../lib/tokens.ts";
 
 /**
  * Session management tools for reasoning chains
@@ -11,27 +12,31 @@ export const listSessionsTool = {
   description: "List all active reasoning sessions with their thought counts and branches",
   parameters: z.object({}),
   execute: async () => {
+    const args = {};
     const sessions = SessionManager.list();
 
+    let result: string;
     if (sessions.length === 0) {
-      return "No active sessions.";
+      result = "No active sessions.";
+    } else {
+      const lines = [
+        `**Active Sessions** (${sessions.length})`,
+        "",
+        "| Session | Thoughts | Branches | Age |",
+        "|---------|----------|----------|-----|",
+      ];
+
+      for (const s of sessions) {
+        const age = formatAge(s.age_ms);
+        lines.push(
+          `| ${s.id.slice(0, 20)}... | ${s.thought_count} | ${s.branches.join(", ")} | ${age} |`,
+        );
+      }
+      result = lines.join("\n");
     }
 
-    const lines = [
-      `**Active Sessions** (${sessions.length})`,
-      "",
-      "| Session | Thoughts | Branches | Age |",
-      "|---------|----------|----------|-----|",
-    ];
-
-    for (const s of sessions) {
-      const age = formatAge(s.age_ms);
-      lines.push(
-        `| ${s.id.slice(0, 20)}... | ${s.thought_count} | ${s.branches.join(", ")} | ${age} |`,
-      );
-    }
-
-    return lines.join("\n");
+    const tokens = calculateTokenUsage(args, result);
+    return `${result}\n\n---\n_tokens: ${tokens.input_tokens} in, ${tokens.output_tokens} out, ${tokens.total_tokens} total_`;
   },
 };
 
@@ -51,53 +56,52 @@ export const getSessionTool = {
   execute: async (args: { session_id: string; format?: string; branch_id?: string }) => {
     const session = SessionManager.get(args.session_id);
 
+    let result: string;
     if (!session) {
-      return `Session not found: ${args.session_id}`;
-    }
+      result = `Session not found: ${args.session_id}`;
+    } else {
+      const format = args.format || "summary";
 
-    const format = args.format || "summary";
+      if (format === "compressed") {
+        result = SessionManager.getCompressed(args.session_id) || "No thoughts to compress.";
+      } else if (format === "summary") {
+        result = SessionManager.getSummary(args.session_id) || "No summary available.";
+      } else {
+        // Full format
+        const thoughts = args.branch_id
+          ? SessionManager.getThoughts(args.session_id, args.branch_id)
+          : SessionManager.getThoughts(args.session_id);
 
-    if (format === "compressed") {
-      const compressed = SessionManager.getCompressed(args.session_id);
-      return compressed || "No thoughts to compress.";
-    }
+        if (thoughts.length === 0) {
+          result = "No thoughts in session.";
+        } else {
+          const lines = [
+            `**Session**: ${args.session_id}`,
+            `**Branches**: ${Array.from(session.branches).join(", ")}`,
+            `**Thoughts**: ${thoughts.length}`,
+            "",
+          ];
 
-    if (format === "summary") {
-      const summary = SessionManager.getSummary(args.session_id);
-      return summary || "No summary available.";
-    }
+          for (const t of thoughts) {
+            const v = t.verification;
+            const status = v ? (v.passed ? "✓" : "✗") : "○";
+            const confidence = v ? ` (${Math.round(v.confidence * 100)}%)` : "";
 
-    // Full format
-    const thoughts = args.branch_id
-      ? SessionManager.getThoughts(args.session_id, args.branch_id)
-      : SessionManager.getThoughts(args.session_id);
+            lines.push(`### Step ${t.step_number} [${t.branch_id}] ${status}${confidence}`);
+            lines.push(t.thought);
 
-    if (thoughts.length === 0) {
-      return "No thoughts in session.";
-    }
-
-    const lines = [
-      `**Session**: ${args.session_id}`,
-      `**Branches**: ${Array.from(session.branches).join(", ")}`,
-      `**Thoughts**: ${thoughts.length}`,
-      "",
-    ];
-
-    for (const t of thoughts) {
-      const v = t.verification;
-      const status = v ? (v.passed ? "✓" : "✗") : "○";
-      const confidence = v ? ` (${Math.round(v.confidence * 100)}%)` : "";
-
-      lines.push(`### Step ${t.step_number} [${t.branch_id}] ${status}${confidence}`);
-      lines.push(t.thought);
-
-      if (t.concepts && t.concepts.length > 0) {
-        lines.push(`*Concepts: ${t.concepts.join(", ")}*`);
+            if (t.concepts && t.concepts.length > 0) {
+              lines.push(`*Concepts: ${t.concepts.join(", ")}*`);
+            }
+            lines.push("");
+          }
+          result = lines.join("\n");
+        }
       }
-      lines.push("");
     }
 
-    return lines.join("\n");
+    const tokens = calculateTokenUsage(args, result);
+    return `${result}\n\n---\n_tokens: ${tokens.input_tokens} in, ${tokens.output_tokens} out, ${tokens.total_tokens} total_`;
   },
 };
 
@@ -109,22 +113,27 @@ export const clearSessionTool = {
     all: z.boolean().default(false).describe("Clear all sessions"),
   }),
   execute: async (args: { session_id?: string; all?: boolean }) => {
+    let result: string;
+
     if (args.all) {
       const count = SessionManager.clearAll();
-      return `Cleared ${count} session(s).`;
+      clearAllSessionTokens();
+      result = `Cleared ${count} session(s).`;
+    } else if (!args.session_id) {
+      result = "Provide session_id or set all=true";
+    } else {
+      // Also clear concept tracker and token tracking for this session
+      clearTracker(args.session_id);
+      clearSessionTokens(args.session_id);
+
+      const cleared = SessionManager.clear(args.session_id);
+      result = cleared
+        ? `Cleared session: ${args.session_id}`
+        : `Session not found: ${args.session_id}`;
     }
 
-    if (!args.session_id) {
-      return "Provide session_id or set all=true";
-    }
-
-    // Also clear concept tracker for this session
-    clearTracker(args.session_id);
-
-    const cleared = SessionManager.clear(args.session_id);
-    return cleared
-      ? `Cleared session: ${args.session_id}`
-      : `Session not found: ${args.session_id}`;
+    const tokens = calculateTokenUsage(args, result);
+    return `${result}\n\n---\n_tokens: ${tokens.input_tokens} in, ${tokens.output_tokens} out, ${tokens.total_tokens} total_`;
   },
 };
 

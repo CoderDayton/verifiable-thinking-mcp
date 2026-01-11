@@ -149,6 +149,29 @@ Unified reasoning tool with operation-based dispatch.
 | `confidence` | 0-1 | Step confidence (accumulates to chain average) |
 | `verify` | boolean | Enable domain verification (auto-enabled after step 3) |
 | `domain` | enum | math, logic, code, general |
+| `warn_at_tokens` | number | Warn when cumulative session tokens exceed threshold (cost control) |
+
+**Token Tracking:**
+
+Every response includes token usage metadata:
+
+```json
+{
+  "tokens": { "input_tokens": 42, "output_tokens": 156, "total_tokens": 198 },
+  "session_tokens": { "total_input": 84, "total_output": 312, "total": 396, "operations": 2 }
+}
+```
+
+Set `warn_at_tokens` to get alerts when costs accumulate:
+
+```typescript
+scratchpad({
+  operation: "step",
+  thought: "...",
+  warn_at_tokens: 2000  // Warn when session exceeds 2000 tokens
+})
+// Response includes token_warning when threshold exceeded
+```
 
 **Workflow:**
 

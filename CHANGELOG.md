@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Token usage tracking** - All tool responses now include token usage metadata
+  - `tokens`: input/output/total for current operation
+  - `session_tokens`: cumulative usage across the session
+  - Model-aware estimation (Claude, GPT, Llama, Mistral, etc.)
+- **Cost control** - `warn_at_tokens` parameter alerts when session token usage exceeds threshold
+
 ## [0.1.0] - 2026-01-11
 
 ### Added
