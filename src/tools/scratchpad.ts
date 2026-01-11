@@ -1830,10 +1830,19 @@ WORKFLOW:
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error";
-      const errorResponse = { error: message };
+      const errorResponse: {
+        error: string;
+        tokens?: ReturnType<typeof calculateTokenUsage>;
+        session_tokens?: ReturnType<typeof trackSessionTokens>;
+      } = { error: message };
       const tokens = calculateTokenUsage(args, errorResponse);
+      errorResponse.tokens = tokens;
+      // Track session tokens even on error for accurate budget monitoring
+      if (args.session_id) {
+        errorResponse.session_tokens = trackSessionTokens(args.session_id, tokens);
+      }
       return {
-        content: [{ type: "text" as const, text: JSON.stringify({ ...errorResponse, tokens }) }],
+        content: [{ type: "text" as const, text: JSON.stringify(errorResponse) }],
       };
     }
   },

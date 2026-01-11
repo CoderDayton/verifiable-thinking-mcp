@@ -142,4 +142,29 @@ describe("Session token tracking", () => {
     expect(getSessionTokens("session-a")).toBeNull();
     expect(getSessionTokens("session-b")).toBeNull();
   });
+
+  test("trackSessionTokens tracks across success and error operations", () => {
+    const sessionId = "error-test-session";
+
+    // First operation succeeds
+    trackSessionTokens(sessionId, {
+      input_tokens: 50,
+      output_tokens: 100,
+      total_tokens: 150,
+    });
+
+    // Second operation errors (should still track)
+    trackSessionTokens(sessionId, {
+      input_tokens: 30,
+      output_tokens: 20, // Error responses are smaller
+      total_tokens: 50,
+    });
+
+    const usage = getSessionTokens(sessionId);
+    expect(usage).not.toBeNull();
+    expect(usage?.total_input).toBe(80);
+    expect(usage?.total_output).toBe(120);
+    expect(usage?.total).toBe(200);
+    expect(usage?.operations).toBe(2);
+  });
 });

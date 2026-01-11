@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-01-11
+
 ### Added
 
 - **Token usage tracking** - All tool responses now include token usage metadata
@@ -14,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `session_tokens`: cumulative usage across the session
   - Model-aware estimation (Claude, GPT, Llama, Mistral, etc.)
 - **Cost control** - `warn_at_tokens` parameter alerts when session token usage exceeds threshold
+
+### Fixed
+
+- Error responses now correctly track session token usage for accurate budget monitoring
 
 ## [0.1.0] - 2026-01-11
 
@@ -58,5 +64,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-write-wins for `setQuestion()` prevents session hijacking
 - OIDC trusted publishing for npm (no tokens stored)
 
-[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/releases/tag/v0.1.0
