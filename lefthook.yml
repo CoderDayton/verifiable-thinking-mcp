@@ -31,8 +31,8 @@ pre-commit:
 pre-push:
   commands:
     coverage:
-      run: bun test:coverage
-      fail_text: "Coverage check failed. Ensure >80% coverage on src/lib/"
+      run: bun run test:ci
+      fail_text: "Coverage check failed. Ensure >85% line coverage on src/lib/ (excludes src/tools/)"
 
 commit-msg:
   commands:

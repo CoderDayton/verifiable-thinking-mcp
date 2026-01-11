@@ -2,6 +2,8 @@
 /**
  * Coverage threshold enforcement script
  * Parses lcov.info and fails if coverage drops below configured thresholds
+ *
+ * Excludes src/tools/ from threshold checks - tools are integration-tested via MCP
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -17,6 +19,16 @@ interface CoverageStats {
   linesHit: number;
   functionsFound: number;
   functionsHit: number;
+}
+
+/** Patterns to exclude from coverage threshold enforcement */
+const EXCLUDE_PATTERNS = [
+  /^src\/tools\//, // Tools are integration-tested via MCP, not unit-tested
+  /^src\/index\.ts$/, // Entry point
+];
+
+function shouldExclude(filePath: string): boolean {
+  return EXCLUDE_PATTERNS.some((pattern) => pattern.test(filePath));
 }
 
 function loadThresholds(): Thresholds {
@@ -40,11 +52,39 @@ function parseLcov(lcovPath: string): CoverageStats {
     functionsHit: 0,
   };
 
+  let currentFile = "";
+  let fileStats: CoverageStats = { linesFound: 0, linesHit: 0, functionsFound: 0, functionsHit: 0 };
+
   for (const line of content.split("\n")) {
-    if (line.startsWith("LF:")) stats.linesFound += parseInt(line.slice(3), 10);
-    if (line.startsWith("LH:")) stats.linesHit += parseInt(line.slice(3), 10);
-    if (line.startsWith("FNF:")) stats.functionsFound += parseInt(line.slice(4), 10);
-    if (line.startsWith("FNH:")) stats.functionsHit += parseInt(line.slice(4), 10);
+    if (line.startsWith("SF:")) {
+      // New source file - commit previous if not excluded
+      if (currentFile && !shouldExclude(currentFile)) {
+        stats.linesFound += fileStats.linesFound;
+        stats.linesHit += fileStats.linesHit;
+        stats.functionsFound += fileStats.functionsFound;
+        stats.functionsHit += fileStats.functionsHit;
+      }
+      // Extract relative path (remove leading ./ or absolute path prefix)
+      currentFile = line.slice(3).replace(/^.*?src\//, "src/");
+      fileStats = { linesFound: 0, linesHit: 0, functionsFound: 0, functionsHit: 0 };
+    } else if (line.startsWith("LF:")) {
+      fileStats.linesFound = parseInt(line.slice(3), 10);
+    } else if (line.startsWith("LH:")) {
+      fileStats.linesHit = parseInt(line.slice(3), 10);
+    } else if (line.startsWith("FNF:")) {
+      fileStats.functionsFound = parseInt(line.slice(4), 10);
+    } else if (line.startsWith("FNH:")) {
+      fileStats.functionsHit = parseInt(line.slice(4), 10);
+    } else if (line === "end_of_record") {
+      // Commit final file stats if not excluded
+      if (currentFile && !shouldExclude(currentFile)) {
+        stats.linesFound += fileStats.linesFound;
+        stats.linesHit += fileStats.linesHit;
+        stats.functionsFound += fileStats.functionsFound;
+        stats.functionsHit += fileStats.functionsHit;
+      }
+      currentFile = "";
+    }
   }
 
   return stats;
@@ -63,6 +103,8 @@ function main() {
   console.log("═".repeat(40));
   console.log(`Lines:     ${lineCoverage.toFixed(2)}% (threshold: ${thresholds.lines}%)`);
   console.log(`Functions: ${functionCoverage.toFixed(2)}% (threshold: ${thresholds.functions}%)`);
+  console.log("─".repeat(40));
+  console.log("Excluded:  src/tools/*, src/index.ts");
   console.log("═".repeat(40));
 
   let failed = false;
