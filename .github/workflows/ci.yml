@@ -91,3 +91,6 @@ jobs:
             echo "Server failed to start with exit code $exit_code"
             exit 1
           fi
+
+      - name: Verify package can be packed
+        run: npm pack --dry-run

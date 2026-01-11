@@ -1,9 +1,41 @@
 {
   "name": "verifiable-thinking-mcp",
   "version": "0.1.0",
-  "module": "src/index.ts",
+  "description": "MCP server for structured reasoning with cognitive trap detection",
+  "author": "CoderDayton",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CoderDayton/verifiable-thinking-mcp.git"
+  },
+  "homepage": "https://github.com/CoderDayton/verifiable-thinking-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/CoderDayton/verifiable-thinking-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "reasoning",
+    "cognitive-traps",
+    "verification",
+    "llm",
+    "ai",
+    "typescript",
+    "bun"
+  ],
   "type": "module",
-  "private": true,
+  "main": "src/index.ts",
+  "bin": {
+    "verifiable-thinking-mcp": "src/index.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts"
+  ],
+  "engines": {
+    "node": ">=18",
+    "bun": ">=1.0"
+  },
   "dependencies": {
     "dotenv": "^17.2.3",
     "fastmcp": "^3.26.7",
