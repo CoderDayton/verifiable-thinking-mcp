@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-11
+
 ### Added
 
 - **Confidence Drift Detection (CDD)** - Novel meta-signal analyzing confidence trajectory for reasoning quality
