@@ -230,7 +230,7 @@ src/
 
 ```bash
 # Clone and install
-git clone <repo-url>
+git clone https://github.com/CoderDayton/verifiable-thinking-mcp.git
 cd verifiable-thinking
 bun install
 
