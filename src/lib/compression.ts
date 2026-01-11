@@ -334,13 +334,18 @@ function isMetaSentence(sentence: string): boolean {
  * NCD(x,y) = (C(xy) - min(C(x), C(y))) / max(C(x), C(y))
  *
  * Lower NCD = more similar (0 = identical, 1 = unrelated)
+ *
+ * @param a - First string
+ * @param b - Second string
+ * @param cachedCa - Optional pre-computed gzip size for string a (optimization)
+ * @param cachedCb - Optional pre-computed gzip size for string b (optimization)
  */
-export function computeNCD(a: string, b: string): number {
+export function computeNCD(a: string, b: string, cachedCa?: number, cachedCb?: number): number {
   if (a.length === 0 || b.length === 0) return 1;
 
   try {
-    const Ca = gzipSync(Buffer.from(a)).length;
-    const Cb = gzipSync(Buffer.from(b)).length;
+    const Ca = cachedCa ?? gzipSync(Buffer.from(a)).length;
+    const Cb = cachedCb ?? gzipSync(Buffer.from(b)).length;
     const Cab = gzipSync(Buffer.from(`${a} ${b}`)).length;
 
     const ncd = (Cab - Math.min(Ca, Cb)) / Math.max(Ca, Cb);
@@ -459,6 +464,16 @@ function buildSentenceMetadata(
   let fillersRemoved = 0;
   let repetitionsPenalized = 0;
 
+  // Pre-compute query's gzip size once (optimization: avoids redundant compression)
+  let cachedQueryGzipSize: number | undefined;
+  if (opts.useNCD && query.length > 0) {
+    try {
+      cachedQueryGzipSize = gzipSync(Buffer.from(query)).length;
+    } catch {
+      // Fallback: let computeNCD handle it
+    }
+  }
+
   const metadata: SentenceMetadata[] = rawSentences.map((sentence, index) => {
     if (opts.removeFillers && isMetaSentence(sentence)) {
       fillersRemoved++;
@@ -480,7 +495,8 @@ function buildSentenceMetadata(
       : { cleaned: sentence, removedCount: 0 };
     fillersRemoved += removedCount;
 
-    const ncdScore = opts.useNCD ? computeNCD(cleaned, query) : 0.5;
+    // Use cached query gzip size for NCD computation
+    const ncdScore = opts.useNCD ? computeNCD(cleaned, query, undefined, cachedQueryGzipSize) : 0.5;
     const startsWithPronoun = PRONOUN_START.test(cleaned);
     const hasCausalConnective =
       CAUSAL_CONNECTIVES.test(cleaned) || CONTRASTIVE_CONNECTIVES.test(cleaned);

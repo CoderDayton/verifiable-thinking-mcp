@@ -367,7 +367,7 @@ function checkRatePattern(q: string, nums: number[], ans: number): SpotCheckResu
   if (setupNum === null) return null;
 
   // Look for a different "target" number (M machines, M widgets)
-  const targetNums = nums.filter((n) => n !== setupNum && counts.get(n)! >= 2);
+  const targetNums = nums.filter((n) => n !== setupNum && (counts.get(n) ?? 0) >= 2);
 
   // Trap: answer equals target number (assumes time scales with count)
   for (const target of targetNums) {

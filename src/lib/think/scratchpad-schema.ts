@@ -55,7 +55,17 @@ export const ScratchpadSchema = z.object({
     .int()
     .min(100)
     .optional()
-    .describe("Warn when cumulative session tokens exceed this threshold (cost control)"),
+    .describe(
+      "Warn when cumulative session tokens exceed this threshold (soft limit, cost control)",
+    ),
+  hard_limit_tokens: z
+    .number()
+    .int()
+    .min(100)
+    .optional()
+    .describe(
+      "Hard stop when cumulative session tokens exceed this threshold. Returns budget_exhausted status and blocks further operations.",
+    ),
 
   // Step operation fields
   thought: z.string().optional().describe("Current reasoning/analysis (step/branch/revise)"),
@@ -250,7 +260,13 @@ export interface ScratchpadResponse {
   steps_with_confidence: number;
 
   // Status & guidance
-  status: "continue" | "review" | "threshold_reached" | "complete" | "verification_failed";
+  status:
+    | "continue"
+    | "review"
+    | "threshold_reached"
+    | "complete"
+    | "verification_failed"
+    | "budget_exhausted";
   suggested_action: string;
 
   // Timer warning (when threshold reached)
@@ -431,5 +447,47 @@ export interface ScratchpadResponse {
     current: number;
     exceeded_by: number;
     message: string;
+  };
+
+  // Hard budget limit (when hard_limit_tokens exceeded - operation blocked)
+  budget_exhausted?: {
+    limit: number;
+    current: number;
+    exceeded_by: number;
+    message: string;
+    recommendation: string;
+  };
+
+  // Confidence Drift Detection (CDD) - novel meta-signal for reasoning quality
+  // Analyzes confidence trajectory shape to detect unresolved uncertainty
+  confidence_drift?: {
+    /** Overall drift score (0-1, higher = more concerning) */
+    drift_score: number;
+    /** Whether the drift represents unresolved uncertainty */
+    unresolved: boolean;
+    /** Confidence at trajectory minimum */
+    min_confidence: number;
+    /** Step number where minimum occurred */
+    min_step: number;
+    /** Maximum confidence drop observed */
+    max_drop: number;
+    /** Recovery magnitude from min to final */
+    recovery: number;
+    /** Whether a revision step exists after the drop */
+    has_revision_after_drop: boolean;
+    /** Pattern classification */
+    pattern:
+      | "stable"
+      | "stable_overconfident"
+      | "declining"
+      | "improving"
+      | "v_shaped"
+      | "oscillating"
+      | "cliff"
+      | "insufficient";
+    /** Human-readable explanation */
+    explanation: string;
+    /** Suggested action if unresolved */
+    suggestion: string | null;
   };
 }

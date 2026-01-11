@@ -611,12 +611,45 @@ const DOMAIN_LIST = Object.entries(DOMAINS).filter(([name]) => name !== "general
 ][];
 
 // =============================================================================
+// OPTIMIZED KEYWORD INDEX
+// Build a keyword→domain map for O(1) exact-match lookups.
+// Keywords sorted by length (longest first) for substring matching.
+// =============================================================================
+
+interface KeywordEntry {
+  keyword: string;
+  domain: GranularDomain;
+  def: DomainDef;
+}
+
+// Build keyword index at module load time
+const KEYWORD_INDEX: KeywordEntry[] = [];
+
+for (const [domain, def] of DOMAIN_LIST) {
+  for (const kw of def.keywords) {
+    KEYWORD_INDEX.push({ keyword: kw.toLowerCase(), domain, def });
+  }
+}
+
+// Sort by:
+// 1. Domain weight descending (higher complexity domains match first)
+// 2. Keyword length descending (longer matches take priority within same weight tier)
+// This ensures "conditional probability" matches before "probability",
+// and higher-weight domains like "financial" match before lower-weight ones like "teaching"
+KEYWORD_INDEX.sort((a, b) => {
+  const weightDiff = b.def.weight - a.def.weight;
+  if (Math.abs(weightDiff) > 0.01) return weightDiff;
+  return b.keyword.length - a.keyword.length;
+});
+
+// =============================================================================
 // MAIN DETECTION FUNCTION
 // =============================================================================
 
 /**
- * Detect domain from text with O(n) complexity.
- * Returns granular domain, meta-category, verification domain, and relevant solvers.
+ * Detect domain from text with optimized keyword matching.
+ * Uses pre-sorted keyword index for O(k) complexity where k = number of keywords.
+ * Keywords are checked longest-first to prefer more specific matches.
  *
  * @param text - Text to analyze (question, system prompt, or thought)
  * @returns Full domain detection result
@@ -624,11 +657,12 @@ const DOMAIN_LIST = Object.entries(DOMAINS).filter(([name]) => name !== "general
 export function detectDomainFull(text: string): DomainResult {
   const lower = text.toLowerCase();
 
-  // Find first matching domain (ordered by weight descending in DOMAINS)
-  for (const [name, def] of DOMAIN_LIST) {
-    if (def.keywords.some((kw) => lower.includes(kw))) {
+  // Optimized: iterate pre-sorted keywords (longest first)
+  // First match wins, ensuring "conditional probability" beats "probability"
+  for (const { keyword, domain, def } of KEYWORD_INDEX) {
+    if (lower.includes(keyword)) {
       return {
-        domain: name,
+        domain,
         weight: def.weight,
         meta: def.meta,
         verification: def.verification,

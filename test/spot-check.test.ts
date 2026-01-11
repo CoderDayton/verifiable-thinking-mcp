@@ -1066,7 +1066,7 @@ describe("primeQuestion - proactive trap detection", () => {
       expect(excluded.trapTypes).toContain("additive_system");
       expect(excluded.skippedReason).toContain("all_types_excluded");
     });
-  });
+  }); // close "smart priming options" describe
 });
 
 // =============================================================================
@@ -1278,5 +1278,92 @@ describe("Scratchpad trap_analysis integration", () => {
     expect(result.trapTypes.length).toBeGreaterThanOrEqual(1);
     // Should only prime 1 trap (conservative)
     expect(result.primedTypes.length).toBeLessThanOrEqual(1);
+  });
+});
+
+// =============================================================================
+// CONJUNCTION FALLACY EDGE CASES (Beyond Linda Problem)
+// =============================================================================
+
+describe("Conjunction Fallacy - varied scenarios", () => {
+  // The current detector specifically looks for "bank teller|feminist|active|personality|description"
+  // so we test variants that use these patterns
+
+  test("detects conjunction fallacy with 'active' keyword", () => {
+    const question = `John is an active volunteer. Which is more likely:
+    (A) John is a doctor
+    (B) John is a doctor and runs marathons`;
+    const result = spotCheck(question, "B - doctor and runs marathons");
+    expectTrap(result, "conjunction_fallacy");
+  });
+
+  test("detects conjunction fallacy with personality description", () => {
+    const question =
+      "Sarah has a strong personality and studies math. Which is more probable: (A) Sarah will become a professor, or (B) Sarah will become a professor and win a chess tournament?";
+    const result = spotCheck(question, "B");
+    expectTrap(result, "conjunction_fallacy");
+  });
+
+  test("detects conjunction fallacy with 'both' phrasing", () => {
+    const question =
+      "Given the description of Tom's personality, which is more likely: winning the lottery, or both winning the lottery and getting struck by lightning?";
+    const result = spotCheck(question, "both events happening");
+    expectTrap(result, "conjunction_fallacy");
+  });
+
+  test("detects conjunction fallacy with 'as well' phrasing", () => {
+    const question =
+      "Based on the description above, which is more probable: Maria becomes a CEO, or Maria becomes a CEO as well as a published author?";
+    const result = spotCheck(question, "CEO as well as author");
+    expectTrap(result, "conjunction_fallacy");
+  });
+
+  test("passes when choosing the simpler (correct) option", () => {
+    const question =
+      "Given Bob's description, which is more likely: (A) Bob is a teacher, or (B) Bob is a teacher and plays piano?";
+    const result = spotCheck(question, "A - just teacher");
+    expectPass(result);
+  });
+
+  test("needsSpotCheck triggers for varied conjunction scenarios", () => {
+    // These use the required pattern words: bank teller, feminist, active, personality, description
+    // AND must match the likely/probable pattern
+    const questions = [
+      "Based on her personality, which is more likely: engineer, or engineer and musician?",
+      "Given his description and active lifestyle, which is more likely: raining, or both raining and cold?",
+      "Is she more likely to be a bank teller, or a bank teller and activist?",
+    ];
+
+    for (const q of questions) {
+      const result = needsSpotCheck(q);
+      expect(result.categories).toContain("conjunction_fallacy");
+    }
+  });
+});
+
+// =============================================================================
+// MONTY HALL EDGE CASES (Structural detection without "Monty Hall" name)
+// =============================================================================
+
+describe("Monty Hall - structural detection", () => {
+  test("detects by structure without naming Monty Hall", () => {
+    const question =
+      "There are 3 boxes. You pick box 1. The host opens box 2 to show it's empty. Should you switch to box 3 or stay with box 1?";
+    const result = spotCheck(question, "stay - it's 50/50 now");
+    expectTrap(result, "monty_hall");
+  });
+
+  test("detects with curtains instead of doors", () => {
+    // Must use "should/better/strategy" for answer detection to trigger
+    const question =
+      "Three curtains hide a prize. You choose curtain A. Host opens curtain C to reveal it's a goat. Should you switch to B or stay with A?";
+    const result = spotCheck(question, "doesn't matter, same odds");
+    expectTrap(result, "monty_hall");
+  });
+
+  test("passes correct answer for structural variant", () => {
+    const question = "3 doors, you pick #1, host shows goat behind #2. Should you switch or stay?";
+    const result = spotCheck(question, "switch - switching wins 2/3 of the time");
+    expectPass(result);
   });
 });

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Confidence Drift Detection (CDD)** - Novel meta-signal analyzing confidence trajectory for reasoning quality
+  - Detects patterns: stable, stable_overconfident, declining, improving, v_shaped, oscillating, cliff
+  - Flags `unresolved=true` when V-shaped pattern exists without revision step
+  - **Stable overconfident detection** - Flags chains where all confidence ≥0.85 with low variance (often wrong on trap questions)
+  - O(n) single-pass algorithm, <1ms execution
+  - Integrated into `complete()` operation with `confidence_drift` response field
+  - **Step-level warnings** - CDD now runs during `step` operation (at step 3+) for early drift detection
+  - 100% precision (no false positives), improved recall with stable_overconfident pattern
+  - Benchmark: `examples/benchmarks/cdd-bench.ts`
+
+- **Hard budget limit** - `hard_limit_tokens` parameter blocks operations when session tokens exceed threshold
+  - Returns `status: "budget_exhausted"` with recommendation to complete or start new session
+  - Check happens BEFORE processing operation, preventing wasted compute
+
 ## [0.2.0] - 2026-01-11
 
 ### Added
