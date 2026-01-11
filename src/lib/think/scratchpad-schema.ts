@@ -123,7 +123,9 @@ export const ScratchpadSchema = z.object({
   question: z
     .string()
     .optional()
-    .describe("Original question (enables auto spot-check for trap detection)"),
+    .describe(
+      "Original question. On step: enables trap priming and stores for auto spot-check. On complete: enables spot-check.",
+    ),
 
   // Augment operation fields
   text: z
@@ -391,5 +393,14 @@ export interface ScratchpadResponse {
       target_step: number;
       reason: string;
     };
+  };
+
+  // Trap analysis (when question provided on step, informational only)
+  trap_analysis?: {
+    detected: boolean;
+    types: string[]; // All detected trap types
+    primed_count: number; // How many traps were actually primed (≤ types.length)
+    note: string | null;
+    confidence: number;
   };
 }

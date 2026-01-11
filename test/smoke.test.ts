@@ -180,20 +180,14 @@ describe("MCP Server Smoke Tests", () => {
     expect(result.tools).toHaveLength(5);
   });
 
-  test("should list 6 prompts", async () => {
+  // NOTE: Prompts disabled in index.ts until opencode supports prompts/get
+  // FastMCP doesn't register prompts/list when no prompts are added
+  test.skip("should list prompts (disabled until opencode supports them)", async () => {
     const response = await client.request("prompts/list");
 
     expect(response.error).toBeUndefined();
     const result = response.result as { prompts: Array<{ name: string }> };
-    const names = result.prompts.map((p) => p.name);
-
-    expect(names).toContain("mathematical-proof");
-    expect(names).toContain("logical-deduction");
-    expect(names).toContain("code-review");
-    expect(names).toContain("debugging");
-    expect(names).toContain("problem-decomposition");
-    expect(names).toContain("comparative-analysis");
-    expect(result.prompts).toHaveLength(6);
+    expect(result.prompts).toHaveLength(0);
   });
 
   test("should execute scratchpad step operation", async () => {
@@ -2533,5 +2527,44 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
     };
     expect(result.passed).toBe(false);
     expect(result.trap_type).toBe("conjunction_fallacy");
+  });
+
+  test("scratchpad: step with question returns trap_analysis", async () => {
+    const sessionId = `trap-priming-${Date.now()}`;
+    const response = await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        session_id: sessionId,
+        question:
+          "A bat and ball cost $1.10 total. The bat costs $1.00 more than the ball. How much does the ball cost?",
+        thought: "Let me set up equations to solve this problem.",
+        purpose: "analysis",
+      },
+    });
+
+    expect(response.error).toBeUndefined();
+    const text = (response.result as { content: Array<{ text: string }> }).content[0]?.text || "";
+    const data = extractJson(text);
+
+    expect(data?.trap_analysis).toBeDefined();
+    const trapAnalysis = data?.trap_analysis as {
+      detected: boolean;
+      types: string[];
+      primed_count: number;
+      note: string;
+      confidence: number;
+    };
+    expect(trapAnalysis.detected).toBe(true);
+    expect(trapAnalysis.types).toContain("additive_system");
+    expect(trapAnalysis.primed_count).toBeGreaterThan(0);
+    expect(trapAnalysis.note).toBeTruthy();
+    expect(trapAnalysis.confidence).toBeGreaterThan(0);
+
+    // Cleanup
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { session_id: sessionId },
+    });
   });
 });

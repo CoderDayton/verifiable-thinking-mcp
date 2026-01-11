@@ -1,0 +1,1039 @@
+{
+  "timestamp": "2026-01-02T05:00:20.205Z",
+  "model": "openai/gpt-oss-20b",
+  "total_questions": 41,
+  "results": [
+    {
+      "question_id": "trap_additive_001",
+      "trap_type": "additive_system",
+      "expected_answer": "5",
+      "intuitive_wrong": "10",
+      "non_primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 811,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 599,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ System of equations detected. Define variables x,y and solve algebraically.",
+        "trap_types_detected": [
+          "additive_system"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_additive_002",
+      "trap_type": "additive_system",
+      "expected_answer": "25",
+      "intuitive_wrong": "50",
+      "non_primed": {
+        "answer": "25",
+        "correct": true,
+        "time_ms": 548,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "25",
+        "correct": true,
+        "time_ms": 520,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ System of equations detected. Define variables x,y and solve algebraically.",
+        "trap_types_detected": [
+          "additive_system"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_additive_003",
+      "trap_type": "additive_system",
+      "expected_answer": "5",
+      "intuitive_wrong": "10",
+      "non_primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 425,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 395,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ System of equations detected. Define variables x,y and solve algebraically.",
+        "trap_types_detected": [
+          "additive_system"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_additive_004",
+      "trap_type": "additive_system",
+      "expected_answer": "20",
+      "intuitive_wrong": "40",
+      "non_primed": {
+        "answer": "20",
+        "correct": true,
+        "time_ms": 608,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "20",
+        "correct": true,
+        "time_ms": 509,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ System of equations detected. Define variables x,y and solve algebraically.",
+        "trap_types_detected": [
+          "additive_system"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_nonlinear_001",
+      "trap_type": "nonlinear_growth",
+      "expected_answer": "47",
+      "intuitive_wrong": "24",
+      "non_primed": {
+        "answer": "47",
+        "correct": true,
+        "time_ms": 236,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "47",
+        "correct": true,
+        "time_ms": 464,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Exponential growth. Work backwards from the end state, not forwards.",
+        "trap_types_detected": [
+          "nonlinear_growth"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_nonlinear_002",
+      "trap_type": "nonlinear_growth",
+      "expected_answer": "23",
+      "intuitive_wrong": "12",
+      "non_primed": {
+        "answer": "23",
+        "correct": true,
+        "time_ms": 445,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "23",
+        "correct": true,
+        "time_ms": 602,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Exponential growth. Work backwards from the end state, not forwards.",
+        "trap_types_detected": [
+          "nonlinear_growth"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_nonlinear_003",
+      "trap_type": "nonlinear_growth",
+      "expected_answer": "19",
+      "intuitive_wrong": "10",
+      "non_primed": {
+        "answer": "19",
+        "correct": true,
+        "time_ms": 389,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "19",
+        "correct": true,
+        "time_ms": 392,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_rate_001",
+      "trap_type": "rate_pattern",
+      "expected_answer": "5",
+      "intuitive_wrong": "100",
+      "non_primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 1104,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 672,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Rate problem. Calculate rate per unit first, then scale.",
+        "trap_types_detected": [
+          "rate_pattern"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_rate_002",
+      "trap_type": "rate_pattern",
+      "expected_answer": "3",
+      "intuitive_wrong": "9",
+      "non_primed": {
+        "answer": "3",
+        "correct": true,
+        "time_ms": 742,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "3",
+        "correct": true,
+        "time_ms": 971,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Rate problem. Calculate rate per unit first, then scale.",
+        "trap_types_detected": [
+          "rate_pattern"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_rate_003",
+      "trap_type": "rate_pattern",
+      "expected_answer": "8",
+      "intuitive_wrong": "1",
+      "non_primed": {
+        "answer": "8",
+        "correct": true,
+        "time_ms": 659,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "8",
+        "correct": true,
+        "time_ms": 845,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Rate problem. Calculate rate per unit first, then scale.",
+        "trap_types_detected": [
+          "rate_pattern"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_harmonic_001",
+      "trap_type": "harmonic_mean",
+      "expected_answer": "40",
+      "intuitive_wrong": "45",
+      "non_primed": {
+        "answer": "40",
+        "correct": true,
+        "time_ms": 602,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "40",
+        "correct": true,
+        "time_ms": 279,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Round trip speed. Use harmonic mean: 2ab/(a+b), not arithmetic.",
+        "trap_types_detected": [
+          "harmonic_mean"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_harmonic_002",
+      "trap_type": "harmonic_mean",
+      "expected_answer": "3",
+      "intuitive_wrong": "4",
+      "non_primed": {
+        "answer": "3",
+        "correct": true,
+        "time_ms": 873,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "3",
+        "correct": true,
+        "time_ms": 300,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Round trip speed. Use harmonic mean: 2ab/(a+b), not arithmetic.",
+        "trap_types_detected": [
+          "harmonic_mean"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_independence_001",
+      "trap_type": "independence",
+      "expected_answer": "50",
+      "intuitive_wrong": "less than 50",
+      "non_primed": {
+        "answer": "50",
+        "correct": true,
+        "time_ms": 402,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "50",
+        "correct": true,
+        "time_ms": 472,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Independent events. Past outcomes don't affect future probability.",
+        "trap_types_detected": [
+          "independence"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_independence_002",
+      "trap_type": "independence",
+      "expected_answer": "50",
+      "intuitive_wrong": "less than 50",
+      "non_primed": {
+        "answer": "50",
+        "correct": true,
+        "time_ms": 545,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "50",
+        "correct": true,
+        "time_ms": 285,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Independent events. Past outcomes don't affect future probability.",
+        "trap_types_detected": [
+          "independence"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_pigeonhole_001",
+      "trap_type": "pigeonhole",
+      "expected_answer": "4",
+      "intuitive_wrong": "2",
+      "non_primed": {
+        "answer": "4",
+        "correct": true,
+        "time_ms": 708,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "4",
+        "correct": true,
+        "time_ms": 423,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Guarantee problem. Consider worst case: need categories + 1.",
+        "trap_types_detected": [
+          "pigeonhole"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_pigeonhole_002",
+      "trap_type": "pigeonhole",
+      "expected_answer": "5",
+      "intuitive_wrong": "2",
+      "non_primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 475,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "5",
+        "correct": true,
+        "time_ms": 395,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Guarantee problem. Consider worst case: need categories + 1.",
+        "trap_types_detected": [
+          "pigeonhole"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_baserate_001",
+      "trap_type": "base_rate",
+      "expected_answer": "9",
+      "intuitive_wrong": "99",
+      "non_primed": {
+        "answer": "9",
+        "correct": true,
+        "time_ms": 866,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "9",
+        "correct": true,
+        "time_ms": 719,
+        "fell_for_trap": false,
+        "priming_prompt": "1. Rare condition + test. Apply Bayes' theorem with base rate.\n2. Conditional probability. Use P(A|B) = P(A∩B)/P(B).",
+        "trap_types_detected": [
+          "base_rate",
+          "conditional_probability"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_baserate_002",
+      "trap_type": "base_rate",
+      "expected_answer": "4",
+      "intuitive_wrong": "80",
+      "non_primed": {
+        "answer": "4",
+        "correct": true,
+        "time_ms": 56,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "4",
+        "correct": true,
+        "time_ms": 1748,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Conditional probability. Use P(A|B) = P(A∩B)/P(B).",
+        "trap_types_detected": [
+          "conditional_probability"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_factorial_001",
+      "trap_type": "factorial_counting",
+      "expected_answer": "6",
+      "intuitive_wrong": "5",
+      "non_primed": {
+        "answer": "6",
+        "correct": true,
+        "time_ms": 326,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "6",
+        "correct": true,
+        "time_ms": 381,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Factorial zeros. Count factors of 5: ⌊n/5⌋ + ⌊n/25⌋ + ...",
+        "trap_types_detected": [
+          "factorial_counting"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_factorial_002",
+      "trap_type": "factorial_counting",
+      "expected_answer": "24",
+      "intuitive_wrong": "20",
+      "non_primed": {
+        "answer": "24",
+        "correct": true,
+        "time_ms": 525,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "24",
+        "correct": true,
+        "time_ms": 365,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Factorial zeros. Count factors of 5: ⌊n/5⌋ + ⌊n/25⌋ + ...",
+        "trap_types_detected": [
+          "factorial_counting"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_clock_001",
+      "trap_type": "clock_overlap",
+      "expected_answer": "11",
+      "intuitive_wrong": "12",
+      "non_primed": {
+        "answer": "11",
+        "correct": true,
+        "time_ms": 373,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "11",
+        "correct": true,
+        "time_ms": 429,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Clock hands overlap 11 times per 12 hours, not 12.",
+        "trap_types_detected": [
+          "clock_overlap"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_clock_002",
+      "trap_type": "clock_overlap",
+      "expected_answer": "22",
+      "intuitive_wrong": "24",
+      "non_primed": {
+        "answer": "22",
+        "correct": true,
+        "time_ms": 486,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "22",
+        "correct": true,
+        "time_ms": 568,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Clock hands overlap 11 times per 12 hours, not 12.",
+        "trap_types_detected": [
+          "clock_overlap"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_conditional_001",
+      "trap_type": "conditional_probability",
+      "expected_answer": "INDIFFERENT",
+      "intuitive_wrong": "YES",
+      "non_primed": {
+        "answer": "INDIFFERENT",
+        "correct": true,
+        "time_ms": 3255,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "YES",
+        "correct": false,
+        "time_ms": 1978,
+        "fell_for_trap": true,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_conditional_002",
+      "trap_type": "conditional_probability",
+      "expected_answer": "YES",
+      "intuitive_wrong": "NO",
+      "non_primed": {
+        "answer": "YES",
+        "correct": true,
+        "time_ms": 159,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "YES",
+        "correct": true,
+        "time_ms": 553,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Revealed information changes odds. Switching wins 2/3.",
+        "trap_types_detected": [
+          "monty_hall"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_percentage_001",
+      "trap_type": "percentage_trap",
+      "expected_answer": "LOWER",
+      "intuitive_wrong": "SAME",
+      "non_primed": {
+        "answer": "LOWER",
+        "correct": true,
+        "time_ms": 754,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "LOWER",
+        "correct": true,
+        "time_ms": 529,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_percentage_002",
+      "trap_type": "percentage_trap",
+      "expected_answer": "LOWER",
+      "intuitive_wrong": "SAME",
+      "non_primed": {
+        "answer": "LOWER",
+        "correct": true,
+        "time_ms": 403,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "LOWER",
+        "correct": true,
+        "time_ms": 387,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_percentage_003",
+      "trap_type": "percentage_trap",
+      "expected_answer": "-4",
+      "intuitive_wrong": "0",
+      "non_primed": {
+        "answer": "-4",
+        "correct": true,
+        "time_ms": 501,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "-4",
+        "correct": true,
+        "time_ms": 330,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_age_001",
+      "trap_type": "age_puzzle",
+      "expected_answer": "18",
+      "intuitive_wrong": "12",
+      "non_primed": {
+        "answer": "18",
+        "correct": true,
+        "time_ms": 1625,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "18",
+        "correct": true,
+        "time_ms": 821,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_siblings_001",
+      "trap_type": "conditional_probability",
+      "expected_answer": "48",
+      "intuitive_wrong": "50",
+      "non_primed": {
+        "answer": "48",
+        "correct": true,
+        "time_ms": 265,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "48",
+        "correct": true,
+        "time_ms": 449,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_birthday_001",
+      "trap_type": "birthday_paradox",
+      "expected_answer": "50",
+      "intuitive_wrong": "6",
+      "non_primed": {
+        "answer": "50",
+        "correct": true,
+        "time_ms": 747,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "50",
+        "correct": true,
+        "time_ms": 502,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Rate problem. Calculate rate per unit first, then scale.",
+        "trap_types_detected": [
+          "rate_pattern"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_conjunction_001",
+      "trap_type": "conjunction_fallacy",
+      "expected_answer": "A",
+      "intuitive_wrong": "B",
+      "non_primed": {
+        "answer": "A",
+        "correct": true,
+        "time_ms": 212,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "A",
+        "correct": true,
+        "time_ms": 456,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Conjunction trap. P(A and B) ≤ P(A) always.",
+        "trap_types_detected": [
+          "conjunction_fallacy"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_conjunction_002",
+      "trap_type": "conjunction_fallacy",
+      "expected_answer": "A",
+      "intuitive_wrong": "B",
+      "non_primed": {
+        "answer": "A",
+        "correct": true,
+        "time_ms": 507,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "A",
+        "correct": true,
+        "time_ms": 526,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_conjunction_003",
+      "trap_type": "representativeness",
+      "expected_answer": "EQUAL",
+      "intuitive_wrong": "A",
+      "non_primed": {
+        "answer": "EQUAL",
+        "correct": true,
+        "time_ms": 370,
+        "fell_for_trap": true
+      },
+      "primed": {
+        "answer": "EQUAL",
+        "correct": true,
+        "time_ms": 507,
+        "fell_for_trap": true,
+        "priming_prompt": "⚠️ Independent events. Past outcomes don't affect future probability.",
+        "trap_types_detected": [
+          "independence"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_monty_001",
+      "trap_type": "monty_hall",
+      "expected_answer": "67",
+      "intuitive_wrong": "50",
+      "non_primed": {
+        "answer": "66.7%",
+        "correct": true,
+        "time_ms": 464,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "3",
+        "correct": false,
+        "time_ms": 499,
+        "fell_for_trap": false,
+        "priming_prompt": "1. Conditional probability. Use P(A|B) = P(A∩B)/P(B).\n2. Revealed information changes odds. Switching wins 2/3.",
+        "trap_types_detected": [
+          "conditional_probability",
+          "monty_hall"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_monty_002",
+      "trap_type": "monty_hall",
+      "expected_answer": "SWITCHING",
+      "intuitive_wrong": "EQUAL",
+      "non_primed": {
+        "answer": "SWITCHING",
+        "correct": true,
+        "time_ms": 392,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "SWITCHING",
+        "correct": true,
+        "time_ms": 412,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Revealed information changes odds. Switching wins 2/3.",
+        "trap_types_detected": [
+          "monty_hall"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_monty_003",
+      "trap_type": "monty_hall",
+      "expected_answer": "67",
+      "intuitive_wrong": "50",
+      "non_primed": {
+        "answer": "67",
+        "correct": true,
+        "time_ms": 1190,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "67",
+        "correct": true,
+        "time_ms": 1194,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_sunk_cost_001",
+      "trap_type": "sunk_cost",
+      "expected_answer": "NO",
+      "intuitive_wrong": "YES",
+      "non_primed": {
+        "answer": "NO",
+        "correct": true,
+        "time_ms": 1444,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "NO",
+        "correct": true,
+        "time_ms": 838,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Sunk cost trap. Past spending is irrelevant to future decisions.",
+        "trap_types_detected": [
+          "sunk_cost"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_sunk_cost_002",
+      "trap_type": "sunk_cost",
+      "expected_answer": "NO",
+      "intuitive_wrong": "YES",
+      "non_primed": {
+        "answer": "NO",
+        "correct": true,
+        "time_ms": 267,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "NO",
+        "correct": true,
+        "time_ms": 363,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    },
+    {
+      "question_id": "trap_sunk_cost_003",
+      "trap_type": "sunk_cost",
+      "expected_answer": "STOP",
+      "intuitive_wrong": "CONTINUE",
+      "non_primed": {
+        "answer": "STOP",
+        "correct": true,
+        "time_ms": 689,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "STOP",
+        "correct": true,
+        "time_ms": 267,
+        "fell_for_trap": false,
+        "priming_prompt": "⚠️ Sunk cost trap. Past spending is irrelevant to future decisions.",
+        "trap_types_detected": [
+          "sunk_cost"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_framing_001",
+      "trap_type": "framing_effect",
+      "expected_answer": "SAME",
+      "intuitive_wrong": "DIFFERENT",
+      "non_primed": {
+        "answer": "SAME",
+        "correct": true,
+        "time_ms": -456,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "SAME",
+        "correct": true,
+        "time_ms": 1449,
+        "fell_for_trap": false,
+        "priming_prompt": "1. Conditional probability. Use P(A|B) = P(A∩B)/P(B).\n2. Check framing. Calculate expected values for both options.",
+        "trap_types_detected": [
+          "conditional_probability",
+          "framing_effect"
+        ]
+      }
+    },
+    {
+      "question_id": "trap_framing_002",
+      "trap_type": "framing_effect",
+      "expected_answer": "EQUIVALENT",
+      "intuitive_wrong": "FIRST",
+      "non_primed": {
+        "answer": "EQUIVALENT",
+        "correct": true,
+        "time_ms": 554,
+        "fell_for_trap": false
+      },
+      "primed": {
+        "answer": "EQUIVALENT",
+        "correct": true,
+        "time_ms": 363,
+        "fell_for_trap": false,
+        "priming_prompt": null,
+        "trap_types_detected": []
+      }
+    }
+  ],
+  "summary": {
+    "non_primed": {
+      "accuracy": 1,
+      "trap_rate": 0.024390243902439025,
+      "avg_time_ms": 623.0731707317074
+    },
+    "primed": {
+      "accuracy": 0.9512195121951219,
+      "trap_rate": 0.04878048780487805,
+      "avg_time_ms": 603.8048780487804
+    },
+    "comparison": {
+      "accuracy_delta": -0.04878048780487805,
+      "accuracy_lift_pct": -4.878048780487805,
+      "trap_rate_reduction": -0.024390243902439025,
+      "trap_rate_reduction_pct": -100,
+      "questions_fixed": 0,
+      "questions_broken": 2,
+      "net_improvement": -2
+    },
+    "by_trap_type": {
+      "additive_system": {
+        "count": 4,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 4
+      },
+      "nonlinear_growth": {
+        "count": 3,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "rate_pattern": {
+        "count": 3,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 3
+      },
+      "harmonic_mean": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "independence": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "pigeonhole": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "base_rate": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 1
+      },
+      "factorial_counting": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "clock_overlap": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "conditional_probability": {
+        "count": 3,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 0.6666666666666666,
+        "delta": -0.3333333333333333,
+        "primed_detected": 0
+      },
+      "percentage_trap": {
+        "count": 3,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 0
+      },
+      "age_puzzle": {
+        "count": 1,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 0
+      },
+      "birthday_paradox": {
+        "count": 1,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 0
+      },
+      "conjunction_fallacy": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 1
+      },
+      "representativeness": {
+        "count": 1,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 0
+      },
+      "monty_hall": {
+        "count": 3,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 0.6666666666666666,
+        "delta": -0.3333333333333333,
+        "primed_detected": 2
+      },
+      "sunk_cost": {
+        "count": 3,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 2
+      },
+      "framing_effect": {
+        "count": 2,
+        "non_primed_accuracy": 1,
+        "primed_accuracy": 1,
+        "delta": 0,
+        "primed_detected": 1
+      }
+    }
+  }
+}

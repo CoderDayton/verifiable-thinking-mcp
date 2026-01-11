@@ -26,7 +26,7 @@ import {
   type ToolCall,
 } from "./llm-client";
 import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
-import { routeQuestion, spotCheck, type SpotCheckResult } from "../../src/lib/think/index";
+import { routeQuestion, spotCheck, primeQuestion, type SpotCheckResult, type PrimeResult } from "../../src/lib/think/index";
 import { detectCommonMistakesFromText, type MistakeType } from "../../src/lib/compute/solvers/derivation";
 
 // ============================================================================
@@ -182,6 +182,14 @@ export interface RunResult {
       mcp_overhead_ms: number;
     };
     spot_check?: SpotCheckResult;
+    priming?: {
+      enabled: boolean;
+      shouldPrime: boolean;
+      trapTypes: string[];
+      primedTypes: string[];
+      primingPrompt: string | null;
+      skippedReason: string | null;
+    };
   };
 }
 
@@ -326,6 +334,18 @@ export interface BenchmarkResults {
       avg_llm_verify_ms: number;
       avg_mcp_overhead_ms: number;
       llm_percentage: number;
+    };
+    priming?: {
+      enabled: boolean;
+      total_primed: number;
+      total_detected: number;
+      primed_accuracy: number;
+      non_primed_accuracy: number;
+      accuracy_delta: number;
+      by_trap_type: Record<
+        string,
+        { detected: number; primed: number; accuracy: number }
+      >;
     };
     efficiency: {
       baseline_correct_per_second: number;
@@ -1116,7 +1136,8 @@ async function runWithTool(
   question: Question,
   useLocal = true,
   compressionLevel: "none" | "auto" | "aggressive" = "auto",
-  verbose = false
+  verbose = false,
+  usePriming = false
 ): Promise<RunResult["with_tool"]> {
   const start = Date.now();
   const sessionId = `bench_${question.id}_${Date.now()}`;
@@ -1228,24 +1249,35 @@ async function runWithTool(
 
     // Main reasoning/answer call
     const { system, user } = route.prompts.main;
+
+    // PRIMING: Detect traps and prepend priming prompt if enabled
+    let primeResult: PrimeResult | undefined;
+    let userWithPriming = user;
+    if (usePriming) {
+      primeResult = primeQuestion(question.question);
+      if (primeResult.shouldPrime && primeResult.primingPrompt) {
+        // Prepend priming prompt to user message
+        userWithPriming = `${primeResult.primingPrompt}\n\n${user}`;
+      }
+    }
     
     // Track prompt overhead (system + user template minus question content)
     // user contains question + suffix, so overhead = system + suffix
-    promptTokens = estimateTokens(system) + estimateTokens(user.slice(question.question.length));
+    promptTokens = estimateTokens(system) + estimateTokens(userWithPriming.slice(question.question.length));
     
     const llmMainStart = Date.now();
     if (verbose) {
       response = await askWithStreaming(
         llm,
-        user,
+        userWithPriming,
         system,
-        `[${route.tier}] ${route.path}`
+        `[${route.tier}] ${route.path}${primeResult?.shouldPrime ? " +PRIME" : ""}`
       );
     } else {
-      response = await llm.ask(user, { system, temperature: 0.1 });
+      response = await llm.ask(userWithPriming, { system, temperature: 0.1 });
     }
     latency.llm_main_ms = Date.now() - llmMainStart;
-    totalTokens += estimateTokens(user + response);
+    totalTokens += estimateTokens(userWithPriming + response);
 
     // STEP 3: Record in MCP (CRASH-style scratchpad)
     // Skip MCP recording for explanatory questions - no scratchpad benefit, adds overhead
@@ -1303,6 +1335,16 @@ async function runWithTool(
       response_length: cleanResponse.length,
       latency_breakdown: latency,
       spot_check: spotCheckResult,
+      priming: usePriming
+        ? {
+            enabled: true,
+            shouldPrime: primeResult?.shouldPrime ?? false,
+            trapTypes: primeResult?.trapTypes ?? [],
+            primedTypes: primeResult?.primedTypes ?? [],
+            primingPrompt: primeResult?.primingPrompt ?? null,
+            skippedReason: primeResult?.skippedReason ?? null,
+          }
+        : undefined,
     };
   } finally {
     await mcp.clearSession(sessionId);
@@ -1327,6 +1369,7 @@ export async function runBenchmark(
     spotCheckDiagnostics?: boolean;
     onProgress?: (completed: number, total: number, result: RunResult) => void;
     useCache?: boolean;
+    usePriming?: boolean;
   } = {}
 ): Promise<BenchmarkResults> {
   const {
@@ -1340,6 +1383,7 @@ export async function runBenchmark(
     spotCheckDiagnostics = false,
     onProgress,
     useCache = false,
+    usePriming = false,
   } = options;
 
   const log = quiet ? () => {} : console.log.bind(console);
@@ -1465,7 +1509,7 @@ export async function runBenchmark(
           }
         } else {
           if (concurrency === 1 && !verbose) log("  Running with MCP tool...");
-          result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel, verbose && concurrency === 1);
+          result.with_tool = await runWithTool(llm, mcp, q, useLocalCompute, compressionLevel, verbose && concurrency === 1, usePriming);
           await cacheResult(q, model, "tool", result.with_tool);
           if (concurrency === 1) {
             const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
@@ -1490,7 +1534,8 @@ export async function runBenchmark(
           q,
           useLocalCompute,
           compressionLevel,
-          verbose && concurrency === 1
+          verbose && concurrency === 1,
+          usePriming
         );
         if (concurrency === 1) {
           const methodTag = result.with_tool.method === "local" ? " [LOCAL]" : "";
@@ -2073,6 +2118,54 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
 
   const breakEvenAccuracy = baseline.accuracy.overall * timeOverhead;
 
+  // Priming stats - only if priming was used
+  let primingStats: BenchmarkResults["summary"]["priming"];
+  const resultsWithPriming = results.filter((r) => r.with_tool.priming?.enabled);
+  if (resultsWithPriming.length > 0) {
+    const primedResults = resultsWithPriming.filter((r) => r.with_tool.priming?.shouldPrime);
+    const nonPrimedResults = resultsWithPriming.filter((r) => !r.with_tool.priming?.shouldPrime);
+
+    const primedCorrect = primedResults.filter((r) => r.with_tool.correct).length;
+    const nonPrimedCorrect = nonPrimedResults.filter((r) => r.with_tool.correct).length;
+
+    // Count detected vs primed by trap type
+    const byTrapType: Record<string, { detected: number; primed: number; correct: number; total: number }> = {};
+    for (const r of resultsWithPriming) {
+      const priming = r.with_tool.priming!;
+      for (const trapType of priming.trapTypes) {
+        if (!byTrapType[trapType]) byTrapType[trapType] = { detected: 0, primed: 0, correct: 0, total: 0 };
+        byTrapType[trapType].detected++;
+        byTrapType[trapType].total++;
+        if (r.with_tool.correct) byTrapType[trapType].correct++;
+      }
+      for (const trapType of priming.primedTypes) {
+        if (byTrapType[trapType]) byTrapType[trapType].primed++;
+      }
+    }
+
+    primingStats = {
+      enabled: true,
+      total_primed: primedResults.length,
+      total_detected: resultsWithPriming.filter((r) => (r.with_tool.priming?.trapTypes.length ?? 0) > 0).length,
+      primed_accuracy: primedResults.length > 0 ? primedCorrect / primedResults.length : 0,
+      non_primed_accuracy: nonPrimedResults.length > 0 ? nonPrimedCorrect / nonPrimedResults.length : 0,
+      accuracy_delta:
+        primedResults.length > 0 && nonPrimedResults.length > 0
+          ? primedCorrect / primedResults.length - nonPrimedCorrect / nonPrimedResults.length
+          : 0,
+      by_trap_type: Object.fromEntries(
+        Object.entries(byTrapType).map(([k, v]) => [
+          k,
+          {
+            detected: v.detected,
+            primed: v.primed,
+            accuracy: v.total > 0 ? v.correct / v.total : 0,
+          },
+        ])
+      ),
+    };
+  }
+
   return {
     baseline,
     with_tool: withTool,
@@ -2101,6 +2194,7 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     compression,
     complexity: complexityStats,
     latency_breakdown: latencyBreakdown,
+    priming: primingStats,
     efficiency: {
       baseline_correct_per_second:
         baselineTotalTime > 0
@@ -2715,6 +2809,7 @@ Options:
   --tool-only        Run only with MCP tool (no baseline)
   --mistakes-only    Run mistake detection validation (no LLM calls)
   --spot-check       Show spot-check diagnostics for trap questions
+  --priming          Enable smart trap priming (prepends trap hints to prompts)
   --no-local         Disable local compute
   --aggressive       Force aggressive compression
   --no-compression   Disable compression
@@ -2779,6 +2874,7 @@ Environment Variables:
   const mistakesOnly = args.includes("--mistakes-only");
   const spotCheckDiag = args.includes("--spot-check");
   const useCache = args.includes("--cache");
+  const usePriming = args.includes("--priming");
 
   const log = jsonOutput ? () => {} : console.log.bind(console);
 
@@ -2873,7 +2969,7 @@ Environment Variables:
   log(
     `Mode: ${baselineOnly ? "baseline only" : toolOnly ? "tool only" : "both"}${
       noLocal ? " (no local compute)" : ""
-    }${parallel > 1 ? ` | parallel=${parallel}` : ""}`
+    }${usePriming ? " +priming" : ""}${parallel > 1 ? ` | parallel=${parallel}` : ""}`
   );
   log(`Compression: ${compressionLevel}${fullRun ? " | Full run" : ""}`);
   if (threshold !== undefined) {
@@ -2965,6 +3061,7 @@ Environment Variables:
     spotCheckDiagnostics: spotCheckDiag,
     onProgress: saveIncrementally,
     useCache,
+    usePriming,
   });
 
   if (jsonOutput) {

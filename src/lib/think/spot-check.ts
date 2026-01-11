@@ -766,6 +766,190 @@ function checkFramingEffect(q: string, answer: string): SpotCheckResult | null {
 }
 
 // =============================================================================
+// TRAP PRIMING (proactive guidance before reasoning)
+// =============================================================================
+
+/**
+ * Configuration for smart priming behavior.
+ * Based on benchmark analysis showing:
+ * - Single-trap priming: 0 regressions
+ * - Multi-trap priming: 1 regression (Monty Hall confusion)
+ */
+export interface PrimeOptions {
+  /** Minimum detection confidence to trigger priming (default: 0.7) */
+  minConfidence?: number;
+
+  /**
+   * Maximum traps to combine into prompt (default: 1 = single-trap only)
+   * Set to 1 for conservative mode (safest), 2-3 for aggressive mode.
+   * Benchmark showed multi-trap priming can confuse models.
+   */
+  maxCombined?: number;
+
+  /** Trap types to exclude from priming (model handles well without help) */
+  excludeTypes?: string[];
+}
+
+/** Default conservative options - single-trap only, proven safe */
+export const PRIME_DEFAULTS: Required<PrimeOptions> = {
+  minConfidence: 0.7,
+  maxCombined: 1,
+  excludeTypes: [],
+};
+
+/** Aggressive priming - use with caution, may cause regressions */
+export const PRIME_AGGRESSIVE: Required<PrimeOptions> = {
+  minConfidence: 0.6,
+  maxCombined: 2,
+  excludeTypes: [],
+};
+
+export interface PrimeResult {
+  /** Whether priming is recommended */
+  shouldPrime: boolean;
+  /** Detected trap types (all detected, before filtering) */
+  trapTypes: string[];
+  /** Trap types actually used for priming (after filtering) */
+  primedTypes: string[];
+  /** Short nudge to prepend (<20 tokens for single, <50 for combined) */
+  primingPrompt: string | null;
+  /** Individual prompts for each detected trap */
+  allPrompts: string[];
+  /** Confidence in detection (0-1) */
+  confidence: number;
+  /** Whether priming was skipped due to options (confidence too low, excluded type, etc.) */
+  skippedReason: string | null;
+}
+
+/** Priming prompts for each trap type - kept under 20 tokens */
+const PRIMING_PROMPTS: Record<string, string> = {
+  additive_system: "⚠️ System of equations detected. Define variables x,y and solve algebraically.",
+  nonlinear_growth: "⚠️ Exponential growth. Work backwards from the end state, not forwards.",
+  rate_pattern: "⚠️ Rate problem. Calculate rate per unit first, then scale.",
+  harmonic_mean: "⚠️ Round trip speed. Use harmonic mean: 2ab/(a+b), not arithmetic.",
+  independence: "⚠️ Independent events. Past outcomes don't affect future probability.",
+  pigeonhole: "⚠️ Guarantee problem. Consider worst case: need categories + 1.",
+  base_rate: "⚠️ Rare condition + test. Apply Bayes' theorem with base rate.",
+  factorial_counting: "⚠️ Factorial zeros. Count factors of 5: ⌊n/5⌋ + ⌊n/25⌋ + ...",
+  clock_overlap: "⚠️ Clock hands overlap 11 times per 12 hours, not 12.",
+  conditional_probability: "⚠️ Conditional probability. Use P(A|B) = P(A∩B)/P(B).",
+  conjunction_fallacy: "⚠️ Conjunction trap. P(A and B) ≤ P(A) always.",
+  monty_hall: "⚠️ Revealed information changes odds. Switching wins 2/3.",
+  anchoring: "⚠️ Ignore irrelevant numbers. Base estimate on actual data only.",
+  sunk_cost: "⚠️ Sunk cost trap. Past spending is irrelevant to future decisions.",
+  framing_effect: "⚠️ Check framing. Calculate expected values for both options.",
+};
+
+/**
+ * Analyze a question BEFORE reasoning to detect potential cognitive traps.
+ * Returns a priming prompt to inject preventive guidance.
+ *
+ * Smart priming based on benchmark analysis:
+ * - Single-trap priming had 0 regressions across 41 questions
+ * - Multi-trap priming caused 1 regression (model confusion)
+ * - Default: conservative single-trap mode (maxCombined=1)
+ *
+ * O(n) single-pass - no LLM calls.
+ *
+ * @param question - The question to analyze
+ * @param options - Smart priming configuration (or number for backward compat)
+ */
+export function primeQuestion(question: string, options?: PrimeOptions | number): PrimeResult {
+  // Backward compatibility: number = maxCombined
+  const opts: Required<PrimeOptions> =
+    typeof options === "number"
+      ? { ...PRIME_DEFAULTS, maxCombined: options }
+      : { ...PRIME_DEFAULTS, ...options };
+
+  const detection = needsSpotCheck(question);
+
+  // No traps detected
+  if (!detection.required || detection.categories.length === 0) {
+    return {
+      shouldPrime: false,
+      trapTypes: [],
+      primedTypes: [],
+      primingPrompt: null,
+      allPrompts: [],
+      confidence: detection.score,
+      skippedReason: "no_traps_detected",
+    };
+  }
+
+  // Confidence below threshold
+  if (detection.score < opts.minConfidence) {
+    return {
+      shouldPrime: false,
+      trapTypes: detection.categories,
+      primedTypes: [],
+      primingPrompt: null,
+      allPrompts: [],
+      confidence: detection.score,
+      skippedReason: `confidence_below_threshold:${detection.score.toFixed(2)}<${opts.minConfidence}`,
+    };
+  }
+
+  // Filter out excluded trap types
+  const filteredCategories = detection.categories.filter((cat) => !opts.excludeTypes.includes(cat));
+
+  // All traps excluded
+  if (filteredCategories.length === 0) {
+    return {
+      shouldPrime: false,
+      trapTypes: detection.categories,
+      primedTypes: [],
+      primingPrompt: null,
+      allPrompts: [],
+      confidence: detection.score,
+      skippedReason: `all_types_excluded:${detection.categories.join(",")}`,
+    };
+  }
+
+  // Collect prompts for filtered traps (up to maxCombined)
+  const trapsToInclude = filteredCategories.slice(0, opts.maxCombined);
+  const allPrompts: string[] = [];
+
+  for (const trap of trapsToInclude) {
+    const prompt = PRIMING_PROMPTS[trap];
+    if (prompt) {
+      allPrompts.push(prompt);
+    }
+  }
+
+  // No prompts available for detected traps
+  if (allPrompts.length === 0) {
+    return {
+      shouldPrime: false,
+      trapTypes: detection.categories,
+      primedTypes: [],
+      primingPrompt: null,
+      allPrompts: [],
+      confidence: detection.score,
+      skippedReason: `no_prompts_for_types:${trapsToInclude.join(",")}`,
+    };
+  }
+
+  // Combine prompts: single trap uses full prompt, multi-trap uses condensed format
+  let primingPrompt: string | null = null;
+  if (allPrompts.length === 1) {
+    primingPrompt = allPrompts[0] ?? null;
+  } else if (allPrompts.length > 1) {
+    // For multi-trap, use numbered list format
+    primingPrompt = allPrompts.map((p, i) => `${i + 1}. ${p.replace("⚠️ ", "")}`).join("\n");
+  }
+
+  return {
+    shouldPrime: true,
+    trapTypes: detection.categories,
+    primedTypes: trapsToInclude,
+    primingPrompt,
+    allPrompts,
+    confidence: detection.score,
+    skippedReason: null,
+  };
+}
+
+// =============================================================================
 // LEGACY EXPORTS (for backwards compatibility)
 // =============================================================================
 

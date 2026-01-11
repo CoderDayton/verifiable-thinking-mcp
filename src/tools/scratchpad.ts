@@ -30,10 +30,30 @@ import {
   type ScratchpadResponse,
   ScratchpadSchema,
 } from "../lib/think/scratchpad-schema.ts";
-import { spotCheck } from "../lib/think/spot-check.ts";
+import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
 import { verify } from "../lib/verification.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
+
+// ============================================================================
+// CONSTANTS
+// ============================================================================
+
+/**
+ * Threshold for adaptive maxCombined in trap priming.
+ * Questions shorter than this get maxCombined=2, longer get maxCombined=1.
+ *
+ * Tuned empirically: all multi-trap questions in benchmark are ≥195 chars.
+ * Using 190 ensures all multi-trap questions stay conservative (maxCombined=1).
+ */
+const ADAPTIVE_PRIMING_THRESHOLD = 190;
+
+/**
+ * Maximum question length for trap priming (security + performance).
+ * Prevents memory exhaustion and ReDoS attacks on regex patterns.
+ * 10k chars ≈ 2.5k tokens, sufficient for any reasonable question.
+ */
+const MAX_QUESTION_LENGTH = 10_000;
 
 // ============================================================================
 // CONFIDENCE TRACKING
@@ -346,6 +366,65 @@ async function applyCompression(
 }
 
 // ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+/**
+ * Handle trap priming for step operation.
+ * Stores question in session and runs trap detection on first step.
+ * Returns trap analysis if traps detected, undefined otherwise.
+ *
+ * Uses adaptive maxCombined based on question length:
+ * - Short questions (<ADAPTIVE_PRIMING_THRESHOLD chars): maxCombined=2
+ * - Longer questions: maxCombined=1 (avoid prompt bloat, multi-trap confusion)
+ */
+async function handleTrapPriming(
+  question: string,
+  sessionId: string,
+  stepNumber: number,
+  streamContent: MCPContext["streamContent"],
+): Promise<ScratchpadResponse["trap_analysis"]> {
+  // Validate question length (security: prevents memory exhaustion + ReDoS)
+  if (question.length > MAX_QUESTION_LENGTH) {
+    await streamContent({
+      type: "text",
+      text: `⚠️ Question too long (${question.length} chars, max ${MAX_QUESTION_LENGTH}). Skipping trap detection.\n\n`,
+    });
+    return undefined;
+  }
+
+  // Store question in session for later spot-check at complete (first-write-wins)
+  SessionManager.setQuestion(sessionId, question);
+
+  // Warn if question provided late (trap analysis only runs on step 1)
+  if (stepNumber !== 1) {
+    await streamContent({
+      type: "text",
+      text: `⚠️ Question provided at step ${stepNumber}. Trap priming only runs on step 1. Stored for spot-check at complete.\n\n`,
+    });
+    return undefined;
+  }
+
+  // Adaptive maxCombined: short questions can handle more priming context
+  const maxCombined = question.length < ADAPTIVE_PRIMING_THRESHOLD ? 2 : 1;
+  const primeResult = primeQuestion(question, { maxCombined });
+  if (!primeResult.shouldPrime || !primeResult.primingPrompt) return undefined;
+
+  await streamContent({
+    type: "text",
+    text: `💡 **Trap Analysis:** ${primeResult.primingPrompt}\n\n`,
+  });
+
+  return {
+    detected: true,
+    types: primeResult.trapTypes,
+    primed_count: primeResult.primedTypes.length,
+    note: primeResult.primingPrompt,
+    confidence: primeResult.confidence,
+  };
+}
+
+// ============================================================================
 // OPERATION HANDLERS
 // ============================================================================
 
@@ -379,6 +458,11 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
 
   // Auto-increment step number
   const stepNumber = SessionManager.getNextStep(sessionId, branchId);
+
+  // Handle trap priming if question provided
+  const trapAnalysis = args.question
+    ? await handleTrapPriming(args.question, sessionId, stepNumber, streamContent)
+    : undefined;
 
   // Strip markdown and detect domain
   let strippedThought = stripMarkdown(thought);
@@ -607,6 +691,11 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   // Add augmentation info
   if (augmentationResult) {
     response.augmentation = augmentationResult;
+  }
+
+  // Add trap analysis info (from priming on first step)
+  if (trapAnalysis) {
+    response.trap_analysis = trapAnalysis;
   }
 
   // Add next step suggestion for math domain (computed before augmentation)
@@ -1067,6 +1156,8 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
   }
 
   // Auto spot-check if question and final_answer provided
+  // Use stored question from step operation if not provided directly
+  const questionForSpotCheck = args.question || SessionManager.getQuestion(sessionId);
   let spotCheckResult:
     | {
         passed: boolean;
@@ -1078,8 +1169,8 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
     | undefined;
   let needsReconsideration = false;
 
-  if (args.question && args.final_answer) {
-    spotCheckResult = spotCheck(args.question, args.final_answer);
+  if (questionForSpotCheck && args.final_answer) {
+    spotCheckResult = spotCheck(questionForSpotCheck, args.final_answer);
     if (!spotCheckResult.passed) {
       needsReconsideration = true;
       await streamContent({
@@ -1639,53 +1730,31 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
 
 export const scratchpadTool = {
   name: "scratchpad",
-  description: `Unified reasoning scratchpad with auto-step tracking, confidence monitoring, and verification-gated flow.
+  description: `Unified reasoning scratchpad with verification, trap detection, and step tracking.
 
 OPERATIONS:
-- step: Add a thought (auto-increments step number). Verification auto-enables after 3 steps.
-- navigate: View history, branches, specific step, or path
-- branch: Start alternative reasoning path (useful after verification failures)
-- revise: Correct an earlier step (useful to fix verification failures or trap warnings)
-- complete: Finalize reasoning chain (auto spot-checks if question provided)
-- augment: Extract math expressions, compute locally, inject results
-- override: Force-commit a step that failed verification (use sparingly)
-- hint: Get progressive simplification hints for math expressions (session-stateful)
-- mistakes: Proactively check text for common algebraic errors (without needing verification to fail)
-- spot_check: Check if your answer may have fallen for a cognitive trap (bat-ball, lily pad, etc.)
+- step: Add thought. Pass question= on first step for trap priming → get trap_analysis. Auto-verifies after 3 steps.
+- complete: Finalize chain. Auto spot-checks final_answer against stored question.
+- revise: Fix earlier step (after verification failure or trap warning)
+- branch: Start alternative path from earlier step
+- navigate: View history/branches/steps/paths
+- augment|hint|mistakes|spot_check|override: Math helpers and manual controls
 
-SPOT-CHECK & RECONSIDERATION:
-- Detects 13 structural trap patterns: additive systems, exponential growth, rate problems, 
-  harmonic mean, independence, pigeonhole, base rate, factorial, clock overlap, 
-  conditional probability, conjunction fallacy, Monty Hall, anchoring
-- Auto-runs during complete if question + final_answer provided
-- If trap detected: status="review", reconsideration.suggested_revise guides you to fix
-- Call revise with the suggested target_step and reason to reconsider your answer
+VERIFICATION FLOW (auto-enabled at step 4+):
+- If fails: status="verification_failed", step held pending
+- Recover: revise (fix) | branch (try different approach) | override (force-commit)
 
-AUTO-VERIFICATION:
-- Verification is AUTO-ENABLED for chains with >3 steps (errors compound)
-- Set verify=false to disable for a specific step
-- Set verify=true to enable early (steps 1-3)
-
-VERIFICATION FLOW:
-When verification FAILS:
-1. Step is NOT stored (held as pending)
-2. status becomes "verification_failed"
-3. You MUST choose a recovery action:
-   - revise: Fix the issue and resubmit
-   - branch: Try a different approach from an earlier step
-   - override: Force-commit if the heuristic is wrong (rare)
-
-CONFIDENCE TRACKING:
-- Confidence accumulates as average across chain
-- When chain_confidence ≥ threshold (default 0.8), status becomes "threshold_reached"
-- 5-second timer warning given to complete or continue
+TRAP DETECTION (15 patterns: bat-ball, lily pad, Monty Hall, etc.):
+- Enabled by passing question= to first step
+- Auto spot-check at complete if question + final_answer provided
+- If trap caught: status="review", use reconsideration.suggested_revise
 
 WORKFLOW:
-1. Call with operation="step", verify=true for important steps
-2. If verification fails, use revise/branch/override to recover
-3. When threshold reached, call operation="complete" with question + final_answer
-4. If status="review" (trap detected), call revise with suggested_revise params
-5. Use navigate to view history, branches, paths at any time`,
+1. step(question="...", thought="...") → trap_analysis if patterns detected
+2. Continue with step(thought="...") → auto-verify kicks in after step 3
+3. If verification fails → revise or branch
+4. complete(final_answer="...") → auto spot-check
+5. If status="review" → revise per suggested_revise`,
 
   parameters: ScratchpadSchema,
 

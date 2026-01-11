@@ -1,5 +1,4 @@
 import { FastMCP } from "fastmcp";
-import { allPrompts } from "./prompts/index.ts";
 import { allResources, allResourceTemplates } from "./resources/index.ts";
 import {
   clearSessionTool,
@@ -21,11 +20,8 @@ server.addTool(getSessionTool);
 server.addTool(clearSessionTool);
 server.addTool(compressTool);
 
-// Register prompts
-for (const prompt of allPrompts) {
-  // biome-ignore lint/suspicious/noExplicitAny: FastMCP prompt type mismatch
-  server.addPrompt(prompt as any);
-}
+// NOTE: MCP prompts disabled - opencode v1.1.4 doesn't support prompt execution
+// Re-enable when opencode implements prompts/get (see sst/opencode#5767)
 
 // Register resources
 for (const resource of allResources) {

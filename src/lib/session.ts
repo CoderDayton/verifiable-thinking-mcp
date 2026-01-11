@@ -66,6 +66,8 @@ export interface Session {
   stepNumbers: Set<number>;
   stepToBranchMap: Map<number, string>;
   toolsUsedSet: Set<string>;
+  // Original question (for auto spot-check at complete)
+  question?: string;
   // Pending thought that failed verification (awaiting recovery action)
   pendingThought?: {
     thought: ThoughtRecord;
@@ -694,6 +696,21 @@ class SessionManagerImpl {
       delete session.metadata.hintState;
       session.updated_at = Date.now();
     }
+  }
+
+  /** Store the original question for a session (for auto spot-check at complete) */
+  setQuestion(sessionId: string, question: string): void {
+    const session = this.getOrCreate(sessionId);
+    // First-write-wins: don't overwrite existing question (prevents race condition)
+    if (session.question) return;
+    session.question = question;
+    session.updated_at = Date.now();
+  }
+
+  /** Get the stored question for a session */
+  getQuestion(sessionId: string): string | undefined {
+    const session = this.get(sessionId);
+    return session?.question;
   }
 
   destroy(): void {

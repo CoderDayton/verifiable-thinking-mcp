@@ -1,8 +1,8 @@
-# Agent Guidelines for Verifiable Thinking
+<agent-guidelines title="Verifiable Thinking">
 
-## Code Organization
+<section name="Code Organization">
 
-### Shared Utilities Belong in `src/lib/`
+<subsection name="Shared Utilities Belong in src/lib/">
 
 **Do NOT put reusable functionality in benchmark runners or test files.**
 
@@ -20,13 +20,17 @@ Utilities that could be used by both the main tool AND benchmarks/tests should l
 
 The benchmark runner (`examples/benchmarks/runner.ts`) should IMPORT from `src/lib/`, not duplicate logic.
 
-### Why This Matters
+</subsection>
+
+<subsection name="Why This Matters">
 
 1. **Single source of truth** - Fixes apply everywhere
 2. **Testable** - Shared code gets unit tested in `test/`
 3. **The tool uses it** - If logic is in the runner, the actual MCP tool can't use it
 
-### Pattern
+</subsection>
+
+<subsection name="Pattern">
 
 ```typescript
 // BAD: Duplicating in runner.ts
@@ -38,9 +42,13 @@ function extractAnswer(response: string): string {
 import { extractAnswer } from "../../src/lib/extraction.ts";
 ```
 
-## Tool Architecture
+</subsection>
 
-### MCP Tools in `src/tools/`
+</section>
+
+<section name="Tool Architecture">
+
+<subsection name="MCP Tools in src/tools/">
 
 Each tool should be self-contained and use shared libraries:
 
@@ -48,7 +56,9 @@ Each tool should be self-contained and use shared libraries:
 - `sessions.ts` - Session management
 - `compress.ts` - Text compression
 
-### New Features Go in Tools First
+</subsection>
+
+<subsection name="New Features Go in Tools First">
 
 When adding new capabilities:
 
@@ -68,7 +78,11 @@ export function assessPromptComplexity(text: string): ComplexityResult { ... }
 import { estimateBudgetLocal } from "../../src/lib/think/complexity";
 ```
 
-## Complexity-Based Routing
+</subsection>
+
+</section>
+
+<section name="Complexity-Based Routing">
 
 The `src/lib/think/complexity.ts` module provides O(n) complexity assessment:
 
@@ -79,7 +93,9 @@ The `src/lib/think/complexity.ts` module provides O(n) complexity assessment:
 
 This replaces LLM-based budget estimation, saving ~500ms per question.
 
-## Explanatory Questions
+</section>
+
+<section name="Explanatory Questions">
 
 Questions starting with "explain", "describe", "compare" are detected as explanatory:
 
@@ -87,7 +103,9 @@ Questions starting with "explain", "describe", "compare" are detected as explana
 - **Domain-aware prompts** - `src/lib/think/prompts.ts` provides domain-specific steering
 - **No expected answer** - use `expected_answer: null` in questions.json for judge-only evaluation
 
-## Response Processing
+</section>
+
+<section name="Response Processing">
 
 The `src/lib/extraction.ts` module handles:
 
@@ -95,7 +113,9 @@ The `src/lib/extraction.ts` module handles:
 - **Answer extraction** - priority-based pattern matching for structured answers
 - **Markdown stripping** - cleans formatting for comparison
 
-## Benchmark Configuration
+</section>
+
+<section name="Benchmark Configuration">
 
 The benchmark runner loads `.env` from project root via dotenv. Key variables:
 
@@ -105,11 +125,11 @@ The benchmark runner loads `.env` from project root via dotenv. Key variables:
 
 Note: `examples/benchmarks/.env` overrides root `.env` if present (Bun loads from cwd first).
 
----
+</section>
 
-## ⚠️ Critical Rules (MUST FOLLOW)
+<critical-rules title="⚠️ MUST FOLLOW">
 
-### 1. Never Duplicate Logic
+<rule number="1" name="Never Duplicate Logic">
 
 If you write a function that could be reused:
 - **STOP** - check if it exists in `src/lib/`
@@ -118,7 +138,9 @@ If you write a function that could be reused:
 
 Violations create drift where fixes don't propagate.
 
-### 2. Tests Are Non-Negotiable
+</rule>
+
+<rule number="2" name="Tests Are Non-Negotiable">
 
 Before any PR:
 ```bash
@@ -129,7 +151,9 @@ bun test --timeout 60000
 - New features require new tests in `test/`
 - Test file naming: `<module>.test.ts`
 
-### 3. Type Safety Is Required
+</rule>
+
+<rule number="3" name="Type Safety Is Required">
 
 ```bash
 bunx tsc --noEmit
@@ -139,14 +163,18 @@ bunx tsc --noEmit
 - No `any` without explicit justification comment
 - Use `as` casts sparingly and only after null checks
 
-### 4. Preserve O(n) Complexity
+</rule>
+
+<rule number="4" name="Preserve O(n) Complexity">
 
 The routing and domain detection are intentionally O(n) single-pass:
 - **Do NOT add nested loops** to `complexity.ts`, `domain.ts`, or `route.ts`
 - **Do NOT call LLM** for complexity estimation (defeats purpose)
 - If you need O(n²), justify with benchmarks proving <1ms impact
 
-### 5. Benchmark Changes Require Verification
+</rule>
+
+<rule number="5" name="Benchmark Changes Require Verification">
 
 After modifying `questions.json`, `runner.ts`, or routing logic:
 ```bash
@@ -158,14 +186,18 @@ Then run at least 5 questions to verify no regression:
 bun run runner.ts --limit=5 --full
 ```
 
-### 6. Never Commit Secrets
+</rule>
+
+<rule number="6" name="Never Commit Secrets">
 
 These patterns are forbidden in commits:
 - `.env` files (except `.env.example`)
 - API keys, tokens, credentials
 - `LLM_API_KEY=...` in any file
 
-### 7. Prompt Changes Need A/B Testing
+</rule>
+
+<rule number="7" name="Prompt Changes Need A/B Testing">
 
 Before changing prompts in `src/lib/think/prompts.ts`:
 1. Run baseline benchmark: `bun run runner.ts --baseline-only --full`
@@ -173,7 +205,9 @@ Before changing prompts in `src/lib/think/prompts.ts`:
 3. Run tool benchmark: `bun run runner.ts --tool-only --full`
 4. Compare accuracy delta - reject if >2% regression
 
-### 8. Keep Responses Token-Light
+</rule>
+
+<rule number="8" name="Keep Responses Token-Light">
 
 System prompts should be <30 tokens. User prompts should add minimal boilerplate.
 
@@ -185,14 +219,18 @@ System prompts should be <30 tokens. User prompts should add minimal boilerplate
 "Explain clearly. Use code if clearer."
 ```
 
-### 9. Open-Ended Questions Use Judge-Only
+</rule>
+
+<rule number="9" name="Open-Ended Questions Use Judge-Only">
 
 For explanatory/descriptive questions:
 - Set `expected_answer: null` in questions.json
 - Do NOT invent fake "correct" answers
 - Evaluation is via `judge.ts`, not accuracy
 
-### 10. One Responsibility Per Function
+</rule>
+
+<rule number="10" name="One Responsibility Per Function">
 
 Functions in `src/lib/` should do ONE thing:
 - `extractAnswer()` - extracts answers
@@ -200,3 +238,9 @@ Functions in `src/lib/` should do ONE thing:
 - `assessPromptComplexity()` - assesses complexity
 
 If a function does multiple things, split it.
+
+</rule>
+
+</critical-rules>
+
+</agent-guidelines>

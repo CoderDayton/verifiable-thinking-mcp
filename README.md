@@ -1,153 +1,30 @@
 # Verifiable Thinking MCP
 
-A Model Context Protocol (MCP) server for structured reasoning with verification, concept tracking, and context compression.
+> LLMs fail predictably on cognitive traps—bat-and-ball, lily pad, Monty Hall. This MCP server catches those mistakes *before* the final answer.
+
+An MCP server for structured reasoning with trap detection, verification, and context compression.
+
+## Quick Stats
+
+| Metric | Value |
+|--------|-------|
+| Cognitive trap patterns | 15 structural detectors |
+| Detection latency | <1ms (O(n) single-pass) |
+| Test coverage | 1496+ tests, 100% line threshold |
+| Dependencies | 3 runtime (fastmcp, zod, dotenv) |
 
 ## Features
 
-- **Domain-specific verification** - Math, logic, code, general domains
-- **CPC-style compression** - Sentence-level context compression (up to 10x faster than token-level)
-- **Concept tracking** - Extract and track concepts across reasoning chains
-- **Session management** - Multi-turn reasoning with TTL cleanup
-- **Self-correction detection** - Blind spot detection with "Wait" marker (89.3% effectiveness)
-- **Branching** - Explore alternative reasoning paths
+- **Trap Detection** — Catches 15 cognitive trap patterns (additive systems, exponential growth, Monty Hall, base rate neglect, etc.) using structural heuristics, no LLM calls
+- **Scratchpad** — Structured reasoning with auto step tracking, confidence monitoring, and verification gates
+- **Local Compute** — Math expression evaluation without LLM round-trips
+- **CPC Compression** — Sentence-level context compression with query-aware relevance scoring
 
-## Setup
+## Quick Start
 
-```bash
-bun install
-```
+### Claude Desktop
 
-## Development
-
-```bash
-# Interactive dev mode with MCP Inspector
-bun run dev
-
-# Inspect server capabilities
-bun run inspect
-
-# Run directly
-bun run start
-```
-
-## Tools
-
-### `think`
-Record a structured reasoning step with optional verification and compression.
-
-```json
-{
-  "thought": "To solve 2x + 5 = 13, subtract 5 from both sides: 2x = 8",
-  "step_number": 1,
-  "total_steps": 3,
-  "verify": true,
-  "domain": "math",
-  "track_concepts": true,
-  "session_id": "algebra-problem"
-}
-```
-
-**Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `thought` | string | required | Current reasoning step |
-| `step_number` | number | required | Step number (≥1) |
-| `total_steps` | number | required | Estimated total steps |
-| `verify` | boolean | false | Enable domain verification |
-| `domain` | enum | "general" | math, logic, code, general |
-| `compress_context` | boolean | false | CPC-style compression |
-| `compression_ratio` | number | 0.5 | Target ratio (0.1-1.0) |
-| `track_concepts` | boolean | false | Extract concepts |
-| `branch_id` | string | "main" | Branch identifier |
-| `check_blindspot` | boolean | false | Self-correction detection |
-| `session_id` | string | auto | Session identifier |
-
-### `list_sessions`
-List all active reasoning sessions.
-
-### `get_session`
-Retrieve a session in full, summary, or compressed format.
-
-### `clear_session`
-Clear a specific session or all sessions.
-
-### `compress`
-Standalone CPC-style context compression tool.
-
-```json
-{
-  "context": "Your long text or context to compress...",
-  "query": "focus query for relevance scoring",
-  "target_ratio": 0.5,
-  "boost_reasoning": true
-}
-```
-
-**Parameters:**
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `context` | string | required | Text to compress |
-| `query` | string | required | Focus query for relevance |
-| `target_ratio` | number | 0.5 | Target ratio (0.1-1.0) |
-| `max_tokens` | number | - | Alternative: max tokens to keep |
-| `boost_reasoning` | boolean | true | Boost reasoning keywords |
-
-## Architecture
-
-```
-src/
-├── index.ts              # FastMCP server entry
-├── tools/
-│   ├── think.ts          # Main reasoning tool
-│   ├── sessions.ts       # Session management
-│   └── compress.ts       # Standalone compression tool
-└── lib/
-    ├── verification.ts   # Domain verifiers (<10ms overhead)
-    ├── compression.ts    # CPC-style sentence compression
-    ├── concepts.ts       # Concept extraction
-    ├── cache.ts          # Verification result caching
-    └── session.ts        # Session manager with TTL
-```
-
-## Research Basis
-
-Based on 2024-2025 research papers:
-
-1. **RLVR** (arXiv:2506.14245) - Binary verification rewards
-2. **Self-Correction Bench** (arXiv:2507.02778) - "Wait" marker reduces blind spots 89.3%
-3. **CPC** (arXiv:2409.01227) - Context-aware prompt compression, 10.93x faster
-
-## Example Usage
-
-```typescript
-// Step 1: Start reasoning
-await think({
-  thought: "Given f(x) = x² + 2x, find f'(x) using power rule",
-  step_number: 1,
-  total_steps: 2,
-  verify: true,
-  domain: "math",
-  session_id: "derivative-calc"
-});
-
-// Step 2: Complete
-await think({
-  thought: "Applying power rule: f'(x) = 2x + 2",
-  step_number: 2,
-  total_steps: 2,
-  verify: true,
-  domain: "math",
-  is_final: true,
-  session_id: "derivative-calc"
-});
-
-// Review session
-await get_session({ session_id: "derivative-calc", format: "summary" });
-```
-
-## Configuration
-
-For Claude Desktop, add to `claude_desktop_config.json`:
+Add to `claude_desktop_config.json`:
 
 ```json
 {
@@ -159,3 +36,197 @@ For Claude Desktop, add to `claude_desktop_config.json`:
   }
 }
 ```
+
+Or with Bun:
+
+```json
+{
+  "mcpServers": {
+    "verifiable-thinking": {
+      "command": "bunx",
+      "args": ["verifiable-thinking-mcp"]
+    }
+  }
+}
+```
+
+### Basic Usage
+
+```typescript
+// Step 1: Start reasoning with trap priming
+scratchpad({
+  operation: "step",
+  question: "A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost?",
+  thought: "Let me set up equations. Let ball = x, bat = x + 1.00",
+  confidence: 0.9
+})
+// Returns trap_analysis warning about additive_system pattern
+
+// Step 2: Continue reasoning
+scratchpad({
+  operation: "step",
+  thought: "x + (x + 1.00) = 1.10, so 2x = 0.10, x = 0.05",
+  confidence: 0.95
+})
+
+// Step 3: Complete with spot-check
+scratchpad({
+  operation: "complete",
+  final_answer: "$0.05"
+})
+// Auto spot-checks against stored question
+```
+
+## Tools
+
+### `scratchpad` (primary)
+
+Unified reasoning tool with operation-based dispatch.
+
+**Operations:**
+
+| Operation | Purpose | Required Params |
+|-----------|---------|-----------------|
+| `step` | Add reasoning step | `thought` |
+| `complete` | Finalize chain | — |
+| `revise` | Fix earlier step | `thought`, `target_step` |
+| `branch` | Alternative path | `thought` |
+| `navigate` | View history | `view` (history\|branches\|step\|path) |
+| `spot_check` | Manual trap check | `question`, `answer` |
+| `hint` | Progressive simplification | `expression` |
+| `mistakes` | Algebraic error detection | `text` |
+| `augment` | Compute math expressions | `text` |
+| `override` | Force-commit failed step | `failed_step`, `reason` |
+
+**Key Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `question` | string | Pass on first step for trap priming |
+| `thought` | string | Current reasoning step |
+| `confidence` | 0-1 | Step confidence (accumulates to chain average) |
+| `verify` | boolean | Enable domain verification (auto-enabled after step 3) |
+| `domain` | enum | math, logic, code, general |
+
+**Workflow:**
+
+1. `step(question="...", thought="...")` → trap_analysis if patterns detected
+2. Continue with `step(thought="...")` → auto-verify kicks in after step 3
+3. If verification fails → `revise` or `branch`
+4. `complete(final_answer="...")` → auto spot-check against stored question
+5. If status="review" → follow `reconsideration.suggested_revise`
+
+### `list_sessions`
+
+List all active reasoning sessions.
+
+### `get_session`
+
+Retrieve session in `full`, `summary`, or `compressed` format.
+
+### `clear_session`
+
+Clear specific session or all sessions.
+
+### `compress`
+
+Standalone CPC-style context compression.
+
+```typescript
+compress({
+  context: "Long text to compress...",
+  query: "relevance query",
+  target_ratio: 0.5,
+  boost_reasoning: true
+})
+```
+
+## Trap Detection
+
+Detects 15 structural patterns without LLM calls:
+
+| Pattern | Trap | Example |
+|---------|------|---------|
+| `additive_system` | Subtract instead of solve | bat-ball, widget-gadget |
+| `nonlinear_growth` | Linear interpolation | lily pad doubling |
+| `rate_pattern` | Incorrect scaling | 5 machines/5 minutes |
+| `harmonic_mean` | Arithmetic mean for rates | average speed round-trip |
+| `independence` | Gambler's fallacy | coin flip sequences |
+| `pigeonhole` | Underestimate worst case | minimum to guarantee |
+| `base_rate` | Ignore prevalence | medical test accuracy |
+| `factorial_counting` | Simple division | trailing zeros in n! |
+| `clock_overlap` | Assume 12 overlaps | hour/minute hand |
+| `conditional_probability` | Ignore conditioning | given/if probability |
+| `conjunction_fallacy` | More detail = more likely | Linda problem |
+| `monty_hall` | 50/50 after reveal | door switching |
+| `anchoring` | Influenced by irrelevant number | estimation after priming |
+| `sunk_cost` | Consider past investment | should continue? |
+| `framing_effect` | Gain/loss framing bias | save vs die |
+
+## Architecture
+
+```
+src/
+├── index.ts              # FastMCP server entry
+├── tools/
+│   ├── scratchpad.ts     # Main reasoning tool (1800 LOC)
+│   ├── sessions.ts       # Session management
+│   └── compress.ts       # Compression tool
+└── lib/
+    ├── think/
+    │   ├── spot-check.ts # Trap detection (O(n))
+    │   ├── guidance.ts   # Domain detection
+    │   └── scratchpad-schema.ts
+    ├── compression.ts    # CPC-style compression
+    ├── compute/          # Local math evaluation
+    ├── verification.ts   # Domain verifiers
+    ├── session.ts        # Session manager with TTL
+    └── extraction.ts     # Answer extraction
+```
+
+## Development
+
+```bash
+# Clone and install
+git clone <repo-url>
+cd verifiable-thinking
+bun install
+
+# Interactive dev mode with MCP Inspector
+bun run dev
+
+# Inspect server capabilities
+bun run inspect
+
+# Run tests
+bun test
+
+# Type check
+bun run typecheck
+
+# Lint and format
+bun run check
+```
+
+## Benchmarks
+
+See `examples/benchmarks/`:
+
+| Benchmark | Purpose |
+|-----------|---------|
+| `priming-latency.ts` | Validates O(n) trap detection (<1ms) |
+| `priming-bench.ts` | LLM accuracy with/without priming |
+| `math-bench.ts` | Local compute accuracy |
+| `compression-bench.ts` | Compression ratio and retention |
+
+Run benchmarks:
+
+```bash
+cd examples/benchmarks
+bun run priming-latency.ts
+bun run priming-bench.ts --full
+```
+
+## License
+
+MIT
