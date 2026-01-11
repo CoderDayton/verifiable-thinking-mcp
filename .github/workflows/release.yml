@@ -101,39 +101,68 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Generate release notes
-        id: notes
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Extract changelog for this version
+        id: changelog
         run: |
-          # Get commits since last tag
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
-          else
-            COMMITS=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
-          fi
+          VERSION=${{ needs.validate.outputs.version }}
           
-          # Create release notes
-          cat << EOF > release_notes.md
+          # Extract changelog section using our script
+          CHANGELOG=$(bun run scripts/extract-changelog.ts "$VERSION" 2>/dev/null || echo "")
+          
+          if [ -z "$CHANGELOG" ]; then
+            echo "⚠️ No changelog entry found for $VERSION, generating from commits"
+            
+            # Fallback to git commits if no changelog entry
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            if [ -z "$PREV_TAG" ]; then
+              COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
+            else
+              COMMITS=$(git log --pretty=format:"- %s (%h)" ${PREV_TAG}..HEAD)
+            fi
+            
+            cat << EOF > release_notes.md
           ## What's Changed
-          
+
           $COMMITS
-          
+
           ## Installation
-          
+
           \`\`\`bash
           npx -y verifiable-thinking-mcp
           \`\`\`
-          
-          Or with bunx:
-          
-          \`\`\`bash
-          bunx verifiable-thinking-mcp
+
+          Or add to Claude Desktop config:
+
+          \`\`\`json
+          {
+            "mcpServers": {
+              "verifiable-thinking": {
+                "command": "npx",
+                "args": ["-y", "verifiable-thinking-mcp"]
+              }
+            }
+          }
           \`\`\`
-          
-          ## Full Changelog
-          
-          https://github.com/${{ github.repository }}/compare/${PREV_TAG:-initial}...v${{ needs.validate.outputs.version }}
+
+          **Full Changelog:** https://github.com/${{ github.repository }}/compare/${PREV_TAG:-initial}...v${VERSION}
           EOF
+          else
+            echo "$CHANGELOG" > release_notes.md
+            
+            # Add full changelog link
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+            echo "" >> release_notes.md
+            echo "---" >> release_notes.md
+            echo "" >> release_notes.md
+            echo "**Full Changelog:** https://github.com/${{ github.repository }}/compare/${PREV_TAG:-initial}...v${VERSION}" >> release_notes.md
+          fi
+          
+          echo "📝 Release notes generated:"
+          cat release_notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
