@@ -134,7 +134,8 @@ describe("CDD Integration with SessionManager", () => {
     const drift = analyzeConfidenceDrift(thoughts);
 
     expect(drift.pattern).toBe("cliff");
-    expect(drift.unresolved).toBe(false);
+    // Cliff with drop >= 0.3 is now flagged as unresolved (S1)
+    expect(drift.unresolved).toBe(true);
     expect(drift.min_step).toBe(4);
   });
 
@@ -387,6 +388,7 @@ describe("Step-Level CDD Analysis", () => {
     thoughts = SessionManager.getThoughts(sessionId);
     drift = analyzeConfidenceDrift(thoughts);
     expect(drift.pattern).toBe("cliff"); // Ends at minimum
+    expect(drift.unresolved).toBe(true); // Cliff with drop >= 0.3 is now flagged
 
     // Add recovery without revision - now V-shaped
     addThoughtWithConfidence(sessionId, 5, 0.85);

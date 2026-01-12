@@ -28,6 +28,7 @@ import {
 import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
 import { routeQuestion, spotCheck, primeQuestion, type SpotCheckResult, type PrimeResult } from "../../src/lib/think/index";
 import { detectCommonMistakesFromText, type MistakeType } from "../../src/lib/compute/solvers/derivation";
+import { analyzeConfidenceDrift, type DriftAnalysis, type DriftPattern } from "../../src/lib/think/confidence-drift";
 
 // ============================================================================
 // RESULT CACHING
@@ -189,6 +190,14 @@ export interface RunResult {
       primedTypes: string[];
       primingPrompt: string | null;
       skippedReason: string | null;
+    };
+    confidence_drift?: {
+      pattern: DriftPattern;
+      drift_score: number;
+      unresolved: boolean;
+      min_confidence: number;
+      max_drop: number;
+      recovery: number;
     };
   };
 }
@@ -467,6 +476,19 @@ interface ScratchpadResult {
       saved: number;
     };
   };
+  // CDD results from complete operation
+  confidenceDrift?: {
+    pattern: DriftPattern;
+    drift_score: number;
+    unresolved: boolean;
+    min_confidence: number;
+    max_drop: number;
+    recovery: number;
+    min_step: number;
+    has_revision_after_drop: boolean;
+    explanation: string;
+    suggestion: string | null;
+  };
   // Augment results
   augmentedText?: string;
   computations?: Array<{
@@ -595,6 +617,8 @@ class MCPClient {
       // Complete results
       totalSteps: meta.total_steps as number | undefined,
       compressionStats: meta.compression_stats as ScratchpadResult["compressionStats"],
+      // CDD results
+      confidenceDrift: meta.confidence_drift as ScratchpadResult["confidenceDrift"],
       // Augment results
       augmentedText: meta.augmented_text as string | undefined,
       computations: meta.computations as ScratchpadResult["computations"],
@@ -968,6 +992,9 @@ Domain hint: ${domain}`;
               toolResponse = `Reasoning complete. ${mcpResult.totalSteps || 0} total steps.`;
               if (mcpResult.compressionStats?.totalBytesSaved) {
                 toolResponse += ` Compression saved ${mcpResult.compressionStats.totalBytesSaved} bytes.`;
+              }
+              if (mcpResult.confidenceDrift?.unresolved) {
+                toolResponse += ` ⚠️ CDD: ${mcpResult.confidenceDrift.pattern} pattern detected.`;
               }
             } else {
               // Step operation (default)
@@ -3276,6 +3303,44 @@ Environment Variables:
       log(`  By trap type:`);
       for (const [type, count] of byType.entries()) {
         log(`    ${type}: ${count}`);
+      }
+    }
+  }
+
+  // CDD Diagnostics (when multi-step reasoning was used)
+  const withCDD = results.results.filter(r => r.with_tool.confidence_drift);
+  if (withCDD.length > 0) {
+    const unresolvedResults = withCDD.filter(r => r.with_tool.confidence_drift?.unresolved);
+    const unresolvedCorrect = unresolvedResults.filter(r => r.with_tool.correct);
+    const unresolvedWrong = unresolvedResults.filter(r => !r.with_tool.correct);
+    
+    log(`\n${"─".repeat(70)}`);
+    log("CONFIDENCE DRIFT DETECTION (CDD)");
+    log("─".repeat(70));
+    log(`  Questions with CDD data: ${withCDD.length}`);
+    log(`  Unresolved patterns:     ${unresolvedResults.length}`);
+    if (unresolvedResults.length > 0) {
+      log(`    Correct despite flag:  ${unresolvedCorrect.length}`);
+      log(`    Wrong (CDD worked):    ${unresolvedWrong.length}`);
+      
+      // Calculate CDD precision (avoiding false positives)
+      const precision = unresolvedWrong.length / unresolvedResults.length;
+      const recall = unresolvedResults.length > 0 && withCDD.filter(r => !r.with_tool.correct).length > 0
+        ? unresolvedWrong.length / withCDD.filter(r => !r.with_tool.correct).length
+        : 0;
+      
+      log(`  CDD Precision: ${(precision * 100).toFixed(1)}% (flagged were actually wrong)`);
+      log(`  CDD Recall:    ${(recall * 100).toFixed(1)}% (wrong answers caught)`);
+      
+      // Group by pattern
+      const byPattern = new Map<string, number>();
+      for (const r of unresolvedResults) {
+        const pattern = r.with_tool.confidence_drift?.pattern || "unknown";
+        byPattern.set(pattern, (byPattern.get(pattern) || 0) + 1);
+      }
+      log(`  By pattern:`);
+      for (const [pattern, count] of byPattern.entries()) {
+        log(`    ${pattern}: ${count}`);
       }
     }
   }

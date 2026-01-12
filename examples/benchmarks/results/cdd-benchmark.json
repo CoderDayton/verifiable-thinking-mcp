@@ -2,63 +2,63 @@
   "total_questions": 48,
   "correct_answers": 24,
   "wrong_answers": 24,
-  "cdd_flagged": 8,
-  "true_positives": 8,
+  "cdd_flagged": 16,
+  "true_positives": 16,
   "true_negatives": 24,
   "false_positives": 0,
-  "false_negatives": 16,
+  "false_negatives": 8,
   "precision": 1,
-  "recall": 0.3333333333333333,
-  "f1_score": 0.5,
-  "accuracy": 0.6666666666666666,
+  "recall": 0.6666666666666666,
+  "f1_score": 0.8,
+  "accuracy": 0.8333333333333334,
   "by_trap_type": {
     "additive_intuition": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "exponential_thinking": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "rate_confusion": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "pigeonhole_principle": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "harmonic_mean": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "sunk_cost_fallacy": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "gamblers_fallacy": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     },
     "conditional_probability": {
       "total": 6,
       "correct": 3,
-      "cdd_flagged": 1,
-      "cdd_accuracy": 0.6666666666666666
+      "cdd_flagged": 2,
+      "cdd_accuracy": 0.8333333333333334
     }
   },
   "by_pattern": {
@@ -72,10 +72,10 @@
       "correct_rate": 1,
       "flagged_rate": 0
     },
-    "stable": {
+    "stable_overconfident": {
       "count": 8,
       "correct_rate": 0,
-      "flagged_rate": 0
+      "flagged_rate": 1
     },
     "declining": {
       "count": 8,

@@ -94,7 +94,8 @@ describe("Confidence Drift Detection", () => {
       const result = analyzeConfidenceDrift(steps);
 
       expect(result.pattern).toBe("cliff");
-      expect(result.unresolved).toBe(false);
+      // Cliff with drop >= 0.3 is now flagged as unresolved (S1)
+      expect(result.unresolved).toBe(true);
     });
 
     test("detects oscillating pattern", () => {
@@ -553,6 +554,82 @@ describe("Confidence Drift Detection", () => {
       const result = analyzeConfidenceDrift(steps);
 
       expect(result.pattern).toBe("stable_overconfident");
+    });
+  });
+
+  // ============================================================================
+  // CLIFF PATTERN - UNRESOLVED DETECTION (S1)
+  // ============================================================================
+
+  describe("Cliff Pattern Unresolved Detection", () => {
+    test("cliff with drop >= 0.3 is flagged as unresolved", () => {
+      // Sharp drop at end indicates error detected but not addressed
+      const steps = makeSteps([0.9, 0.85, 0.82, 0.8, 0.4]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("cliff");
+      expect(result.unresolved).toBe(true);
+      expect(result.drift_score).toBeGreaterThanOrEqual(0.4);
+    });
+
+    test("cliff with small drop is NOT flagged as unresolved", () => {
+      // Moderate drop at end - not severe enough to flag
+      const steps = makeSteps([0.9, 0.85, 0.82, 0.8, 0.65]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("cliff");
+      expect(result.unresolved).toBe(false);
+    });
+
+    test("cliff suggestion mentions late error detection", () => {
+      const steps = makeSteps([0.9, 0.88, 0.85, 0.82, 0.45]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("cliff");
+      expect(result.unresolved).toBe(true);
+      expect(result.suggestion).toContain("final step");
+      expect(result.suggestion).toContain("error");
+    });
+
+    test("cliff explanation mentions sharp drop", () => {
+      const steps = makeSteps([0.8, 0.78, 0.75, 0.72, 0.35]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("cliff");
+      expect(result.explanation).toContain("dropped sharply");
+    });
+
+    test("custom cliff_drop_threshold", () => {
+      const steps = makeSteps([0.9, 0.85, 0.82, 0.8, 0.6]);
+
+      // Default threshold 0.3 - drop is 0.2, not flagged
+      const defaultResult = analyzeConfidenceDrift(steps);
+      expect(defaultResult.pattern).toBe("cliff");
+      expect(defaultResult.unresolved).toBe(false);
+
+      // Lower threshold 0.15 - now flagged
+      const customResult = analyzeConfidenceDrift(steps, {
+        cliff_drop_threshold: 0.15,
+      });
+      expect(customResult.pattern).toBe("cliff");
+      expect(customResult.unresolved).toBe(true);
+    });
+
+    test("severe cliff drop of 0.5+ is flagged", () => {
+      const steps = makeSteps([0.9, 0.88, 0.85, 0.9, 0.3]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("cliff");
+      expect(result.unresolved).toBe(true);
+      expect(result.max_drop).toBeGreaterThanOrEqual(0.5);
+    });
+
+    test("cliff with exact 0.3 drop is flagged (boundary)", () => {
+      const steps = makeSteps([0.9, 0.85, 0.82, 0.8, 0.5]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("cliff");
+      expect(result.unresolved).toBe(true);
     });
   });
 });

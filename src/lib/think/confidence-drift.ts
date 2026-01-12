@@ -70,6 +70,8 @@ export interface DriftConfig {
   overconfident_threshold: number;
   /** Maximum variance allowed for "stable overconfident" pattern (default: 0.05) */
   overconfident_max_variance: number;
+  /** Minimum final drop to flag cliff as unresolved (default: 0.3) */
+  cliff_drop_threshold: number;
 }
 
 const DEFAULT_CONFIG: DriftConfig = {
@@ -79,6 +81,7 @@ const DEFAULT_CONFIG: DriftConfig = {
   min_steps: 3,
   overconfident_threshold: 0.85,
   overconfident_max_variance: 0.05,
+  cliff_drop_threshold: 0.3,
 };
 
 // ============================================================================
@@ -184,6 +187,7 @@ export function analyzeConfidenceDrift(
   // Determine if unresolved (concerning pattern without remediation)
   const isVShaped = pattern === "v_shaped";
   const isStableOverconfident = pattern === "stable_overconfident";
+  const isCliff = pattern === "cliff";
   const significantDrop = maxDropFromPeak >= cfg.min_significant_drop;
   const significantRecovery = recovery >= cfg.min_significant_recovery;
 
@@ -195,14 +199,23 @@ export function analyzeConfidenceDrift(
     !hasRevisionAfterDrop &&
     normalizedDriftScore >= cfg.unresolved_threshold;
 
+  // Cliff is unresolved if: sharp final drop exceeds threshold (error detected at end)
+  // Calculate final step drop for cliff detection
+  const finalStepDrop =
+    confidences.length >= 2
+      ? confidences[confidences.length - 2]! - confidences[confidences.length - 1]!
+      : 0;
+  const cliffUnresolved = isCliff && finalStepDrop >= cfg.cliff_drop_threshold;
+
   // Stable overconfident is always flagged as unresolved (warrants review)
   // This catches trap questions where LLM is confidently wrong
-  const unresolved = vShapedUnresolved || isStableOverconfident;
+  const unresolved = vShapedUnresolved || isStableOverconfident || cliffUnresolved;
 
-  // For stable_overconfident, use a moderate drift score to indicate concern
-  const finalDriftScore = isStableOverconfident
-    ? Math.max(normalizedDriftScore, 0.4) // Ensure visible concern level
-    : normalizedDriftScore;
+  // For stable_overconfident and cliff, use a moderate drift score to indicate concern
+  const finalDriftScore =
+    isStableOverconfident || cliffUnresolved
+      ? Math.max(normalizedDriftScore, 0.4) // Ensure visible concern level
+      : normalizedDriftScore;
 
   // Generate explanation
   const explanation = generateExplanation(
@@ -390,6 +403,12 @@ function generateSuggestion(
   if (pattern === "stable_overconfident") {
     const confPct = ((minConfidence ?? 0.85) * 100).toFixed(0);
     return `High confidence (${confPct}%+) throughout suggests possible overconfidence. Consider: Is this a trick question? Have you verified assumptions? Adding a self-check step could help catch errors.`;
+  }
+
+  // Special handling for cliff pattern - error detected at end
+  if (pattern === "cliff") {
+    const dropPct = (dropMagnitude * 100).toFixed(0);
+    return `Sharp confidence drop (${dropPct}%) at the final step suggests an error or contradiction was detected late. Consider: What caused this doubt? Should you revise earlier steps before concluding?`;
   }
 
   if (dropMagnitude >= 0.3) {

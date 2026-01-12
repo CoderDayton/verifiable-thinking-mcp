@@ -1137,6 +1137,7 @@ describe("Agent Mode Integration Tests", () => {
         thought: "15/100 × 80 = 15 × 80/100 = 1200/100 = 12",
         purpose: "exploration",
         session_id: sessionId,
+        confidence: 0.9, // Add confidence to avoid cliff detection
       },
     });
     expect(branch.error).toBeUndefined();

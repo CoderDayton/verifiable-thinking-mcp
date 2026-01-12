@@ -128,6 +128,52 @@ function getSuggestedAction(status: ScratchpadResponse["status"], chainConfidenc
   }
 }
 
+/**
+ * Run step-level CDD analysis and return warning info if pattern is concerning.
+ * Extracts CDD logic from handleStep to reduce cyclomatic complexity.
+ */
+async function runStepLevelCDD(
+  sessionId: string,
+  branchId: string,
+  streamContent: MCPContext["streamContent"],
+): Promise<ScratchpadResponse["confidence_drift"] | undefined> {
+  const thoughts = SessionManager.getThoughts(sessionId, branchId);
+
+  // Need at least 3 steps for meaningful CDD analysis
+  if (thoughts.length < 3) {
+    return undefined;
+  }
+
+  const analysis = analyzeConfidenceDrift(thoughts);
+
+  // Only report concerning patterns (not just informational)
+  if (!analysis.unresolved || analysis.pattern === "insufficient") {
+    return undefined;
+  }
+
+  // Stream warning to user
+  await streamContent({
+    type: "text",
+    text:
+      `\n⚠️ **Early Drift Warning:** ${analysis.explanation}\n` +
+      (analysis.suggestion ? `   💡 ${analysis.suggestion}\n` : ""),
+  });
+
+  // Return structured data for response
+  return {
+    drift_score: analysis.drift_score,
+    unresolved: analysis.unresolved,
+    min_confidence: analysis.min_confidence,
+    min_step: analysis.min_step,
+    max_drop: analysis.max_drop,
+    recovery: analysis.recovery,
+    has_revision_after_drop: analysis.has_revision_after_drop,
+    pattern: analysis.pattern,
+    explanation: analysis.explanation,
+    suggestion: analysis.suggestion,
+  };
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -714,34 +760,10 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   }
 
   // S3: Step-level Confidence Drift Detection (CDD)
-  // Analyze trajectory so far and warn about concerning patterns early
-  const allThoughts = SessionManager.getThoughts(sessionId, branchId);
-  if (allThoughts.length >= 3) {
-    const stepDriftAnalysis = analyzeConfidenceDrift(allThoughts);
-
-    // Only stream warnings for concerning patterns (not just informational)
-    if (stepDriftAnalysis.unresolved && stepDriftAnalysis.pattern !== "insufficient") {
-      await streamContent({
-        type: "text",
-        text:
-          `\n⚠️ **Early Drift Warning:** ${stepDriftAnalysis.explanation}\n` +
-          (stepDriftAnalysis.suggestion ? `   💡 ${stepDriftAnalysis.suggestion}\n` : ""),
-      });
-
-      // Add drift info to response for programmatic access
-      response.confidence_drift = {
-        drift_score: stepDriftAnalysis.drift_score,
-        unresolved: stepDriftAnalysis.unresolved,
-        min_confidence: stepDriftAnalysis.min_confidence,
-        min_step: stepDriftAnalysis.min_step,
-        max_drop: stepDriftAnalysis.max_drop,
-        recovery: stepDriftAnalysis.recovery,
-        has_revision_after_drop: stepDriftAnalysis.has_revision_after_drop,
-        pattern: stepDriftAnalysis.pattern,
-        explanation: stepDriftAnalysis.explanation,
-        suggestion: stepDriftAnalysis.suggestion,
-      };
-    }
+  // Extracted to helper function to reduce cyclomatic complexity
+  const cddResult = await runStepLevelCDD(sessionId, branchId, streamContent);
+  if (cddResult) {
+    response.confidence_drift = cddResult;
   }
 
   return response;
@@ -1162,8 +1184,9 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
   const threshold = args.confidence_threshold ?? 0.8;
   const branchId = "main";
 
-  // Get final stats
-  const thoughts = SessionManager.getThoughts(sessionId);
+  // Get final stats - filter to main branch only for accurate analysis
+  const allThoughts = SessionManager.getThoughts(sessionId);
+  const thoughts = allThoughts.filter((t) => !t.branch_id || t.branch_id === branchId);
   const confState = calculateConfidence(sessionId, branchId);
   const compressionStats = SessionManager.getCompressionStats(sessionId);
 
