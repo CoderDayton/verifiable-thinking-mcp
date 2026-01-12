@@ -111,11 +111,26 @@ describe("CDD Integration with SessionManager", () => {
     expect(drift.drift_score).toBeLessThan(0.1);
   });
 
-  test("declining confidence triggers review but not unresolved", () => {
+  test("declining confidence ending uncertain is flagged as unresolved", () => {
     addThoughtWithConfidence(sessionId, 1, 0.9);
     addThoughtWithConfidence(sessionId, 2, 0.75);
     addThoughtWithConfidence(sessionId, 3, 0.6);
     addThoughtWithConfidence(sessionId, 4, 0.45);
+
+    const thoughts = SessionManager.getThoughts(sessionId);
+    const drift = analyzeConfidenceDrift(thoughts);
+
+    expect(drift.pattern).toBe("declining");
+    // Declining with final confidence < 0.5 is now flagged as unresolved (S3)
+    expect(drift.unresolved).toBe(true);
+    expect(drift.drift_score).toBeGreaterThanOrEqual(0.4);
+  });
+
+  test("declining confidence ending with acceptable confidence is NOT unresolved", () => {
+    addThoughtWithConfidence(sessionId, 1, 0.9);
+    addThoughtWithConfidence(sessionId, 2, 0.8);
+    addThoughtWithConfidence(sessionId, 3, 0.7);
+    addThoughtWithConfidence(sessionId, 4, 0.55); // >= 0.5
 
     const thoughts = SessionManager.getThoughts(sessionId);
     const drift = analyzeConfidenceDrift(thoughts);

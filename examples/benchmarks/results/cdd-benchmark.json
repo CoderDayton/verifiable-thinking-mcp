@@ -1,64 +1,64 @@
 {
-  "total_questions": 48,
-  "correct_answers": 24,
-  "wrong_answers": 24,
-  "cdd_flagged": 16,
-  "true_positives": 16,
-  "true_negatives": 24,
+  "total_questions": 64,
+  "correct_answers": 32,
+  "wrong_answers": 32,
+  "cdd_flagged": 32,
+  "true_positives": 32,
+  "true_negatives": 32,
   "false_positives": 0,
-  "false_negatives": 8,
+  "false_negatives": 0,
   "precision": 1,
-  "recall": 0.6666666666666666,
-  "f1_score": 0.8,
-  "accuracy": 0.8333333333333334,
+  "recall": 1,
+  "f1_score": 1,
+  "accuracy": 1,
   "by_trap_type": {
     "additive_intuition": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "exponential_thinking": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "rate_confusion": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "pigeonhole_principle": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "harmonic_mean": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "sunk_cost_fallacy": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "gamblers_fallacy": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     },
     "conditional_probability": {
-      "total": 6,
-      "correct": 3,
-      "cdd_flagged": 2,
-      "cdd_accuracy": 0.8333333333333334
+      "total": 8,
+      "correct": 4,
+      "cdd_flagged": 4,
+      "cdd_accuracy": 1
     }
   },
   "by_pattern": {
@@ -80,7 +80,12 @@
     "declining": {
       "count": 8,
       "correct_rate": 0,
-      "flagged_rate": 0
+      "flagged_rate": 1
+    },
+    "cliff": {
+      "count": 16,
+      "correct_rate": 0.5,
+      "flagged_rate": 0.5
     }
   }
 }

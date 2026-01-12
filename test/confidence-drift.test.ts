@@ -632,4 +632,87 @@ describe("Confidence Drift Detection", () => {
       expect(result.unresolved).toBe(true);
     });
   });
+
+  // ============================================================================
+  // DECLINING PATTERN - UNRESOLVED DETECTION (S3)
+  // ============================================================================
+
+  describe("Declining Pattern Unresolved Detection", () => {
+    test("declining with final confidence < 0.5 is flagged as unresolved", () => {
+      // Steady decline ending with low confidence = ended uncertain
+      const steps = makeSteps([0.8, 0.7, 0.6, 0.5, 0.45]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("declining");
+      expect(result.unresolved).toBe(true);
+      expect(result.drift_score).toBeGreaterThanOrEqual(0.4);
+    });
+
+    test("declining with final confidence >= 0.5 is NOT flagged as unresolved", () => {
+      // Decline but ending with acceptable confidence
+      const steps = makeSteps([0.9, 0.8, 0.7, 0.65, 0.55]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("declining");
+      expect(result.unresolved).toBe(false);
+    });
+
+    test("declining explanation includes warning emoji when low confidence", () => {
+      const steps = makeSteps([0.8, 0.7, 0.6, 0.5, 0.4]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("declining");
+      expect(result.explanation).toContain("⚠️");
+      expect(result.explanation).toContain("unresolved uncertainty");
+    });
+
+    test("declining suggestion mentions trying different method", () => {
+      const steps = makeSteps([0.85, 0.7, 0.6, 0.45, 0.35]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("declining");
+      expect(result.unresolved).toBe(true);
+      expect(result.suggestion).toContain("different method");
+    });
+
+    test("custom declining_final_threshold", () => {
+      const steps = makeSteps([0.9, 0.75, 0.65, 0.55, 0.45]);
+
+      // Default threshold 0.5 - final is 0.45 < 0.5, flagged
+      const defaultResult = analyzeConfidenceDrift(steps);
+      expect(defaultResult.pattern).toBe("declining");
+      expect(defaultResult.unresolved).toBe(true);
+
+      // Higher threshold 0.6 - now flagged even earlier
+      const customResult = analyzeConfidenceDrift(steps, {
+        declining_final_threshold: 0.6,
+      });
+      expect(customResult.pattern).toBe("declining");
+      expect(customResult.unresolved).toBe(true);
+
+      // Lower threshold 0.3 - now NOT flagged
+      const lowThresholdResult = analyzeConfidenceDrift(steps, {
+        declining_final_threshold: 0.3,
+      });
+      expect(lowThresholdResult.pattern).toBe("declining");
+      expect(lowThresholdResult.unresolved).toBe(false);
+    });
+
+    test("declining with exactly 0.5 final confidence is NOT flagged (boundary)", () => {
+      const steps = makeSteps([0.9, 0.8, 0.7, 0.6, 0.5]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("declining");
+      expect(result.unresolved).toBe(false); // >= 0.5 is ok
+    });
+
+    test("steep decline to very low confidence is flagged", () => {
+      const steps = makeSteps([0.9, 0.7, 0.5, 0.3, 0.2]);
+      const result = analyzeConfidenceDrift(steps);
+
+      expect(result.pattern).toBe("declining");
+      expect(result.unresolved).toBe(true);
+      expect(result.min_confidence).toBe(0.2);
+    });
+  });
 });

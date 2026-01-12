@@ -72,6 +72,8 @@ export interface DriftConfig {
   overconfident_max_variance: number;
   /** Minimum final drop to flag cliff as unresolved (default: 0.3) */
   cliff_drop_threshold: number;
+  /** Final confidence threshold to flag declining pattern as unresolved (default: 0.5) */
+  declining_final_threshold: number;
 }
 
 const DEFAULT_CONFIG: DriftConfig = {
@@ -82,6 +84,7 @@ const DEFAULT_CONFIG: DriftConfig = {
   overconfident_threshold: 0.85,
   overconfident_max_variance: 0.05,
   cliff_drop_threshold: 0.3,
+  declining_final_threshold: 0.5,
 };
 
 // ============================================================================
@@ -207,13 +210,18 @@ export function analyzeConfidenceDrift(
       : 0;
   const cliffUnresolved = isCliff && finalStepDrop >= cfg.cliff_drop_threshold;
 
+  // Declining is unresolved if: final confidence below threshold (ended uncertain)
+  const isDeclining = pattern === "declining";
+  const decliningUnresolved = isDeclining && finalConf < cfg.declining_final_threshold;
+
   // Stable overconfident is always flagged as unresolved (warrants review)
   // This catches trap questions where LLM is confidently wrong
-  const unresolved = vShapedUnresolved || isStableOverconfident || cliffUnresolved;
+  const unresolved =
+    vShapedUnresolved || isStableOverconfident || cliffUnresolved || decliningUnresolved;
 
-  // For stable_overconfident and cliff, use a moderate drift score to indicate concern
+  // For stable_overconfident, cliff, and declining: use a moderate drift score to indicate concern
   const finalDriftScore =
-    isStableOverconfident || cliffUnresolved
+    isStableOverconfident || cliffUnresolved || decliningUnresolved
       ? Math.max(normalizedDriftScore, 0.4) // Ensure visible concern level
       : normalizedDriftScore;
 
@@ -364,6 +372,9 @@ function generateExplanation(
       return `⚠️ Stable high confidence (≥${((minConfidence ?? 0.85) * 100).toFixed(0)}%) throughout chain. On complex/trap questions, consistent high confidence without doubt often correlates with incorrect answers.`;
 
     case "declining":
+      if (minConfidence !== undefined && minConfidence < 0.5) {
+        return `⚠️ Confidence declined steadily to ${(minConfidence * 100).toFixed(0)}% (${dropPct}% total drop). Ending with low confidence suggests unresolved uncertainty.`;
+      }
       return `Confidence declined steadily (${dropPct}% total drop). This may indicate increasing uncertainty or problem difficulty.`;
 
     case "improving":
@@ -409,6 +420,12 @@ function generateSuggestion(
   if (pattern === "cliff") {
     const dropPct = (dropMagnitude * 100).toFixed(0);
     return `Sharp confidence drop (${dropPct}%) at the final step suggests an error or contradiction was detected late. Consider: What caused this doubt? Should you revise earlier steps before concluding?`;
+  }
+
+  // Special handling for declining pattern - ended uncertain
+  if (pattern === "declining") {
+    const finalConfPct = ((minConfidence ?? 0.5) * 100).toFixed(0);
+    return `Confidence declined to ${finalConfPct}% by the end. The reasoning chain ended with significant doubt. Consider: What's causing the uncertainty? Is the approach valid? Should you try a different method?`;
   }
 
   if (dropMagnitude >= 0.3) {
