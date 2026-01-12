@@ -129,8 +129,9 @@ function getSuggestedAction(status: ScratchpadResponse["status"], chainConfidenc
 }
 
 /**
- * Run step-level CDD analysis and return warning info if pattern is concerning.
- * Extracts CDD logic from handleStep to reduce cyclomatic complexity.
+ * Run step-level CDD analysis and return drift info.
+ * Returns data for ALL patterns (not just concerning ones) so clients can display trajectory.
+ * Streams warning only for concerning patterns.
  */
 async function runStepLevelCDD(
   sessionId: string,
@@ -146,20 +147,22 @@ async function runStepLevelCDD(
 
   const analysis = analyzeConfidenceDrift(thoughts);
 
-  // Only report concerning patterns (not just informational)
-  if (!analysis.unresolved || analysis.pattern === "insufficient") {
+  // Skip insufficient pattern
+  if (analysis.pattern === "insufficient") {
     return undefined;
   }
 
-  // Stream warning to user
-  await streamContent({
-    type: "text",
-    text:
-      `\n⚠️ **Early Drift Warning:** ${analysis.explanation}\n` +
-      (analysis.suggestion ? `   💡 ${analysis.suggestion}\n` : ""),
-  });
+  // Stream warning for concerning patterns only
+  if (analysis.unresolved) {
+    await streamContent({
+      type: "text",
+      text:
+        `\n⚠️ **Early Drift Warning:** ${analysis.explanation}\n` +
+        (analysis.suggestion ? `   💡 ${analysis.suggestion}\n` : ""),
+    });
+  }
 
-  // Return structured data for response
+  // Return structured data for ALL non-insufficient patterns (so clients can display trajectory)
   return {
     drift_score: analysis.drift_score,
     unresolved: analysis.unresolved,
@@ -171,6 +174,83 @@ async function runStepLevelCDD(
     pattern: analysis.pattern,
     explanation: analysis.explanation,
     suggestion: analysis.suggestion,
+  };
+}
+
+/**
+ * Adaptive spot-check: Auto-run spot-check when CDD detects unresolved drift.
+ * This catches trap patterns early, before the model reaches complete().
+ *
+ * Triggers when:
+ * 1. CDD detected unresolved pattern (unresolved=true)
+ * 2. Session has a stored question
+ * 3. Current thought contains potential answer markers
+ *
+ * Returns spot-check result if triggered, undefined otherwise.
+ */
+async function runAdaptiveSpotCheck(
+  sessionId: string,
+  thought: string,
+  cddResult: ScratchpadResponse["confidence_drift"] | undefined,
+  streamContent: MCPContext["streamContent"],
+): Promise<ScratchpadResponse["spot_check_result"] | undefined> {
+  // Only trigger if CDD detected unresolved drift
+  if (!cddResult?.unresolved) {
+    return undefined;
+  }
+
+  // Need a stored question to spot-check against
+  const question = SessionManager.getQuestion(sessionId);
+  if (!question) {
+    return undefined;
+  }
+
+  // Look for answer indicators in the thought
+  // Match patterns like "answer is X", "= X", "therefore X", "result: X"
+  const answerPatterns = [
+    /(?:answer|result|solution|total|sum|value|equals?)\s*(?:is|:|=)\s*([^\s,.]+)/i,
+    /(?:therefore|thus|so|hence)\s*[,:]?\s*([^\s,.]+)/i,
+    /=\s*([^\s,.=]+)\s*$/m,
+    /\*\*([^*]+)\*\*\s*$/m, // Bold answer at end
+  ];
+
+  let potentialAnswer: string | undefined;
+  for (const pattern of answerPatterns) {
+    const match = thought.match(pattern);
+    if (match?.[1]) {
+      potentialAnswer = match[1].trim();
+      break;
+    }
+  }
+
+  // No answer found in thought
+  if (!potentialAnswer) {
+    return undefined;
+  }
+
+  // Run spot-check
+  const result = spotCheck(question, potentialAnswer);
+
+  // Only report if spot-check failed (found a trap)
+  if (result.passed) {
+    return undefined;
+  }
+
+  // Stream warning
+  await streamContent({
+    type: "text",
+    text:
+      `\n🔍 **Adaptive Spot-Check** (triggered by ${cddResult.pattern} drift)\n` +
+      `   ⚠️ ${result.trapType}: ${result.warning}\n` +
+      (result.hint ? `   💡 ${result.hint}\n` : ""),
+  });
+
+  return {
+    passed: result.passed,
+    trap_type: result.trapType,
+    warning: result.warning,
+    hint: result.hint,
+    confidence: result.confidence,
   };
 }
 
@@ -764,6 +844,23 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   const cddResult = await runStepLevelCDD(sessionId, branchId, streamContent);
   if (cddResult) {
     response.confidence_drift = cddResult;
+  }
+
+  // Adaptive spot-check: Auto-trigger when CDD detects unresolved drift
+  // This catches trap patterns early, before complete() is called
+  const adaptiveSpotCheck = await runAdaptiveSpotCheck(
+    sessionId,
+    strippedThought,
+    cddResult,
+    streamContent,
+  );
+  if (adaptiveSpotCheck) {
+    response.spot_check_result = adaptiveSpotCheck;
+    // Upgrade status to "review" if spot-check found a trap
+    if (!adaptiveSpotCheck.passed) {
+      response.status = "review";
+      response.suggested_action = `Potential ${adaptiveSpotCheck.trap_type} trap detected. ${adaptiveSpotCheck.hint || "Reconsider your approach."}`;
+    }
   }
 
   return response;
