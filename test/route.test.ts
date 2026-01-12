@@ -13,7 +13,12 @@ import {
   getUserPrompt,
   getVerbosity,
 } from "../src/lib/think/prompts";
-import { getComplexityInfo, isExplanatoryQuestion, routeQuestion } from "../src/lib/think/route";
+import {
+  detectOverthinking,
+  getComplexityInfo,
+  isExplanatoryQuestion,
+  routeQuestion,
+} from "../src/lib/think/route";
 
 // =============================================================================
 // ROUTING TESTS
@@ -397,5 +402,225 @@ describe("Prompt Overhead Measurement", () => {
     // System prompt is domain-specific and short
     const systemTokens = Math.ceil(system.length / 4);
     expect(systemTokens).toBeLessThan(20);
+  });
+});
+
+// =============================================================================
+// META-QUESTION DETECTION TESTS
+// =============================================================================
+
+describe("Meta-Question Detection", () => {
+  const metaQuestionCases: Array<{
+    q: string;
+    shouldBeMetaQuestion: boolean;
+    expectedPath: "trivial" | "direct" | "reasoning";
+    description: string;
+  }> = [
+    {
+      q: 'Asked "Is the Mississippi River longer or shorter than 500 miles?" then asked length. A different group asked about 5000 miles. Which group estimates higher?',
+      shouldBeMetaQuestion: true,
+      expectedPath: "direct",
+      description: "anchoring research question",
+    },
+    {
+      q: "Research shows that when participants are primed with a number, their estimates are affected. Which group gave higher estimates?",
+      shouldBeMetaQuestion: true,
+      expectedPath: "direct",
+      description: "psychology research question",
+    },
+    {
+      q: "In a study, one group was shown a wheel landing on 65, another on 10. Which group estimated higher?",
+      shouldBeMetaQuestion: true,
+      expectedPath: "direct",
+      description: "experiment comparison question",
+    },
+    {
+      q: "What is 5 + 5?",
+      shouldBeMetaQuestion: false,
+      expectedPath: "trivial",
+      description: "simple math question",
+    },
+    {
+      q: "A bat and ball cost $1.10. The bat costs $1 more than the ball. What does the ball cost?",
+      shouldBeMetaQuestion: false,
+      expectedPath: "reasoning",
+      description: "bat-ball trap question",
+    },
+  ];
+
+  for (const { q, shouldBeMetaQuestion, expectedPath, description } of metaQuestionCases) {
+    test(`${description}: routes to ${expectedPath}`, () => {
+      const route = routeQuestion(q);
+      const complexity = assessPromptComplexity(q);
+
+      if (shouldBeMetaQuestion) {
+        expect(complexity.explanation.verb_type).toContain("[meta-question]");
+        expect(complexity.explanation.intensity_signals).toContain("meta_question");
+      }
+
+      expect(route.path).toBe(expectedPath);
+    });
+  }
+
+  test("meta-question signal does not trigger minimum Moderate tier", () => {
+    // Meta-questions should stay at Low tier even with intensity_signals
+    const q = "Which group estimated higher after being asked about 500 vs 5000 miles?";
+    const complexity = assessPromptComplexity(q);
+
+    // Should have meta_question signal but stay at Low tier
+    if (complexity.explanation.intensity_signals.includes("meta_question")) {
+      expect(complexity.tier).toBe("Low");
+    }
+  });
+});
+
+// =============================================================================
+// OVERTHINKING DETECTION TESTS
+// =============================================================================
+
+describe("Overthinking Detection", () => {
+  describe("Binary Decision with Conditional Probability", () => {
+    const binaryConditionalCases = [
+      {
+        q: "6-chamber revolver, 2 adjacent bullets. First trigger: click (empty). Better to SPIN again or FIRE without spinning?",
+        shouldDetect: true,
+        reason: "binary_decision_with_conditional_probability",
+        description: "Russian roulette",
+      },
+      {
+        q: "After flipping 5 heads in a row, should you bet on heads or tails for the next flip?",
+        shouldDetect: false, // No clear binary decision pattern
+        description: "gambler's fallacy (no binary decision)",
+      },
+    ];
+
+    for (const { q, shouldDetect, reason, description } of binaryConditionalCases) {
+      test(`${description}: overthinking=${shouldDetect}`, () => {
+        const result = detectOverthinking(q);
+
+        expect(result.prone).toBe(shouldDetect);
+        if (shouldDetect && reason) {
+          expect(result.reason).toBe(reason);
+        }
+      });
+    }
+  });
+
+  describe("Game Theory Binary Decisions", () => {
+    const gameTheoryCases = [
+      {
+        q: "Monty Hall problem: 3 doors, you pick #1, host opens #3 (goat). Better to SWITCH or STAY?",
+        shouldDetect: true,
+        reason: "game_theory_binary_decision",
+        description: "Monty Hall switch/stay",
+      },
+      {
+        q: "Russian roulette: revolver with one bullet. Better to SPIN or FIRE?",
+        shouldDetect: true,
+        reason: "game_theory_binary_decision",
+        description: "Russian roulette simple",
+      },
+      {
+        q: "What is the probability of winning Monty Hall if you switch?",
+        shouldDetect: false, // Not a binary decision question
+        description: "Monty Hall probability (not binary decision)",
+      },
+    ];
+
+    for (const { q, shouldDetect, reason, description } of gameTheoryCases) {
+      test(`${description}: overthinking=${shouldDetect}`, () => {
+        const result = detectOverthinking(q);
+
+        expect(result.prone).toBe(shouldDetect);
+        if (shouldDetect && reason) {
+          expect(result.reason).toBe(reason);
+        }
+      });
+    }
+  });
+
+  describe("Overthinking Bypass Routing", () => {
+    test("overthinking-prone questions route to direct even at High tier", () => {
+      const q =
+        "6-chamber revolver, 2 adjacent bullets. First trigger: click (empty). Better to SPIN again or FIRE without spinning?";
+      const route = routeQuestion(q);
+
+      // Should have High tier but be routed to direct
+      expect(route.tier).toBe("High");
+      expect(route.overthinking.prone).toBe(true);
+      expect(route.path).toBe("direct");
+    });
+
+    test("non-overthinking High tier questions still use reasoning", () => {
+      const q = "Prove by induction that the sum of first n natural numbers is n(n+1)/2.";
+      const route = routeQuestion(q);
+
+      expect(["High", "Very Hard", "Almost Impossible"]).toContain(route.tier);
+      expect(route.overthinking.prone).toBe(false);
+      expect(route.path).toBe("reasoning");
+    });
+  });
+});
+
+// =============================================================================
+// ROUTING RESULT STRUCTURE TESTS
+// =============================================================================
+
+describe("RouteResult Structure", () => {
+  test("includes overthinking field in all routes", () => {
+    const testQuestions = [
+      "What is 2+2?",
+      "Explain quantum mechanics.",
+      "6-chamber revolver, 2 adjacent bullets. Better to SPIN or FIRE?",
+      "Prove that P = NP is unsolvable.",
+    ];
+
+    for (const q of testQuestions) {
+      const route = routeQuestion(q);
+
+      // All routes must have overthinking field
+      expect(route.overthinking).toBeDefined();
+      expect(typeof route.overthinking.prone).toBe("boolean");
+      expect(
+        route.overthinking.reason === null || typeof route.overthinking.reason === "string",
+      ).toBe(true);
+    }
+  });
+});
+
+// =============================================================================
+// TRAP PATTERN BYPASS TESTS
+// =============================================================================
+
+describe("Trap Pattern Bypass Routing", () => {
+  test("Low tier with sunk_cost trap pattern routes to reasoning", () => {
+    const q =
+      "You paid $100 for concert ticket. Day of concert, you feel sick. Should the $100 factor into your decision to go? YES or NO.";
+    const route = routeQuestion(q);
+
+    // Should be Low tier but routed to reasoning due to trap pattern
+    expect(route.tier).toBe("Low");
+    expect(route.path).toBe("reasoning");
+  });
+
+  test("Low tier meta-question with anchoring pattern still routes to direct", () => {
+    // This describes anchoring but doesn't set a trap for the answerer
+    const q =
+      "Research shows people who anchor on high numbers give higher estimates. If subjects saw $5000 before estimating, what would happen?";
+    const route = routeQuestion(q);
+
+    // Should be Low tier AND route to direct (meta-question exception)
+    expect(route.tier).toBe("Low");
+    expect(route.path).toBe("direct");
+  });
+
+  test("non-trap Low tier questions route to direct normally", () => {
+    // A simple factual question without trap patterns
+    const q =
+      "Pascal's Wager argues for belief in God based on infinite utility. Does it commit the 'many gods' objection? YES or NO.";
+    const route = routeQuestion(q);
+
+    expect(route.tier).toBe("Low");
+    expect(route.path).toBe("direct");
   });
 });

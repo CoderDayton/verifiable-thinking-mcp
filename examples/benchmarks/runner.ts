@@ -356,6 +356,59 @@ export interface BenchmarkResults {
         { detected: number; primed: number; accuracy: number }
       >;
     };
+    routing_feedback?: {
+      /** Accuracy by (tier, path) combinations - key is "tier:path" */
+      by_tier_path: Record<
+        string,
+        {
+          tier: string;
+          path: string;
+          count: number;
+          correct: number;
+          accuracy: number;
+          avg_time_ms: number;
+          baseline_accuracy: number;
+          delta_vs_baseline: number;
+        }
+      >;
+      /** Underperforming routing decisions where tool accuracy < baseline */
+      underperforming: Array<{
+        tier: string;
+        path: string;
+        tool_accuracy: number;
+        baseline_accuracy: number;
+        delta: number;
+        count: number;
+        recommendation: string;
+      }>;
+      /** Overperforming routing decisions where tool accuracy > baseline */
+      overperforming: Array<{
+        tier: string;
+        path: string;
+        tool_accuracy: number;
+        baseline_accuracy: number;
+        delta: number;
+        count: number;
+      }>;
+      /** Questions where routing decision led to regression (baseline correct, tool wrong) */
+      routing_regressions: Array<{
+        question_id: string;
+        tier: string;
+        path: string;
+        baseline_answer: string;
+        tool_answer: string;
+        expected: string;
+      }>;
+      /** Summary statistics */
+      summary: {
+        total_routing_decisions: number;
+        tier_path_combinations: number;
+        underperforming_combinations: number;
+        total_regressions: number;
+        best_performing: { tier: string; path: string; accuracy: number } | null;
+        worst_performing: { tier: string; path: string; accuracy: number } | null;
+      };
+    };
     efficiency: {
       baseline_correct_per_second: number;
       tool_correct_per_second: number;
@@ -1642,7 +1695,7 @@ export async function runBenchmark(
     }
   }
 
-  const summary = calculateSummary(results);
+  const summary = calculateSummary(results, questions);
 
   return {
     timestamp: new Date().toISOString(),
@@ -1946,7 +1999,27 @@ function calculateEnhancedMetrics(
   return metrics;
 }
 
-function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
+/**
+ * Generate a routing recommendation based on tier, path, and performance delta.
+ */
+function generateRoutingRecommendation(tier: string, path: string, delta: number): string {
+  const absDelta = Math.abs(delta);
+  const severity = absDelta > 0.2 ? "strongly" : absDelta > 0.1 ? "consider" : "may";
+
+  if (path === "reasoning" && delta < 0) {
+    return `${severity} route ${tier} tier to direct path instead of reasoning`;
+  } else if (path === "direct" && delta < 0) {
+    return `${severity} route ${tier} tier to reasoning path for more deliberation`;
+  } else if (path === "local" && delta < 0) {
+    return `investigate local compute failures for ${tier} tier`;
+  } else if (tier === "High" && path === "reasoning") {
+    return `${severity} add overthinking detection for High tier questions`;
+  } else {
+    return `review ${tier}:${path} routing logic for potential improvements`;
+  }
+}
+
+function calculateSummary(results: RunResult[], questionSet?: Question[]): BenchmarkResults["summary"] {
   const total = results.length;
 
   const baseline = calculateEnhancedMetrics(results, "baseline");
@@ -2193,6 +2266,133 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     };
   }
 
+  // ============================================================================
+  // ROUTING FEEDBACK ANALYSIS
+  // ============================================================================
+  // Analyze routing decisions to identify underperforming combinations
+  // This enables data-driven threshold tuning
+
+  type TierPathStats = {
+    tier: string;
+    path: string;
+    count: number;
+    correct: number;
+    total_time: number;
+    baseline_correct: number;
+  };
+  const byTierPath: Record<string, TierPathStats> = {};
+
+  // Collect routing regressions (baseline correct, tool wrong)
+  const routingRegressions: NonNullable<BenchmarkResults["summary"]["routing_feedback"]>["routing_regressions"] = [];
+
+  for (const r of results) {
+    const tier = r.with_tool.complexity_tier || "Unknown";
+    const path = r.with_tool.complexity_path || "unknown";
+    const key = `${tier}:${path}`;
+
+    if (!byTierPath[key]) {
+      byTierPath[key] = {
+        tier,
+        path,
+        count: 0,
+        correct: 0,
+        total_time: 0,
+        baseline_correct: 0,
+      };
+    }
+    byTierPath[key].count++;
+    if (r.with_tool.correct) byTierPath[key].correct++;
+    if (r.baseline.correct) byTierPath[key].baseline_correct++;
+    byTierPath[key].total_time += r.with_tool.time_ms;
+
+    // Track regressions: baseline correct, tool wrong
+    if (r.baseline.correct && !r.with_tool.correct) {
+      // Find expected answer from question set
+      const question = questionSet?.find((q) => q.id === r.question_id);
+      const expected = question?.expected_answer;
+      routingRegressions.push({
+        question_id: r.question_id,
+        tier,
+        path,
+        baseline_answer: r.baseline.answer,
+        tool_answer: r.with_tool.answer,
+        expected: Array.isArray(expected) ? expected.join("|") : expected ?? "?",
+      });
+    }
+  }
+
+  // Build the routing feedback stats
+  const tierPathEntries = Object.entries(byTierPath).map(([key, v]) => {
+    const accuracy = v.count > 0 ? v.correct / v.count : 0;
+    const baselineAccuracy = v.count > 0 ? v.baseline_correct / v.count : 0;
+    return {
+      key,
+      tier: v.tier,
+      path: v.path,
+      count: v.count,
+      correct: v.correct,
+      accuracy,
+      avg_time_ms: v.count > 0 ? Math.round(v.total_time / v.count) : 0,
+      baseline_accuracy: baselineAccuracy,
+      delta_vs_baseline: accuracy - baselineAccuracy,
+    };
+  });
+
+  // Identify underperforming combinations (tool accuracy < baseline, count >= 3 for significance)
+  const underperforming = tierPathEntries
+    .filter((e) => e.delta_vs_baseline < -0.05 && e.count >= 3) // 5%+ regression with enough samples
+    .sort((a, b) => a.delta_vs_baseline - b.delta_vs_baseline) // Worst first
+    .map((e) => ({
+      tier: e.tier,
+      path: e.path,
+      tool_accuracy: e.accuracy,
+      baseline_accuracy: e.baseline_accuracy,
+      delta: e.delta_vs_baseline,
+      count: e.count,
+      recommendation: generateRoutingRecommendation(e.tier, e.path, e.delta_vs_baseline),
+    }));
+
+  // Identify overperforming combinations (tool accuracy > baseline)
+  const overperforming = tierPathEntries
+    .filter((e) => e.delta_vs_baseline > 0.05 && e.count >= 3)
+    .sort((a, b) => b.delta_vs_baseline - a.delta_vs_baseline) // Best first
+    .map((e) => ({
+      tier: e.tier,
+      path: e.path,
+      tool_accuracy: e.accuracy,
+      baseline_accuracy: e.baseline_accuracy,
+      delta: e.delta_vs_baseline,
+      count: e.count,
+    }));
+
+  // Find best and worst performing combinations
+  const sortedByAccuracy = [...tierPathEntries].filter((e) => e.count >= 2).sort((a, b) => b.accuracy - a.accuracy);
+  const bestPerforming = sortedByAccuracy[0]
+    ? { tier: sortedByAccuracy[0].tier, path: sortedByAccuracy[0].path, accuracy: sortedByAccuracy[0].accuracy }
+    : null;
+  const worstPerforming = sortedByAccuracy.length > 0
+    ? {
+        tier: sortedByAccuracy[sortedByAccuracy.length - 1].tier,
+        path: sortedByAccuracy[sortedByAccuracy.length - 1].path,
+        accuracy: sortedByAccuracy[sortedByAccuracy.length - 1].accuracy,
+      }
+    : null;
+
+  const routingFeedback: BenchmarkResults["summary"]["routing_feedback"] = {
+    by_tier_path: Object.fromEntries(tierPathEntries.map((e) => [e.key, e])),
+    underperforming,
+    overperforming,
+    routing_regressions: routingRegressions,
+    summary: {
+      total_routing_decisions: results.length,
+      tier_path_combinations: tierPathEntries.length,
+      underperforming_combinations: underperforming.length,
+      total_regressions: routingRegressions.length,
+      best_performing: bestPerforming,
+      worst_performing: worstPerforming,
+    },
+  };
+
   return {
     baseline,
     with_tool: withTool,
@@ -2222,6 +2422,7 @@ function calculateSummary(results: RunResult[]): BenchmarkResults["summary"] {
     complexity: complexityStats,
     latency_breakdown: latencyBreakdown,
     priming: primingStats,
+    routing_feedback: routingFeedback,
     efficiency: {
       baseline_correct_per_second:
         baselineTotalTime > 0
@@ -3060,7 +3261,7 @@ Environment Variables:
     incrementalResults.push(result);
     
     // Calculate partial summary for incremental save
-    const partialSummary = calculateSummary(incrementalResults);
+    const partialSummary = calculateSummary(incrementalResults, questions);
     const partialResults: BenchmarkResults = {
       timestamp: new Date().toISOString(),
       model: process.env.LLM_MODEL || "unknown",

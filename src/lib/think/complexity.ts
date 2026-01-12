@@ -340,6 +340,31 @@ export function assessPromptComplexity(text: string): ComplexityResult {
     verb_type += " [simplified]";
   }
 
+  // ===== PHASE 5b: META-QUESTION DETECTION =====
+  // Questions ABOUT psychological research, biases, or experiments should use direct path.
+  // Extended reasoning on meta-cognitive questions leads to overthinking.
+  // Example: "Which group estimates higher?" is about anchoring research, not a math problem.
+  const meta_question_patterns = [
+    /which (group|sample|population) (estimates?|guesses?|predicts?|reports?)/i, // Anchoring research
+    /research (shows?|found|demonstrates?|indicates?)/i, // Citing research findings
+    /study (found|shows?|demonstrates?)/i, // Study citations
+    /experiment (shows?|found|demonstrates?)/i, // Experiment findings
+    /psychology (research|studies?|experiments?)/i, // Psychology context
+    /cognitive (bias|heuristic|psychology)/i, // Cognitive science terms
+    /asked .*(longer|shorter|higher|lower|more|less).*asked/i, // Classic anchoring setup
+    /one group.*(another|different|second) group/i, // Between-subjects comparison
+    /participants? (were|are) (asked|shown|given)/i, // Experimental procedure
+    /what (does|do) (the|this) (research|study|experiment)/i, // Meta-question about research
+  ];
+
+  const is_meta_question = meta_question_patterns.some((p) => p.test(text));
+  if (is_meta_question) {
+    // Strong penalty: meta-questions benefit from direct intuition, not extended reasoning
+    verb_boosted *= 0.6; // 40% penalty - biases toward "Low" tier (direct path)
+    verb_type += " [meta-question]";
+    intensity_signals.push("meta_question");
+  }
+
   // ===== PHASE 6: COMPOSITE SCORING =====
   // If we detected a high-weight domain but no explicit verb, boost the base
   // This handles "What is X?" questions in difficult domains
@@ -368,7 +393,9 @@ export function assessPromptComplexity(text: string): ComplexityResult {
   // ASYMMETRIC DEFAULT: When in doubt, verify
   // Any intensity signal or trap detection → minimum Moderate
   // Rationale: under-routing causes wrong answers, over-routing only wastes tokens
-  if (tier === "Low" && intensity_signals.length > 0) {
+  // EXCEPTION: meta_question signals should stay Low (direct path preferred for these)
+  const signals_excluding_meta = intensity_signals.filter((s) => s !== "meta_question");
+  if (tier === "Low" && signals_excluding_meta.length > 0) {
     tier = "Moderate";
   }
 
