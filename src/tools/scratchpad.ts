@@ -254,6 +254,87 @@ async function runAdaptiveSpotCheck(
   };
 }
 
+/**
+ * Enrich step response with optional fields (verification, compute, compression, etc).
+ * Extracted to reduce handleStep complexity.
+ */
+function enrichStepResponse(
+  response: ScratchpadResponse,
+  params: {
+    verificationResult: { passed: boolean; confidence: number } | null;
+    domain: string;
+    computeResult: { solved: boolean; result?: string | number; method?: string } | null;
+    compressionResult: ScratchpadResponse["compression"] | null;
+    tokenUsage: { total: number };
+    tokenBudget: number;
+    budgetExceeded: boolean;
+    autoCompressed: boolean;
+    augmentationResult: ScratchpadResponse["augmentation"] | null;
+    trapAnalysis: ScratchpadResponse["trap_analysis"] | undefined;
+    nextStepSuggestion: ScratchpadResponse["next_step_suggestion"] | undefined;
+  },
+): void {
+  const {
+    verificationResult,
+    domain,
+    computeResult,
+    compressionResult,
+    tokenUsage,
+    tokenBudget,
+    budgetExceeded,
+    autoCompressed,
+    augmentationResult,
+    trapAnalysis,
+    nextStepSuggestion,
+  } = params;
+
+  // Add verification info
+  if (verificationResult) {
+    response.verification = {
+      passed: verificationResult.passed,
+      confidence: verificationResult.confidence,
+      domain,
+    };
+  }
+
+  // Add local compute info
+  if (computeResult?.solved && computeResult.result !== undefined) {
+    response.local_compute = {
+      solved: true,
+      result: computeResult.result,
+      method: computeResult.method ?? "unknown",
+    };
+  }
+
+  // Add compression info
+  if (compressionResult) {
+    response.compression = compressionResult;
+  }
+
+  // Add token usage info
+  response.token_usage = {
+    total: tokenUsage.total,
+    budget: tokenBudget,
+    exceeded: budgetExceeded,
+    auto_compressed: autoCompressed,
+  };
+
+  // Add augmentation info
+  if (augmentationResult) {
+    response.augmentation = augmentationResult;
+  }
+
+  // Add trap analysis info (from priming on first step)
+  if (trapAnalysis) {
+    response.trap_analysis = trapAnalysis;
+  }
+
+  // Add next step suggestion for math domain
+  if (nextStepSuggestion) {
+    response.next_step_suggestion = nextStepSuggestion;
+  }
+}
+
 // ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
@@ -786,57 +867,28 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     });
   }
 
-  // Add verification info
-  if (verificationResult) {
-    response.verification = {
-      passed: verificationResult.passed,
-      confidence: verificationResult.confidence,
-      domain,
-    };
-  }
-
-  // Add local compute info
-  if (computeResult?.solved) {
-    response.local_compute = {
-      solved: true,
-      result: computeResult.result,
-      method: computeResult.method ?? "unknown",
-    };
-  }
-
-  // Add compression info
-  if (compressionResult) {
-    response.compression = compressionResult;
-  }
-
-  // Add token usage info
+  // Enrich response with optional fields (extracted to reduce complexity)
   const updatedTokenUsage = SessionManager.getTokenUsage(sessionId);
-  response.token_usage = {
-    total: updatedTokenUsage.total,
-    budget: tokenBudget,
-    exceeded: budgetExceeded,
-    auto_compressed: autoCompressed,
-  };
+  enrichStepResponse(response, {
+    verificationResult,
+    domain,
+    computeResult,
+    compressionResult,
+    tokenUsage: updatedTokenUsage,
+    tokenBudget,
+    budgetExceeded,
+    autoCompressed,
+    augmentationResult,
+    trapAnalysis,
+    nextStepSuggestion,
+  });
 
-  // Add augmentation info
-  if (augmentationResult) {
-    response.augmentation = augmentationResult;
-  }
-
-  // Add trap analysis info (from priming on first step)
-  if (trapAnalysis) {
-    response.trap_analysis = trapAnalysis;
-  }
-
-  // Add next step suggestion for math domain (computed before augmentation)
-  if (nextStepSuggestion) {
-    response.next_step_suggestion = nextStepSuggestion;
-    if (nextStepSuggestion.hasSuggestion) {
-      await streamContent({
-        type: "text",
-        text: `💡 **Next step:** ${nextStepSuggestion.description}\n`,
-      });
-    }
+  // Stream next step suggestion if available
+  if (nextStepSuggestion?.hasSuggestion) {
+    await streamContent({
+      type: "text",
+      text: `💡 **Next step:** ${nextStepSuggestion.description}\n`,
+    });
   }
 
   // S3: Step-level Confidence Drift Detection (CDD)
