@@ -208,6 +208,26 @@ function simulateReasoningTrajectories(question: TrapQuestion): SimulatedReasoni
     revision_step: 4,
   });
 
+  // Pattern 7: Cliff → wrong answer (error detected at end but not addressed)
+  // Sharp drop at final step indicates late error detection
+  trajectories.push({
+    question_id: question.id,
+    trajectory: [0.85, 0.8, 0.75, 0.7, 0.35],
+    answer: question.common_wrong_answer,
+    is_correct: false,
+    has_revision: false,
+  });
+
+  // Pattern 8: Mild cliff → correct answer (some uncertainty at end but still right)
+  // Small drop at end (< 0.3 threshold) - shouldn't be flagged
+  trajectories.push({
+    question_id: question.id,
+    trajectory: [0.85, 0.82, 0.8, 0.78, 0.6],
+    answer: question.expected_answer,
+    is_correct: true,
+    has_revision: false,
+  });
+
   return trajectories;
 }
 
