@@ -1,55 +1,32 @@
 <div align="center">
 
-# Verifiable Thinking
+<img src="assets/header.svg" alt="Verifiable Thinking MCP" width="800" />
 
-**Your LLM is confidently wrong 40% of the time on reasoning questions.**<br>
-**This fixes that.**
+**Your LLM is confidently wrong 40% of the time on reasoning questions. This fixes that.**
 
-[![npm](https://img.shields.io/npm/v/verifiable-thinking-mcp?color=blue)](https://www.npmjs.com/package/verifiable-thinking-mcp)
-[![CI](https://img.shields.io/github/actions/workflow/status/CoderDayton/verifiable-thinking-mcp/ci.yml?label=CI)](https://github.com/CoderDayton/verifiable-thinking-mcp/actions)
+[![npm version](https://img.shields.io/npm/v/verifiable-thinking-mcp?color=blue&label=npm)](https://www.npmjs.com/package/verifiable-thinking-mcp)
+[![CI](https://img.shields.io/github/actions/workflow/status/CoderDayton/verifiable-thinking-mcp/ci.yml?label=CI)](https://github.com/CoderDayton/verifiable-thinking-mcp/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/CoderDayton/verifiable-thinking-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/CoderDayton/verifiable-thinking-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[Why This Exists](#why-this-exists) • [Quick Start](#quick-start) • [Features](#features) • [vs Sequential Thinking](#vs-sequential-thinking)
+*15 trap patterns detected in <1ms. No LLM calls. Just pattern matching.*
+
+[Quick Start](#quick-start) • [Features](#features) • [Trap Detection](#trap-detection) • [API](#tools)
 
 </div>
 
 ---
 
-## The Problem
-
-Ask Claude or GPT this:
-
-> *A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost?*
-
-**40% of the time, it answers $0.10.** Confidently. With reasoning. And it's wrong.
-
-The correct answer is $0.05 (because $0.05 + $1.05 = $1.10).
-
-This isn't a cherry-picked example. LLMs fail predictably on cognitive traps:
-- Lily pad doubling problems
-- Monty Hall scenarios  
-- Base rate fallacies
-- Gambler's fallacy questions
-
-They fail because they pattern-match to *similar-looking* problems instead of reasoning through the actual structure.
-
-## The Solution
-
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  "A bat and ball cost $1.10. The bat costs $1 more..."          │
-│                              ↓                                  │
-│  TRAP DETECTED: additive_system                                 │
-│  ⚠️  Don't subtract $1 from $1.10. Set up: x + (x+1) = 1.10     │
-│                              ↓                                  │
-│  LLM receives warning BEFORE reasoning starts                   │
-│                              ↓                                  │
-│  Answer: $0.05 ✓                                                 │
-└─────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ "A bat and ball cost $1.10. The bat costs $1 more..."          │
+│                             ↓                                  │
+│ TRAP DETECTED: additive_system                                 │
+│ > Don't subtract $1 from $1.10. Set up: x + (x+1) = 1.10       │
+│                             ↓                                  │
+│ Answer: $0.05 (not $0.10)                                      │
+└────────────────────────────────────────────────────────────────┘
 ```
-
-**Verifiable Thinking** detects 15 cognitive trap patterns in <1ms and warns the LLM before it starts reasoning. No extra LLM calls. Just pattern matching.
 
 ## Quick Start
 
@@ -70,137 +47,126 @@ Add to Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-That's it. Claude now has trap detection built in.
-
-## Why This Exists
-
-I got tired of LLMs being confidently wrong.
-
-Not wrong about obscure facts—wrong about basic math and logic. The kind of problems where a human who *thought carefully* would get it right, but an LLM pattern-matches to the wrong template and produces a confident, well-reasoned, incorrect answer.
-
-The MCP ecosystem had "Sequential Thinking"—a tool that helps LLMs think step-by-step. But step-by-step reasoning doesn't help if you're reasoning toward the wrong answer from the start.
-
-So I built this. **22,000+ lines of code. 1,831 tests. 15 trap detectors.** All to catch the patterns that make LLMs fail.
-
 ## Features
 
-| Feature | What It Does | Why It Matters |
-|---------|--------------|----------------|
-| **Trap Detection** | 15 cognitive trap patterns detected in <1ms | Warns LLM *before* it reasons toward wrong answer |
-| **Auto-Challenge** | Forces counterarguments when confidence >95% | Catches overconfident mistakes |
-| **Contradiction Detection** | Spots "Let x=5" then "Now x=10" in reasoning chains | Prevents reasoning drift |
-| **Confidence Tracking** | Monitors per-step and chain-average confidence | Flags suspiciously stable overconfidence |
-| **Local Math** | Evaluates expressions without LLM calls | Catches arithmetic errors instantly |
-| **Budget Control** | Token tracking with soft/hard limits | Prevents runaway reasoning chains |
-
-<details>
-<summary><strong>All 15 Trap Patterns</strong></summary>
-
-| Pattern | Classic Example | The Trap |
-|---------|-----------------|----------|
-| `additive_system` | Bat and ball | Subtract instead of solve equations |
-| `nonlinear_growth` | Lily pad doubling | Linear interpolation on exponential |
-| `rate_pattern` | 5 machines, 5 minutes | Incorrect scaling |
-| `harmonic_mean` | Round-trip average speed | Arithmetic mean for rates |
-| `independence` | Coin flip sequence | Gambler's fallacy |
-| `pigeonhole` | Socks in the dark | Underestimate worst case |
-| `base_rate` | Medical test accuracy | Ignore prevalence |
-| `factorial_counting` | Trailing zeros in n! | Simple division |
-| `clock_overlap` | Hour/minute hand overlaps | Assume exactly 12 |
-| `conditional_probability` | Given/if probability | Ignore conditioning |
-| `conjunction_fallacy` | Linda the bank teller | More detail = more likely |
-| `monty_hall` | Door switching game | 50/50 fallacy after reveal |
-| `anchoring` | Estimation after priming | Irrelevant number influence |
-| `sunk_cost` | Should I continue? | Past investment bias |
-| `framing_effect` | "Save 200" vs "400 die" | Gain/loss framing |
-
-</details>
+| | |
+|---|---|
+| 🎯 **Trap Detection** | 15 patterns (bat-ball, Monty Hall, base rate) caught before reasoning starts |
+| ⚔️ **Auto-Challenge** | Forces counterarguments when confidence >95%—no more overconfident wrong answers |
+| 🔍 **Contradiction Detection** | Catches "Let x=5" then "Now x=10" across steps |
+| 🌿 **Hypothesis Branching** | Explore alternatives, auto-detects when branches confirm/refute |
+| 🔢 **Local Math** | Evaluates expressions without LLM round-trips |
+| 🗜️ **Compression** | Query-aware context compression for long chains |
 
 ## How It Works
 
 ```typescript
-// Step 1: Start reasoning—trap detection runs automatically
+// Start with a question—trap detection runs automatically
 scratchpad({
   operation: "step",
-  question: "A bat and ball cost $1.10. The bat costs $1 more than the ball...",
-  thought: "Let me work this out systematically",
-  confidence: 0.8
-})
-// → Returns trap_analysis: { pattern: "additive_system", warning: "..." }
-
-// Step 2: Continue reasoning with the warning in context
-scratchpad({
-  operation: "step", 
-  thought: "Setting up equations: ball = x, bat = x + 1.00",
+  question: "A bat and ball cost $1.10...",
+  thought: "Let ball = x, bat = x + 1.00",
   confidence: 0.9
 })
+// → Returns trap_analysis warning
 
-// Step 3: Complete—auto spot-check validates answer
-scratchpad({
-  operation: "complete",
-  final_answer: "$0.05"
-})
-// → Returns validation result
+// High confidence? Auto-challenge kicks in
+scratchpad({ operation: "step", thought: "...", confidence: 0.96 })
+// → Returns challenge_suggestion: "What if your assumption is wrong?"
+
+// Complete with spot-check
+scratchpad({ operation: "complete", final_answer: "$0.05" })
 ```
 
-## vs Sequential Thinking
+## Trap Detection
 
-| | Sequential Thinking | Verifiable Thinking |
-|---|:---:|:---:|
-| Trap detection | ❌ | 15 patterns |
-| Auto-challenge | ❌ | ✓ |
-| Contradiction detection | ❌ | ✓ |
-| Confidence tracking | ❌ | ✓ |
-| Local compute | ❌ | ✓ |
-| Token budgets | ❌ | ✓ |
-| Lines of code | ~100 | 22,000+ |
-| Tests | ? | 1,831 |
-
-Sequential Thinking helps you think step-by-step.<br>
-Verifiable Thinking catches you when you're stepping in the wrong direction.
-
-[Full comparison →](docs/competitive-analysis.md)
-
-## API Reference
+| Pattern | What It Catches |
+|---------|-----------------|
+| `additive_system` | Bat-ball, widget-gadget (subtract instead of solve) |
+| `nonlinear_growth` | Lily pad doubling (linear interpolation) |
+| `monty_hall` | Door switching (50/50 fallacy) |
+| `base_rate` | Medical tests (ignoring prevalence) |
+| `independence` | Coin flips (gambler's fallacy) |
 
 <details>
-<summary><strong>scratchpad operations</strong></summary>
+<summary>All 15 patterns</summary>
 
-| Operation | Purpose |
-|-----------|---------|
+| Pattern | Trap |
+|---------|------|
+| `additive_system` | Subtract instead of solve |
+| `nonlinear_growth` | Linear interpolation |
+| `rate_pattern` | Incorrect scaling |
+| `harmonic_mean` | Arithmetic mean for rates |
+| `independence` | Gambler's fallacy |
+| `pigeonhole` | Underestimate worst case |
+| `base_rate` | Ignore prevalence |
+| `factorial_counting` | Simple division |
+| `clock_overlap` | Assume 12 overlaps |
+| `conditional_probability` | Ignore conditioning |
+| `conjunction_fallacy` | More detail = more likely |
+| `monty_hall` | 50/50 after reveal |
+| `anchoring` | Irrelevant number influence |
+| `sunk_cost` | Past investment bias |
+| `framing_effect` | Gain/loss framing |
+
+</details>
+
+## Tools
+
+**`scratchpad`** — the main tool with 11 operations:
+
+| Operation | What It Does |
+|-----------|--------------|
 | `step` | Add reasoning step (trap priming on first) |
 | `complete` | Finalize with auto spot-check |
 | `revise` | Fix earlier step |
 | `branch` | Explore alternative path |
 | `challenge` | Force adversarial self-check |
 | `navigate` | View history/branches |
-| `spot_check` | Manual trap validation |
-| `hint` | Progressive algebraic help |
-| `mistakes` | Detect common errors |
-| `augment` | Evaluate math expressions |
-| `override` | Force-commit after failure |
-
-</details>
 
 <details>
-<summary><strong>Session management</strong></summary>
+<summary>All operations</summary>
 
-- `list_sessions` — List all active sessions
-- `get_session` — Get session details
-- `clear_session` — Delete a session
-- `compress` — CPC-style context compression
+| Operation | Purpose |
+|-----------|---------|
+| `step` | Add reasoning step |
+| `complete` | Finalize chain |
+| `revise` | Fix earlier step |
+| `branch` | Alternative path |
+| `challenge` | Adversarial self-check |
+| `navigate` | View history |
+| `spot_check` | Manual trap check |
+| `hint` | Progressive simplification |
+| `mistakes` | Algebraic error detection |
+| `augment` | Compute math expressions |
+| `override` | Force-commit failed step |
 
 </details>
+
+**Other tools:** `list_sessions`, `get_session`, `clear_session`, `compress`
+
+## vs Sequential Thinking MCP
+
+| | Sequential Thinking | Verifiable Thinking |
+|---|---|---|
+| Trap detection | ❌ | 15 patterns |
+| Auto-challenge | ❌ | >95% confidence |
+| Contradiction detection | ❌ | ✅ |
+| Confidence tracking | ❌ | Per-step + chain |
+| Local compute | ❌ | ✅ |
+| Token budgets | ❌ | Soft + hard limits |
+
+Sequential Thinking is ~100 lines. This is 22,000+ with 1,831 tests.
+
+See [`docs/competitive-analysis.md`](docs/competitive-analysis.md) for full breakdown.
 
 ## Development
 
 ```bash
 git clone https://github.com/CoderDayton/verifiable-thinking-mcp.git
 cd verifiable-thinking-mcp && bun install
-
-bun run dev      # MCP Inspector
+bun run dev      # Interactive MCP Inspector
 bun test         # 1,831 tests
-bun run build    # Production bundle
 ```
 
 ## License
@@ -211,8 +177,6 @@ MIT
 
 <div align="center">
 
-**[Report Bug](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Request Feature](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Discussions](https://github.com/CoderDayton/verifiable-thinking-mcp/discussions)**
-
-*Built because LLMs shouldn't be confidently wrong.*
+**[Report Bug](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Request Feature](https://github.com/CoderDayton/verifiable-thinking-mcp/issues)**
 
 </div>
