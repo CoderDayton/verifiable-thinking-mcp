@@ -8,6 +8,7 @@
  * - Navigate operation for viewing history/branches/paths
  * - Branch and revise operations
  * - Auto-suggest next simplification step for math derivations
+ * - Proactive stepping guidance based on question complexity
  */
 
 import type { Context } from "fastmcp";
@@ -24,8 +25,12 @@ import {
 } from "../lib/compute/index.ts";
 import { stripMarkdown } from "../lib/extraction.ts";
 import { SessionManager, type ThoughtRecord } from "../lib/session.ts";
+import { challenge } from "../lib/think/challenge.ts";
+import { assessPromptComplexity } from "../lib/think/complexity.ts";
 import { analyzeConfidenceDrift } from "../lib/think/confidence-drift.ts";
+import { checkStepConsistency } from "../lib/think/consistency.ts";
 import { detectDomain } from "../lib/think/guidance.ts";
+import { analyzeStepForResolution } from "../lib/think/hypothesis.ts";
 import {
   type ScratchpadArgs,
   type ScratchpadResponse,
@@ -56,6 +61,28 @@ const ADAPTIVE_PRIMING_THRESHOLD = 190;
  * 10k chars ≈ 2.5k tokens, sufficient for any reasonable question.
  */
 const MAX_QUESTION_LENGTH = 10_000;
+
+// ============================================================================
+// STEPPING GUIDANCE
+// ============================================================================
+
+/** Map complexity tier to recommended minimum steps */
+function getRecommendedSteps(
+  tier: "Low" | "Moderate" | "High" | "Very Hard" | "Almost Impossible",
+): number {
+  switch (tier) {
+    case "Low":
+      return 1;
+    case "Moderate":
+      return 2;
+    case "High":
+      return 4;
+    case "Very Hard":
+      return 6;
+    case "Almost Impossible":
+      return 8;
+  }
+}
 
 // ============================================================================
 // CONFIDENCE TRACKING
@@ -312,12 +339,26 @@ function enrichStepResponse(
   }
 
   // Add token usage info
+  const budgetPercent = tokenBudget > 0 ? (tokenUsage.total / tokenBudget) * 100 : 0;
   response.token_usage = {
     total: tokenUsage.total,
     budget: tokenBudget,
     exceeded: budgetExceeded,
     auto_compressed: autoCompressed,
+    budget_percent: Math.round(budgetPercent),
   };
+
+  // Proactive compression suggestion when approaching budget (>60% consumed)
+  if (budgetPercent >= 60 && !autoCompressed && !compressionResult) {
+    const urgency = budgetPercent >= 80 ? "⚠️ " : "";
+    response.compression_suggestion = {
+      should_compress: true,
+      current_tokens: tokenUsage.total,
+      budget: tokenBudget,
+      percent_used: Math.round(budgetPercent),
+      nudge: `${urgency}Session at ${Math.round(budgetPercent)}% of token budget (${tokenUsage.total}/${tokenBudget}). Use compress=true on next step to reduce context size.`,
+    };
+  }
 
   // Add augmentation info
   if (augmentationResult) {
@@ -675,6 +716,30 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     ? await handleTrapPriming(args.question, sessionId, stepNumber, streamContent)
     : undefined;
 
+  // Proactive stepping guidance: assess complexity on first step when question provided
+  let steppingGuidance: ScratchpadResponse["stepping_guidance"];
+  if (args.question && stepNumber === 1) {
+    const complexity = assessPromptComplexity(args.question);
+    const recommendedSteps = getRecommendedSteps(complexity.tier);
+    steppingGuidance = {
+      complexity_tier: complexity.tier,
+      recommended_steps: recommendedSteps,
+      current_steps: 1,
+      needs_more_steps: recommendedSteps > 1,
+      nudge:
+        recommendedSteps > 2
+          ? `⚠️ This is a ${complexity.tier} complexity question. Take ${recommendedSteps}+ reasoning steps before concluding.`
+          : null,
+    };
+
+    if (steppingGuidance.nudge) {
+      await streamContent({
+        type: "text",
+        text: `${steppingGuidance.nudge}\n\n`,
+      });
+    }
+  }
+
   // Strip markdown and detect domain
   let strippedThought = stripMarkdown(thought);
   const domain = args.domain || detectDomain(strippedThought);
@@ -792,6 +857,12 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     type: "text",
     text: `**Step ${stepNumber}** [${args.purpose}]\n${strippedThought}\n`,
   });
+  if (args.preconditions?.length) {
+    await streamContent({
+      type: "text",
+      text: `📋 **Preconditions:** ${args.preconditions.join(", ")}\n`,
+    });
+  }
   if (args.outcome) {
     await streamContent({ type: "text", text: `**Outcome:** ${args.outcome}\n` });
   }
@@ -803,6 +874,8 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     thought: strippedThought,
     timestamp: Date.now(),
     branch_id: branchId,
+    // Store preconditions if provided
+    preconditions: args.preconditions,
     verification: verificationResult
       ? {
           passed: verificationResult.passed,
@@ -891,6 +964,19 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     });
   }
 
+  // Add stepping guidance if available (from first step complexity assessment)
+  if (steppingGuidance) {
+    response.stepping_guidance = steppingGuidance;
+  }
+
+  // Stream compression suggestion if present
+  if (response.compression_suggestion) {
+    await streamContent({
+      type: "text",
+      text: `📦 ${response.compression_suggestion.nudge}\n`,
+    });
+  }
+
   // S3: Step-level Confidence Drift Detection (CDD)
   // Extracted to helper function to reduce cyclomatic complexity
   const cddResult = await runStepLevelCDD(sessionId, branchId, streamContent);
@@ -912,6 +998,83 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     if (!adaptiveSpotCheck.passed) {
       response.status = "review";
       response.suggested_action = `Potential ${adaptiveSpotCheck.trap_type} trap detected. ${adaptiveSpotCheck.hint || "Reconsider your approach."}`;
+    }
+  }
+
+  // Consistency check: Run every 3 steps to catch contradictions early
+  // Only checks if there are prior steps to compare against
+  if (stepNumber >= 3 && stepNumber % 3 === 0) {
+    const thoughts = SessionManager.getThoughts(sessionId, branchId);
+    const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+    const contradictions = checkStepConsistency(
+      { step: stepNumber, thought: strippedThought },
+      stepData.slice(0, -1), // Exclude current step (already in thoughts)
+    );
+
+    if (contradictions.length > 0) {
+      response.consistency_warning = {
+        has_contradictions: true,
+        count: contradictions.length,
+        contradictions: contradictions.map((c) => ({
+          type: c.type,
+          description: c.description,
+          subject: c.subject,
+          original_step: c.original_step,
+          conflicting_step: c.conflicting_step,
+          confidence: c.confidence,
+        })),
+        nudge: `⚠️ Found ${contradictions.length} potential contradiction(s). Review steps ${contradictions.map((c) => c.original_step).join(", ")} for consistency.`,
+      };
+
+      await streamContent({
+        type: "text",
+        text:
+          `\n⚠️ **Consistency Warning:** ${contradictions.length} contradiction(s) detected\n` +
+          contradictions.map((c) => `  - ${c.description}`).join("\n") +
+          "\n",
+      });
+    }
+  }
+
+  // Hypothesis resolution: Check if any hypothesis in the session has been resolved
+  // This runs on every step to detect resolution signals in the reasoning
+  const session = SessionManager.get(sessionId);
+  if (session) {
+    // Check all branches with hypotheses
+    for (const branch of session.branches.values()) {
+      if (branch.hypothesis && branch.id !== "main") {
+        // Only check if the current step is on this branch
+        if (branchId === branch.id) {
+          // Current step is on this branch, include it
+          const resolution = analyzeStepForResolution(
+            strippedThought,
+            branch.hypothesis,
+            branch.success_criteria ?? null,
+            stepNumber,
+          );
+
+          if (resolution.resolved || resolution.confidence > 0.5) {
+            response.hypothesis_resolution = resolution;
+
+            if (resolution.resolved) {
+              const emoji =
+                resolution.outcome === "confirmed"
+                  ? "✅"
+                  : resolution.outcome === "refuted"
+                    ? "❌"
+                    : "❓";
+              await streamContent({
+                type: "text",
+                text:
+                  `\n${emoji} **Hypothesis ${resolution.outcome?.toUpperCase()}:** "${branch.hypothesis.slice(0, 60)}${branch.hypothesis.length > 60 ? "..." : ""}"\n` +
+                  `   Evidence: ${resolution.evidence}\n` +
+                  `   ${resolution.suggestion}\n`,
+              });
+            }
+            break; // Only report first resolution found
+          }
+        }
+      }
     }
   }
 
@@ -969,6 +1132,8 @@ async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<S
         name: b.name,
         from_step: b.from_step,
         depth: b.depth,
+        hypothesis: b.hypothesis,
+        success_criteria: b.success_criteria,
       }));
       break;
     }
@@ -990,6 +1155,9 @@ async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<S
         confidence: step.verification?.confidence,
         revises_step: step.revises_step,
         revised_by: step.revised_by,
+        preconditions: step.preconditions,
+        hypothesis: step.hypothesis,
+        success_criteria: step.success_criteria,
       };
       break;
     }
@@ -1089,11 +1257,15 @@ async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
 
   // Stream branch creation
   const pendingNote = hadPending ? " (abandoning failed verification step)" : "";
+  const hypothesisNote = args.hypothesis ? `\n   📊 Hypothesis: ${args.hypothesis}` : "";
+  const criteriaNote = args.success_criteria
+    ? `\n   ✅ Success criteria: ${args.success_criteria}`
+    : "";
   await streamContent({
     type: "text",
     text:
       `🌿 **New Branch:** ${branchName}${pendingNote}\n` +
-      `   From step ${fromStep} → Step ${stepNumber}\n\n`,
+      `   From step ${fromStep} → Step ${stepNumber}${hypothesisNote}${criteriaNote}\n\n`,
   });
 
   // Stream the thought
@@ -1111,6 +1283,9 @@ async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
     branch_id: branchId,
     branch_from: fromStep,
     branch_name: branchName,
+    // Hypothesis-driven branching
+    hypothesis: args.hypothesis,
+    success_criteria: args.success_criteria,
   };
 
   // Store thought
@@ -1132,7 +1307,9 @@ async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
     confidence_threshold: threshold,
     steps_with_confidence: confState.stepsWithConfidence,
     status,
-    suggested_action: `Branch "${branchName}" created. Continue reasoning on this alternative path.`,
+    suggested_action: args.hypothesis
+      ? `Branch "${branchName}" created to test: "${args.hypothesis}". Continue reasoning to prove/disprove.`
+      : `Branch "${branchName}" created. Continue reasoning on this alternative path.`,
   };
 
   // Add augmentation info
@@ -1978,45 +2155,172 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
   };
 }
 
+/** Handle challenge operation - adversarial self-check for reasoning quality */
+async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+  const { streamContent } = ctx;
+  const sessionId = args.session_id;
+  if (!sessionId) {
+    throw new Error("session_id required for challenge operation");
+  }
+
+  const session = SessionManager.get(sessionId);
+  if (!session) {
+    throw new Error(`Session not found: ${sessionId}`);
+  }
+
+  const threshold = args.confidence_threshold ?? 0.8;
+  const branchId = args.branch_id || "main";
+
+  // Get thoughts from session
+  const thoughts = SessionManager.getThoughts(sessionId, branchId);
+  if (thoughts.length === 0) {
+    await streamContent({
+      type: "text",
+      text: "⚠️ No reasoning steps to challenge. Add steps first.\n",
+    });
+
+    return {
+      session_id: sessionId,
+      current_step: 0,
+      branch: branchId,
+      operation: "challenge",
+      chain_confidence: 0,
+      confidence_threshold: threshold,
+      steps_with_confidence: 0,
+      status: "continue",
+      suggested_action: "Add reasoning steps before running challenge.",
+      challenge_result: {
+        challenges_generated: 0,
+        challenges: [],
+        overall_robustness: 1.0,
+        summary: "No steps to challenge.",
+      },
+    };
+  }
+
+  // Convert to format expected by challenge function
+  const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+
+  // Run challenge with optional target claim
+  const result = challenge(stepData, args.target_claim);
+
+  // Stream results
+  if (result.challenges_generated === 0) {
+    await streamContent({
+      type: "text",
+      text:
+        `✓ **No significant challenges found**\n` +
+        `Robustness: ${(result.overall_robustness * 100).toFixed(0)}%\n\n` +
+        `_Reasoning appears robust against common counterarguments._\n`,
+    });
+  } else {
+    const highCount = result.challenges.filter((c) => c.severity === "high").length;
+    const medCount = result.challenges.filter((c) => c.severity === "medium").length;
+
+    await streamContent({
+      type: "text",
+      text:
+        `⚡ **Adversarial Challenge Results**\n` +
+        `   Challenges: ${result.challenges_generated} (${highCount} high, ${medCount} medium)\n` +
+        `   Robustness: ${(result.overall_robustness * 100).toFixed(0)}%\n\n`,
+    });
+
+    // Group by severity for better readability
+    const severityOrder = ["high", "medium", "low"] as const;
+    for (const severity of severityOrder) {
+      const challengesOfSeverity = result.challenges.filter((c) => c.severity === severity);
+      if (challengesOfSeverity.length === 0) continue;
+
+      const emoji = severity === "high" ? "🔴" : severity === "medium" ? "🟡" : "🟢";
+      await streamContent({
+        type: "text",
+        text: `**${emoji} ${severity.toUpperCase()} Severity:**\n`,
+      });
+
+      for (const c of challengesOfSeverity) {
+        await streamContent({
+          type: "text",
+          text:
+            `• **${c.type}**: ${c.challenge}\n` +
+            `  _Claim: "${c.original_claim.slice(0, 60)}${c.original_claim.length > 60 ? "..." : ""}"_\n` +
+            `  💡 ${c.suggested_response}\n\n`,
+        });
+      }
+    }
+  }
+
+  // Calculate confidence for session
+  const confState = calculateConfidence(sessionId, branchId);
+  const status =
+    result.challenges.filter((c) => c.severity === "high").length > 0 ? "review" : "continue";
+
+  return {
+    session_id: sessionId,
+    current_step: SessionManager.getCurrentStep(sessionId, branchId),
+    branch: branchId,
+    operation: "challenge",
+    chain_confidence: confState.chainConfidence,
+    confidence_threshold: threshold,
+    steps_with_confidence: confState.stepsWithConfidence,
+    status,
+    suggested_action:
+      result.challenges_generated === 0
+        ? "Reasoning appears robust. Proceed to complete."
+        : result.challenges.filter((c) => c.severity === "high").length > 0
+          ? `Found ${result.challenges.filter((c) => c.severity === "high").length} high-severity challenge(s). Address before finalizing.`
+          : `Found ${result.challenges_generated} challenge(s). Consider addressing before completion.`,
+    challenge_result: {
+      challenges_generated: result.challenges_generated,
+      challenges: result.challenges.map((c) => ({
+        type: c.type,
+        original_claim: c.original_claim,
+        challenge: c.challenge,
+        severity: c.severity,
+        suggested_response: c.suggested_response,
+      })),
+      overall_robustness: result.overall_robustness,
+      summary: result.summary,
+    },
+  };
+}
+
 // ============================================================================
 // SCRATCHPAD TOOL
 // ============================================================================
 
 export const scratchpadTool = {
   name: "scratchpad",
-  description: `Reasoning scratchpad: step tracking, verification, trap detection.
+  description: `Structured reasoning with verification, trap detection, and self-challenge.
 
 OPS:
-step      → Add thought. question= on 1st enables trap priming. Auto-verify after step 3.
-complete  → Finalize. Spot-checks final_answer vs stored question.
-revise    → Fix step (verification fail | trap warning). target_step + reason.
-branch    → Alt path. from_step + branch_name.
-navigate  → View: history|branches|step|path
-augment   → Compute math in text, inject results
-hint      → Progressive math simplification steps
-mistakes  → Check text for algebraic errors
-spot_check→ Manual trap detection on answer
-override  → Force-commit after verification fail (acknowledge=true)
+step       thought= [question= on 1st] → Add reasoning step. Auto-verifies at step 4+.
+complete   [final_answer=] [summary=]  → Finalize chain. Auto spot-checks answer.
+revise     target_step= thought= [reason=] → Fix a step (after verification fail or trap warning).
+branch     thought= [from_step=] [hypothesis=] → Fork reasoning path to test alternative.
+navigate   view=history|branches|step|path [step_id=] → Inspect session state.
+augment    text= → Compute math expressions, inject results.
+hint       [expression=] → Progressive simplification hints (auto-continues).
+mistakes   text= → Check for algebraic errors.
+spot_check question= answer= → Manual trap pattern detection.
+challenge  [target_claim=] → Adversarial self-check. Generates counterarguments.
+override   failed_step= [reason=] → Force-commit after verification fail.
 
-VERIFY (auto step 4+):
-Fail → status="verification_failed", step pending
-Fix  → revise | branch | override
+DEFAULTS:
+confidence_threshold=0.8   token_budget=3000
 
-TRAPS (15 patterns: bat-ball, Monty Hall, etc):
-Prime: question= on step 1
-Check: auto at complete if question + final_answer
-Caught: status="review" → use reconsideration.suggested_revise
-
-BUDGET:
-warn_at_tokens  → Soft. token_warning in response, op continues.
-hard_limit_tokens → Hard. status="budget_exhausted", op blocked. Complete or new session.
+STATUS → ACTION:
+continue            → Add more steps
+threshold_reached   → Consider complete or add verification step
+review              → Trap/drift detected. Use reconsideration.suggested_revise
+verification_failed → revise target_step | branch from prior | override
+budget_exhausted    → complete or new session
 
 FLOW:
-1. step(question=, thought=) → trap_analysis
-2. step(thought=) ... auto-verify at 4+
-3. Fail? → revise | branch
-4. complete(final_answer=) → spot-check
-5. status="review"? → revise`,
+1. step(question=, thought=) → primes trap detection
+2. step(thought=) × N       → auto-verify at 4+
+3. [optional] challenge()   → adversarial self-check
+4. complete(final_answer=)  → spot-check, returns status
+5. If review: revise per reconsideration.suggested_revise`,
 
   parameters: ScratchpadSchema,
 
@@ -2094,6 +2398,9 @@ FLOW:
           break;
         case "spot_check":
           response = await handleSpotCheck(args, ctx);
+          break;
+        case "challenge":
+          response = await handleChallenge(args, ctx);
           break;
         default:
           throw new Error(`Unknown operation: ${(args as { operation: string }).operation}`);

@@ -33,6 +33,7 @@ export const ScratchpadSchema = z.object({
       "hint",
       "mistakes",
       "spot_check",
+      "challenge",
     ])
     .describe("Operation to perform"),
 
@@ -113,6 +114,10 @@ export const ScratchpadSchema = z.object({
     .optional()
     .describe("Max tokens for this step. Rejects if exceeded (default: no limit)"),
   force_large: z.boolean().default(false).describe("Allow step even if it exceeds max_step_tokens"),
+  preconditions: z
+    .array(z.string())
+    .optional()
+    .describe("Assumptions that MUST be true for this step (e.g., 'x > 0', 'file exists')"),
 
   // Navigate operation fields
   view: z
@@ -128,6 +133,14 @@ export const ScratchpadSchema = z.object({
   // Branch operation fields
   from_step: z.number().int().min(1).optional().describe("Step to branch from (default: current)"),
   branch_name: z.string().optional().describe("Human-readable branch name"),
+  hypothesis: z
+    .string()
+    .optional()
+    .describe("Falsifiable hypothesis this branch will test (e.g., 'Assume X is prime')"),
+  success_criteria: z
+    .string()
+    .optional()
+    .describe("What observation proves/disproves this hypothesis"),
 
   // Revise operation fields
   target_step: z.number().int().min(1).optional().describe("Step number to revise"),
@@ -177,6 +190,16 @@ export const ScratchpadSchema = z.object({
 
   // Spot check operation fields
   answer: z.string().optional().describe("The proposed answer to check for trap patterns"),
+
+  // Challenge operation fields
+  challenge_type: z
+    .enum(["assumption_inversion", "edge_case", "premise_check", "steelman_counter", "all"])
+    .optional()
+    .describe("Type of challenge to generate (default: all)"),
+  target_claim: z
+    .string()
+    .optional()
+    .describe("Specific claim to challenge (optional - if omitted, extracts claims from steps)"),
 });
 
 export type ScratchpadArgs = z.infer<typeof ScratchpadSchema>;
@@ -192,6 +215,7 @@ export type OverrideOperation = ScratchpadArgs & { operation: "override" };
 export type HintOperation = ScratchpadArgs & { operation: "hint" };
 export type MistakesOperation = ScratchpadArgs & { operation: "mistakes" };
 export type SpotCheckOperation = ScratchpadArgs & { operation: "spot_check" };
+export type ChallengeOperation = ScratchpadArgs & { operation: "challenge" };
 
 // ============================================================================
 // RESPONSE TYPES
@@ -290,6 +314,10 @@ export interface ScratchpadResponse {
     name: string;
     from_step: number;
     depth: number;
+    /** Hypothesis this branch is testing (if provided) */
+    hypothesis?: string;
+    /** Criteria for proving/disproving the hypothesis */
+    success_criteria?: string;
   }>;
   path?: Array<{
     step: number;
@@ -305,6 +333,12 @@ export interface ScratchpadResponse {
     confidence?: number;
     revises_step?: number;
     revised_by?: number;
+    /** Preconditions/assumptions for this step */
+    preconditions?: string[];
+    /** Hypothesis being tested (for branch steps) */
+    hypothesis?: string;
+    /** Success criteria for the hypothesis */
+    success_criteria?: string;
   };
 
   // For complete operation
@@ -335,6 +369,22 @@ export interface ScratchpadResponse {
     budget: number;
     exceeded: boolean;
     auto_compressed: boolean;
+    /** Percentage of budget consumed */
+    budget_percent: number;
+  };
+
+  // Proactive compression suggestion (when approaching budget)
+  compression_suggestion?: {
+    /** Whether compression is recommended now */
+    should_compress: boolean;
+    /** Current session token total */
+    current_tokens: number;
+    /** Budget threshold */
+    budget: number;
+    /** Percentage consumed */
+    percent_used: number;
+    /** Human-readable nudge */
+    nudge: string;
   };
 
   // Augmentation results (when augment_compute=true)
@@ -489,5 +539,91 @@ export interface ScratchpadResponse {
     explanation: string;
     /** Suggested action if unresolved */
     suggestion: string | null;
+  };
+
+  // Proactive stepping guidance based on question complexity
+  // Provided on first step when question is supplied
+  stepping_guidance?: {
+    /** Complexity tier of the question */
+    complexity_tier: "Low" | "Moderate" | "High" | "Very Hard" | "Almost Impossible";
+    /** Recommended minimum steps for this complexity */
+    recommended_steps: number;
+    /** Current step count */
+    current_steps: number;
+    /** Whether more steps are recommended before completing */
+    needs_more_steps: boolean;
+    /** Human-readable nudge */
+    nudge: string | null;
+  };
+
+  // Consistency check - detects contradictions across reasoning steps
+  // Checked every N steps (configurable) to catch logical inconsistencies
+  consistency_warning?: {
+    /** Whether contradictions were found */
+    has_contradictions: boolean;
+    /** Number of contradictions detected */
+    count: number;
+    /** The contradictions found */
+    contradictions: Array<{
+      /** Type of contradiction */
+      type: "value_reassignment" | "logical_conflict" | "sign_flip" | "direction_reversal";
+      /** Human-readable description */
+      description: string;
+      /** The variable/concept involved */
+      subject: string;
+      /** Step where original claim was made */
+      original_step: number;
+      /** Conflicting step number */
+      conflicting_step: number;
+      /** Confidence in detection (0-1) */
+      confidence: number;
+    }>;
+    /** Human-readable nudge */
+    nudge: string;
+  };
+
+  // Hypothesis resolution - detects when a branch's hypothesis is confirmed/refuted
+  // Only present for steps on branches with hypotheses
+  hypothesis_resolution?: {
+    /** Whether the hypothesis has been resolved */
+    resolved: boolean;
+    /** Resolution outcome if resolved */
+    outcome: "confirmed" | "refuted" | "inconclusive" | null;
+    /** Confidence in the resolution (0-1) */
+    confidence: number;
+    /** Step number where resolution was detected */
+    resolved_at_step: number | null;
+    /** Evidence text that triggered resolution */
+    evidence: string | null;
+    /** The original hypothesis being tested */
+    hypothesis: string;
+    /** The success criteria (if provided) */
+    success_criteria: string | null;
+    /** Suggested action based on resolution */
+    suggestion: string;
+  };
+
+  // Challenge result - adversarial self-check for reasoning quality
+  // Only present for challenge operation
+  challenge_result?: {
+    /** Number of challenges generated */
+    challenges_generated: number;
+    /** The challenges */
+    challenges: Array<{
+      /** Type of challenge */
+      type: "assumption_inversion" | "edge_case" | "premise_check" | "steelman_counter";
+      /** The original claim being challenged */
+      original_claim: string;
+      /** The challenge/counterargument */
+      challenge: string;
+      /** How serious is this challenge */
+      severity: "low" | "medium" | "high";
+      /** Suggested way to address this challenge */
+      suggested_response: string;
+    }>;
+    /** Overall robustness score (0-1) */
+    overall_robustness: number;
+    /** Summary of findings */
+    summary: string;
   };
 }

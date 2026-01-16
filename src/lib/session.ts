@@ -7,7 +7,10 @@
  * - Revision tracking with revised_by marker
  * - Branch depth limits
  * - Batched TTL cleanup for efficiency
+ * - Token tracking sync on cleanup
  */
+
+import { clearSessionTokens } from "./tokens.ts";
 
 export interface ThoughtRecord {
   id: string;
@@ -44,6 +47,11 @@ export interface ThoughtRecord {
   // Tool tracking
   tools_used?: string[];
   external_context?: Record<string, unknown>;
+  // Hypothesis-driven branching
+  hypothesis?: string;
+  success_criteria?: string;
+  // Preconditions (assumptions that must be true for this step)
+  preconditions?: string[];
 }
 
 export interface Branch {
@@ -52,6 +60,10 @@ export interface Branch {
   from_step: number;
   depth: number;
   created_at: number;
+  /** Falsifiable hypothesis this branch tests */
+  hypothesis?: string;
+  /** Criteria for proving/disproving the hypothesis */
+  success_criteria?: string;
 }
 
 export interface Session {
@@ -182,11 +194,15 @@ class SessionManagerImpl {
     }
 
     for (const id of expired) {
+      // Clear token tracking FIRST (before session deletion and recycling)
+      clearSessionTokens(id);
+
       const session = this.sessions.get(id);
+      // Delete from map BEFORE recycling to prevent use-after-free race
+      this.sessions.delete(id);
       if (session) {
         this.recycleSession(session);
       }
-      this.sessions.delete(id);
     }
   }
 
@@ -325,6 +341,8 @@ class SessionManagerImpl {
           from_step: thought.branch_from,
           depth,
           created_at: Date.now(),
+          hypothesis: thought.hypothesis,
+          success_criteria: thought.success_criteria,
         });
       }
       thought.branch_id = branchId;
@@ -430,11 +448,17 @@ class SessionManagerImpl {
   }
 
   clear(sessionId: string): boolean {
+    // Clear token tracking when session is explicitly cleared
+    clearSessionTokens(sessionId);
     return this.sessions.delete(sessionId);
   }
 
   clearAll(): number {
     const count = this.sessions.size;
+    // Clear token tracking for all sessions
+    for (const id of this.sessions.keys()) {
+      clearSessionTokens(id);
+    }
     this.sessions.clear();
     return count;
   }
@@ -697,17 +721,25 @@ class SessionManagerImpl {
     return true;
   }
 
-  /** Commit pending thought (used by override operation) */
+  /** Commit pending thought (used by override operation)
+   * Atomic: only clears pending if addThought succeeds
+   */
   commitPendingThought(sessionId: string): { success: boolean; error?: string } {
     const session = this.get(sessionId);
     if (!session?.pendingThought) {
       return { success: false, error: "No pending thought to commit" };
     }
 
-    const result = this.addThought(sessionId, session.pendingThought.thought);
+    // Clone the pending thought before attempting to add
+    // This ensures we can restore if addThought fails
+    const pendingCopy = session.pendingThought;
+
+    const result = this.addThought(sessionId, pendingCopy.thought);
     if (result.success) {
+      // Only clear pending if addThought succeeded
       session.pendingThought = undefined;
     }
+    // If addThought failed, pending is preserved for retry/alternate recovery
     return result;
   }
 
