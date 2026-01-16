@@ -44,7 +44,7 @@ An MCP server for structured reasoning with cognitive trap detection, verificati
 |--------|-------|
 | 🎯 Cognitive trap patterns | 15 structural detectors |
 | ⚡ Detection latency | <1ms (O(n) single-pass) |
-| 🧪 Test coverage | 1496+ tests, 100% line coverage |
+| 🧪 Test coverage | 1831+ tests, 100% line coverage |
 | 📦 Dependencies | 3 runtime (fastmcp, zod, dotenv) |
 
 ## Features
@@ -302,6 +302,27 @@ cd examples/benchmarks
 bun run priming-latency.ts
 bun run priming-bench.ts --full
 ```
+
+## vs Sequential Thinking MCP
+
+How does this compare to `@modelcontextprotocol/server-sequential-thinking`?
+
+| Feature | Sequential Thinking | Verifiable Thinking |
+|---------|---------------------|---------------------|
+| Thought tracking | ✅ | ✅ |
+| Branching | ✅ Basic | ✅ + hypothesis + success criteria |
+| **Trap detection** | ❌ | ✅ 15 patterns |
+| **Verification** | ❌ | ✅ 4 domains |
+| **Consistency checking** | ❌ | ✅ Contradiction detection |
+| **Confidence tracking** | ❌ | ✅ Per-step + chain average |
+| **Adversarial challenge** | ❌ | ✅ 4 challenge types |
+| **Local compute** | ❌ | ✅ Math + hints + mistake detection |
+| **Context compression** | ❌ | ✅ CPC-style |
+| **Token tracking** | ❌ | ✅ Per-call + budget limits |
+
+Sequential Thinking is minimal scaffolding (~150 lines). Verifiable Thinking is a complete verification system with 18 additional features.
+
+See [`docs/competitive-analysis.md`](docs/competitive-analysis.md) for full comparison.
 
 ## License
 

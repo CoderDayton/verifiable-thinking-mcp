@@ -50,6 +50,7 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target bun --minify --external sury --external effect --external @valibot/to-json-schema",
     "dev": "fastmcp dev src/index.ts",
     "inspect": "fastmcp inspect src/index.ts",
     "start": "bun run src/index.ts",
