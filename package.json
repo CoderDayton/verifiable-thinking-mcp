@@ -1,6 +1,6 @@
 {
   "name": "verifiable-thinking-mcp",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "MCP server for structured reasoning with cognitive trap detection",
   "author": "CoderDayton",
   "license": "MIT",
@@ -24,13 +24,13 @@
     "bun"
   ],
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
   "bin": {
-    "verifiable-thinking-mcp": "src/index.ts"
+    "verifiable-thinking-mcp": "dist/index.js"
   },
   "files": [
-    "src/**/*.ts",
-    "!src/**/*.test.ts"
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
   ],
   "engines": {
     "node": ">=18",
@@ -50,7 +50,7 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target bun --minify --external sury --external effect --external @valibot/to-json-schema",
+    "build": "bun build src/index.ts --outdir dist --target node --minify --external sury --external effect --external @valibot/to-json-schema && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js",
     "dev": "fastmcp dev src/index.ts",
     "inspect": "fastmcp inspect src/index.ts",
     "start": "bun run src/index.ts",

@@ -1,72 +1,63 @@
 <div align="center">
 
-<img src="assets/header.svg" alt="Verifiable Thinking MCP" width="800" />
+# Verifiable Thinking
 
-**LLMs fail predictably on cognitive traps. This catches them.**
+**Your LLM is confidently wrong 40% of the time on reasoning questions.**<br>
+**This fixes that.**
 
-[![npm version](https://img.shields.io/npm/v/verifiable-thinking-mcp?color=blue&label=npm)](https://www.npmjs.com/package/verifiable-thinking-mcp)
-[![CI](https://img.shields.io/github/actions/workflow/status/CoderDayton/verifiable-thinking-mcp/ci.yml?label=CI)](https://github.com/CoderDayton/verifiable-thinking-mcp/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/verifiable-thinking-mcp?color=blue)](https://www.npmjs.com/package/verifiable-thinking-mcp)
+[![CI](https://img.shields.io/github/actions/workflow/status/CoderDayton/verifiable-thinking-mcp/ci.yml?label=CI)](https://github.com/CoderDayton/verifiable-thinking-mcp/actions)
 [![codecov](https://codecov.io/gh/CoderDayton/verifiable-thinking-mcp/branch/main/graph/badge.svg)](https://codecov.io/gh/CoderDayton/verifiable-thinking-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-*Bat-and-ball, lily pad doubling, Monty Hall—15 trap patterns detected in <1ms, no LLM calls.*
-
-[Quick Start](#quick-start) • [Features](#features) • [Trap Detection](#trap-detection) • [API](#tools)
+[Why This Exists](#why-this-exists) • [Quick Start](#quick-start) • [Features](#features) • [vs Sequential Thinking](#vs-sequential-thinking)
 
 </div>
 
 ---
 
-An MCP server for structured reasoning with cognitive trap detection, verification gates, and context compression.
+## The Problem
+
+Ask Claude or GPT this:
+
+> *A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost?*
+
+**40% of the time, it answers $0.10.** Confidently. With reasoning. And it's wrong.
+
+The correct answer is $0.05 (because $0.05 + $1.05 = $1.10).
+
+This isn't a cherry-picked example. LLMs fail predictably on cognitive traps:
+- Lily pad doubling problems
+- Monty Hall scenarios  
+- Base rate fallacies
+- Gambler's fallacy questions
+
+They fail because they pattern-match to *similar-looking* problems instead of reasoning through the actual structure.
+
+## The Solution
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│ "A bat and ball cost $1.10. The bat costs $1 more..."          │
-│                             ↓                                  │
-│ TRAP DETECTED: additive_system                                 │
-│ > Don't subtract $1 from $1.10. Set up: x + (x+1) = 1.10       │
-│                             ↓                                  │
-│ Answer: $0.05 (not $0.10)                                      │
-└────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  "A bat and ball cost $1.10. The bat costs $1 more..."          │
+│                              ↓                                  │
+│  TRAP DETECTED: additive_system                                 │
+│  ⚠️  Don't subtract $1 from $1.10. Set up: x + (x+1) = 1.10     │
+│                              ↓                                  │
+│  LLM receives warning BEFORE reasoning starts                   │
+│                              ↓                                  │
+│  Answer: $0.05 ✓                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-## Why This Exists
-
-| The Problem | Our Solution |
-|-------------|--------------|
-| LLMs answer "$0.10" to bat-ball ~40% of the time | Trap priming catches it before reasoning starts |
-| Verification requires another LLM call | O(n) heuristics, zero LLM overhead |
-| Reasoning chains drift without structure | Scratchpad with confidence tracking & auto-verification |
-
-## Quick Stats
-
-| Metric | Value |
-|--------|-------|
-| 🎯 Cognitive trap patterns | 15 structural detectors |
-| ⚡ Detection latency | <1ms (O(n) single-pass) |
-| 🧪 Test coverage | 1831+ tests, 100% line coverage |
-| 📦 Dependencies | 3 runtime (fastmcp, zod, dotenv) |
-
-## Features
-
-| Feature | What It Does |
-|---------|--------------|
-| 🎯 **Trap Detection** | 15 cognitive trap patterns (bat-ball, Monty Hall, base rate...) via O(n) heuristics |
-| 📝 **Scratchpad** | Structured reasoning with step tracking, confidence, and verification gates |
-| 🔢 **Local Compute** | Math expression evaluation without LLM round-trips |
-| 🗜️ **CPC Compression** | Query-aware context compression for long reasoning chains |
+**Verifiable Thinking** detects 15 cognitive trap patterns in <1ms and warns the LLM before it starts reasoning. No extra LLM calls. Just pattern matching.
 
 ## Quick Start
-
-**Zero config install:**
 
 ```bash
 npx -y verifiable-thinking-mcp
 ```
 
-### Claude Desktop
-
-Add to `claude_desktop_config.json`:
+Add to Claude Desktop (`claude_desktop_config.json`):
 
 ```json
 {
@@ -79,250 +70,138 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-Or with Bun:
+That's it. Claude now has trap detection built in.
 
-```json
-{
-  "mcpServers": {
-    "verifiable-thinking": {
-      "command": "bunx",
-      "args": ["verifiable-thinking-mcp"]
-    }
-  }
-}
-```
+## Why This Exists
 
-### Basic Usage
+I got tired of LLMs being confidently wrong.
+
+Not wrong about obscure facts—wrong about basic math and logic. The kind of problems where a human who *thought carefully* would get it right, but an LLM pattern-matches to the wrong template and produces a confident, well-reasoned, incorrect answer.
+
+The MCP ecosystem had "Sequential Thinking"—a tool that helps LLMs think step-by-step. But step-by-step reasoning doesn't help if you're reasoning toward the wrong answer from the start.
+
+So I built this. **22,000+ lines of code. 1,831 tests. 15 trap detectors.** All to catch the patterns that make LLMs fail.
+
+## Features
+
+| Feature | What It Does | Why It Matters |
+|---------|--------------|----------------|
+| **Trap Detection** | 15 cognitive trap patterns detected in <1ms | Warns LLM *before* it reasons toward wrong answer |
+| **Auto-Challenge** | Forces counterarguments when confidence >95% | Catches overconfident mistakes |
+| **Contradiction Detection** | Spots "Let x=5" then "Now x=10" in reasoning chains | Prevents reasoning drift |
+| **Confidence Tracking** | Monitors per-step and chain-average confidence | Flags suspiciously stable overconfidence |
+| **Local Math** | Evaluates expressions without LLM calls | Catches arithmetic errors instantly |
+| **Budget Control** | Token tracking with soft/hard limits | Prevents runaway reasoning chains |
+
+<details>
+<summary><strong>All 15 Trap Patterns</strong></summary>
+
+| Pattern | Classic Example | The Trap |
+|---------|-----------------|----------|
+| `additive_system` | Bat and ball | Subtract instead of solve equations |
+| `nonlinear_growth` | Lily pad doubling | Linear interpolation on exponential |
+| `rate_pattern` | 5 machines, 5 minutes | Incorrect scaling |
+| `harmonic_mean` | Round-trip average speed | Arithmetic mean for rates |
+| `independence` | Coin flip sequence | Gambler's fallacy |
+| `pigeonhole` | Socks in the dark | Underestimate worst case |
+| `base_rate` | Medical test accuracy | Ignore prevalence |
+| `factorial_counting` | Trailing zeros in n! | Simple division |
+| `clock_overlap` | Hour/minute hand overlaps | Assume exactly 12 |
+| `conditional_probability` | Given/if probability | Ignore conditioning |
+| `conjunction_fallacy` | Linda the bank teller | More detail = more likely |
+| `monty_hall` | Door switching game | 50/50 fallacy after reveal |
+| `anchoring` | Estimation after priming | Irrelevant number influence |
+| `sunk_cost` | Should I continue? | Past investment bias |
+| `framing_effect` | "Save 200" vs "400 die" | Gain/loss framing |
+
+</details>
+
+## How It Works
 
 ```typescript
-// Step 1: Start reasoning with trap priming
+// Step 1: Start reasoning—trap detection runs automatically
 scratchpad({
   operation: "step",
-  question: "A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost?",
-  thought: "Let me set up equations. Let ball = x, bat = x + 1.00",
+  question: "A bat and ball cost $1.10. The bat costs $1 more than the ball...",
+  thought: "Let me work this out systematically",
+  confidence: 0.8
+})
+// → Returns trap_analysis: { pattern: "additive_system", warning: "..." }
+
+// Step 2: Continue reasoning with the warning in context
+scratchpad({
+  operation: "step", 
+  thought: "Setting up equations: ball = x, bat = x + 1.00",
   confidence: 0.9
 })
-// Returns trap_analysis warning about additive_system pattern
 
-// Step 2: Continue reasoning
-scratchpad({
-  operation: "step",
-  thought: "x + (x + 1.00) = 1.10, so 2x = 0.10, x = 0.05",
-  confidence: 0.95
-})
-
-// Step 3: Complete with spot-check
+// Step 3: Complete—auto spot-check validates answer
 scratchpad({
   operation: "complete",
   final_answer: "$0.05"
 })
-// Auto spot-checks against stored question
+// → Returns validation result
 ```
 
-## Tools
+## vs Sequential Thinking
 
-### `scratchpad` (primary)
+| | Sequential Thinking | Verifiable Thinking |
+|---|:---:|:---:|
+| Trap detection | ❌ | 15 patterns |
+| Auto-challenge | ❌ | ✓ |
+| Contradiction detection | ❌ | ✓ |
+| Confidence tracking | ❌ | ✓ |
+| Local compute | ❌ | ✓ |
+| Token budgets | ❌ | ✓ |
+| Lines of code | ~100 | 22,000+ |
+| Tests | ? | 1,831 |
 
-Unified reasoning tool with operation-based dispatch.
+Sequential Thinking helps you think step-by-step.<br>
+Verifiable Thinking catches you when you're stepping in the wrong direction.
 
-**Operations:**
+[Full comparison →](docs/competitive-analysis.md)
 
-| Operation | Purpose | Required Params |
-|-----------|---------|-----------------|
-| `step` | Add reasoning step | `thought` |
-| `complete` | Finalize chain | — |
-| `revise` | Fix earlier step | `thought`, `target_step` |
-| `branch` | Alternative path | `thought` |
-| `navigate` | View history | `view` (history\|branches\|step\|path) |
-| `spot_check` | Manual trap check | `question`, `answer` |
-| `hint` | Progressive simplification | `expression` |
-| `mistakes` | Algebraic error detection | `text` |
-| `augment` | Compute math expressions | `text` |
-| `override` | Force-commit failed step | `failed_step`, `reason` |
+## API Reference
 
-**Key Parameters:**
+<details>
+<summary><strong>scratchpad operations</strong></summary>
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `question` | string | Pass on first step for trap priming |
-| `thought` | string | Current reasoning step |
-| `confidence` | 0-1 | Step confidence (accumulates to chain average) |
-| `verify` | boolean | Enable domain verification (auto-enabled after step 3) |
-| `domain` | enum | math, logic, code, general |
-| `warn_at_tokens` | number | Soft limit: warn when session tokens exceed threshold |
-| `hard_limit_tokens` | number | Hard limit: block operations when exceeded |
+| Operation | Purpose |
+|-----------|---------|
+| `step` | Add reasoning step (trap priming on first) |
+| `complete` | Finalize with auto spot-check |
+| `revise` | Fix earlier step |
+| `branch` | Explore alternative path |
+| `challenge` | Force adversarial self-check |
+| `navigate` | View history/branches |
+| `spot_check` | Manual trap validation |
+| `hint` | Progressive algebraic help |
+| `mistakes` | Detect common errors |
+| `augment` | Evaluate math expressions |
+| `override` | Force-commit after failure |
 
-**Token Tracking:**
+</details>
 
-Every response includes token usage metadata:
+<details>
+<summary><strong>Session management</strong></summary>
 
-```json
-{
-  "tokens": { "input_tokens": 42, "output_tokens": 156, "total_tokens": 198 },
-  "session_tokens": { "total_input": 84, "total_output": 312, "total": 396, "operations": 2 }
-}
-```
+- `list_sessions` — List all active sessions
+- `get_session` — Get session details
+- `clear_session` — Delete a session
+- `compress` — CPC-style context compression
 
-**Cost Control:**
-
-Use `warn_at_tokens` for soft warnings, or `hard_limit_tokens` to block operations:
-
-```typescript
-// Soft limit: warns but allows operation
-scratchpad({
-  operation: "step",
-  thought: "...",
-  warn_at_tokens: 2000  // Adds token_warning to response
-})
-
-// Hard limit: blocks operation entirely
-scratchpad({
-  operation: "step",
-  thought: "...",
-  hard_limit_tokens: 5000  // Returns status="budget_exhausted" if exceeded
-})
-// Response includes budget_exhausted with recommendation to complete or start new session
-```
-
-**Workflow:**
-
-1. `step(question="...", thought="...")` → trap_analysis if patterns detected
-2. Continue with `step(thought="...")` → auto-verify kicks in after step 3
-3. If verification fails → `revise` or `branch`
-4. `complete(final_answer="...")` → auto spot-check against stored question
-5. If status="review" → follow `reconsideration.suggested_revise`
-
-### `list_sessions`
-
-List all active reasoning sessions.
-
-### `get_session`
-
-Retrieve session in `full`, `summary`, or `compressed` format.
-
-### `clear_session`
-
-Clear specific session or all sessions.
-
-### `compress`
-
-Standalone CPC-style context compression.
-
-```typescript
-compress({
-  context: "Long text to compress...",
-  query: "relevance query",
-  target_ratio: 0.5,
-  boost_reasoning: true
-})
-```
-
-## Trap Detection
-
-Detects 15 structural patterns without LLM calls:
-
-| Pattern | Trap | Example |
-|---------|------|---------|
-| `additive_system` | Subtract instead of solve | bat-ball, widget-gadget |
-| `nonlinear_growth` | Linear interpolation | lily pad doubling |
-| `rate_pattern` | Incorrect scaling | 5 machines/5 minutes |
-| `harmonic_mean` | Arithmetic mean for rates | average speed round-trip |
-| `independence` | Gambler's fallacy | coin flip sequences |
-| `pigeonhole` | Underestimate worst case | minimum to guarantee |
-| `base_rate` | Ignore prevalence | medical test accuracy |
-| `factorial_counting` | Simple division | trailing zeros in n! |
-| `clock_overlap` | Assume 12 overlaps | hour/minute hand |
-| `conditional_probability` | Ignore conditioning | given/if probability |
-| `conjunction_fallacy` | More detail = more likely | Linda problem |
-| `monty_hall` | 50/50 after reveal | door switching |
-| `anchoring` | Influenced by irrelevant number | estimation after priming |
-| `sunk_cost` | Consider past investment | should continue? |
-| `framing_effect` | Gain/loss framing bias | save vs die |
-
-## Architecture
-
-```
-src/
-├── index.ts              # FastMCP server entry
-├── tools/
-│   ├── scratchpad.ts     # Main reasoning tool (1800 LOC)
-│   ├── sessions.ts       # Session management
-│   └── compress.ts       # Compression tool
-└── lib/
-    ├── think/
-    │   ├── spot-check.ts # Trap detection (O(n))
-    │   ├── guidance.ts   # Domain detection
-    │   └── scratchpad-schema.ts
-    ├── compression.ts    # CPC-style compression
-    ├── compute/          # Local math evaluation
-    ├── verification.ts   # Domain verifiers
-    ├── session.ts        # Session manager with TTL
-    └── extraction.ts     # Answer extraction
-```
+</details>
 
 ## Development
 
 ```bash
-# Clone and install
 git clone https://github.com/CoderDayton/verifiable-thinking-mcp.git
-cd verifiable-thinking
-bun install
+cd verifiable-thinking-mcp && bun install
 
-# Interactive dev mode with MCP Inspector
-bun run dev
-
-# Inspect server capabilities
-bun run inspect
-
-# Run tests
-bun test
-
-# Type check
-bun run typecheck
-
-# Lint and format
-bun run check
+bun run dev      # MCP Inspector
+bun test         # 1,831 tests
+bun run build    # Production bundle
 ```
-
-## Benchmarks
-
-See `examples/benchmarks/`:
-
-| Benchmark | Purpose |
-|-----------|---------|
-| `priming-latency.ts` | Validates O(n) trap detection (<1ms) |
-| `priming-bench.ts` | LLM accuracy with/without priming |
-| `math-bench.ts` | Local compute accuracy |
-| `compression-bench.ts` | Compression ratio and retention |
-
-Run benchmarks:
-
-```bash
-cd examples/benchmarks
-bun run priming-latency.ts
-bun run priming-bench.ts --full
-```
-
-## vs Sequential Thinking MCP
-
-How does this compare to `@modelcontextprotocol/server-sequential-thinking`?
-
-| Feature | Sequential Thinking | Verifiable Thinking |
-|---------|---------------------|---------------------|
-| Thought tracking | ✅ | ✅ |
-| Branching | ✅ Basic | ✅ + hypothesis + success criteria |
-| **Trap detection** | ❌ | ✅ 15 patterns |
-| **Verification** | ❌ | ✅ 4 domains |
-| **Consistency checking** | ❌ | ✅ Contradiction detection |
-| **Confidence tracking** | ❌ | ✅ Per-step + chain average |
-| **Adversarial challenge** | ❌ | ✅ 4 challenge types |
-| **Local compute** | ❌ | ✅ Math + hints + mistake detection |
-| **Context compression** | ❌ | ✅ CPC-style |
-| **Token tracking** | ❌ | ✅ Per-call + budget limits |
-
-Sequential Thinking is minimal scaffolding (~150 lines). Verifiable Thinking is a complete verification system with 18 additional features.
-
-See [`docs/competitive-analysis.md`](docs/competitive-analysis.md) for full comparison.
 
 ## License
 
@@ -332,8 +211,8 @@ MIT
 
 <div align="center">
 
-**[Report Bug](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Request Feature](https://github.com/CoderDayton/verifiable-thinking-mcp/issues)**
+**[Report Bug](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Request Feature](https://github.com/CoderDayton/verifiable-thinking-mcp/issues) · [Discussions](https://github.com/CoderDayton/verifiable-thinking-mcp/discussions)**
 
-Made with 🧠 for more reliable AI reasoning
+*Built because LLMs shouldn't be confidently wrong.*
 
 </div>
