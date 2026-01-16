@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-15
+
+### Added
+
+- **Consistency Checking** - Automatic contradiction detection between reasoning steps
+  - Detects value reassignment (e.g., "Let x = 5" then "Now x = 10")
+  - Detects logical conflicts ("always" vs "never", "all" vs "none")
+  - Detects sign flips (positive/negative, increasing/decreasing)
+  - Runs every 3 steps via `runConsistencyCheck()` helper
+  - O(n) algorithm, <100ms for 100 steps
+
+- **Hypothesis Resolution** - Automatic detection of branch hypothesis outcomes
+  - Detects confirmation signals (QED, "proven", "we have shown")
+  - Detects refutation signals (contradiction, counterexample, "impossible")
+  - Detects inconclusive signals ("need more evidence", "inconclusive")
+  - Returns `hypothesis_resolution` field with outcome and suggestion
+
+- **Auto-Challenge on Overconfidence** - Adversarial self-check triggers automatically
+  - Triggers when confidence >95%
+  - Triggers when confidence >90% with <3 steps and no verification
+  - Returns `challenge_suggestion` field with challenge type recommendation
+  - Uses `shouldChallenge()` from challenge module
+
+- **Merge Suggestions** - Prompts to merge confirmed branch findings
+  - When `hypothesis_resolution.outcome === "confirmed"`, suggests merging
+  - Returns `merge_suggestion` field with merge recommendation
+
+- **Build Command** - `bun run build` produces minified bundle
+  - Output: `dist/index.js` (~2MB minified)
+  - Externals: sury, effect, @valibot/to-json-schema
+
+- **Competitive Analysis Documentation** - `docs/competitive-analysis.md`
+  - Feature comparison vs `@modelcontextprotocol/server-sequential-thinking`
+  - 20+ feature comparison table
+  - Performance benchmarks
+
+### Changed
+
+- **Refactored `handleStep()`** - Reduced complexity from 104 to <50
+  - Extracted `runConsistencyCheck()` helper
+  - Extracted `runHypothesisResolution()` helper
+  - Extracted `runAutoChallenge()` helper
+  - Extracted `calculateSteppingGuidance()` helper
+  - Extracted `runVerificationCheck()` helper
+
+- **Updated test count** - 1831 tests (was 1496)
+
+### Fixed
+
+- Routing feedback analysis for trap pattern bypass scenarios
+
 ## [0.3.0] - 2026-01-11
 
 ### Added
@@ -82,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-write-wins for `setQuestion()` prevents session hijacking
 - OIDC trusted publishing for npm (no tokens stored)
 
-[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/releases/tag/v0.1.0
