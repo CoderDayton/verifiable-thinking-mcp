@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-01-15
+
+### Fixed
+
+- **npm publish now includes dist/** - Release workflow was missing `bun run build` step
+  - Added build step before `npm publish` in CI
+  - Added verification step to ensure `dist/index.js` exists
+  - `npx -y verifiable-thinking-mcp` now works correctly
+
 ## [0.4.1] - 2026-01-15
 
 ### Fixed
@@ -143,7 +152,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-write-wins for `setQuestion()` prevents session hijacking
 - OIDC trusted publishing for npm (no tokens stored)
 
-[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.2.0...v0.3.0
