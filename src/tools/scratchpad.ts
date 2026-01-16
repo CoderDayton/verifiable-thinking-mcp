@@ -25,7 +25,7 @@ import {
 } from "../lib/compute/index.ts";
 import { stripMarkdown } from "../lib/extraction.ts";
 import { SessionManager, type ThoughtRecord } from "../lib/session.ts";
-import { challenge } from "../lib/think/challenge.ts";
+import { challenge, shouldChallenge } from "../lib/think/challenge.ts";
 import { assessPromptComplexity } from "../lib/think/complexity.ts";
 import { analyzeConfidenceDrift } from "../lib/think/confidence-drift.ts";
 import { checkStepConsistency } from "../lib/think/consistency.ts";
@@ -676,6 +676,316 @@ async function handleTrapPriming(
   };
 }
 
+/**
+ * Run consistency check every N steps to detect contradictions.
+ * Returns consistency_warning if contradictions found, undefined otherwise.
+ */
+async function runConsistencyCheck(
+  sessionId: string,
+  branchId: string,
+  stepNumber: number,
+  currentThought: string,
+  streamContent: MCPContext["streamContent"],
+): Promise<ScratchpadResponse["consistency_warning"]> {
+  // Only check every 3 steps, and only if we have prior steps
+  if (stepNumber < 3 || stepNumber % 3 !== 0) {
+    return undefined;
+  }
+
+  const thoughts = SessionManager.getThoughts(sessionId, branchId);
+  const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+  const contradictions = checkStepConsistency(
+    { step: stepNumber, thought: currentThought },
+    stepData.slice(0, -1), // Exclude current step (already in thoughts)
+  );
+
+  if (contradictions.length === 0) {
+    return undefined;
+  }
+
+  await streamContent({
+    type: "text",
+    text:
+      `\n⚠️ **Consistency Warning:** ${contradictions.length} contradiction(s) detected\n` +
+      contradictions.map((c) => `  - ${c.description}`).join("\n") +
+      "\n",
+  });
+
+  return {
+    has_contradictions: true,
+    count: contradictions.length,
+    contradictions: contradictions.map((c) => ({
+      type: c.type,
+      description: c.description,
+      subject: c.subject,
+      original_step: c.original_step,
+      conflicting_step: c.conflicting_step,
+      confidence: c.confidence,
+    })),
+    nudge: `⚠️ Found ${contradictions.length} potential contradiction(s). Review steps ${contradictions.map((c) => c.original_step).join(", ")} for consistency.`,
+  };
+}
+
+/**
+ * Run hypothesis resolution check for branch steps.
+ * Returns hypothesis_resolution and optional merge_suggestion if confirmed.
+ */
+async function runHypothesisResolution(
+  sessionId: string,
+  branchId: string,
+  stepNumber: number,
+  currentThought: string,
+  streamContent: MCPContext["streamContent"],
+): Promise<{
+  resolution?: ScratchpadResponse["hypothesis_resolution"];
+  mergeSuggestion?: ScratchpadResponse["merge_suggestion"];
+}> {
+  const session = SessionManager.get(sessionId);
+  if (!session) {
+    return {};
+  }
+
+  // Check all branches with hypotheses
+  for (const branch of session.branches.values()) {
+    if (!branch.hypothesis || branch.id === "main") {
+      continue;
+    }
+
+    // Only check if the current step is on this branch
+    if (branchId !== branch.id) {
+      continue;
+    }
+
+    const resolution = analyzeStepForResolution(
+      currentThought,
+      branch.hypothesis,
+      branch.success_criteria ?? null,
+      stepNumber,
+    );
+
+    if (!resolution.resolved && resolution.confidence <= 0.5) {
+      continue;
+    }
+
+    // Stream resolution status
+    if (resolution.resolved) {
+      const emoji =
+        resolution.outcome === "confirmed" ? "✅" : resolution.outcome === "refuted" ? "❌" : "❓";
+      await streamContent({
+        type: "text",
+        text:
+          `\n${emoji} **Hypothesis ${resolution.outcome?.toUpperCase()}:** "${branch.hypothesis.slice(0, 60)}${branch.hypothesis.length > 60 ? "..." : ""}"\n` +
+          `   Evidence: ${resolution.evidence}\n` +
+          `   ${resolution.suggestion}\n`,
+      });
+    }
+
+    // Build merge suggestion if hypothesis confirmed
+    let mergeSuggestion: ScratchpadResponse["merge_suggestion"];
+    if (resolution.outcome === "confirmed") {
+      mergeSuggestion = {
+        should_merge: true,
+        from_branch: branch.id,
+        confirmed_hypothesis: branch.hypothesis,
+        key_findings: resolution.evidence || currentThought.slice(0, 100),
+        nudge: `💡 Hypothesis confirmed! Consider incorporating findings from branch "${branch.name || branch.id}" into your main reasoning.`,
+      };
+
+      await streamContent({
+        type: "text",
+        text: `\n${mergeSuggestion.nudge}\n`,
+      });
+    }
+
+    return { resolution, mergeSuggestion };
+  }
+
+  return {};
+}
+
+/**
+ * Check if reasoning should be challenged and build suggestion.
+ * Returns challenge_suggestion if overconfidence detected, undefined otherwise.
+ */
+async function runAutoChallenge(
+  chainConfidence: number,
+  stepCount: number,
+  hasVerification: boolean,
+  streamContent: MCPContext["streamContent"],
+): Promise<ScratchpadResponse["challenge_suggestion"]> {
+  if (!shouldChallenge(chainConfidence, stepCount, hasVerification)) {
+    return undefined;
+  }
+
+  // Determine reason for challenge suggestion
+  let reason: string;
+  let suggestedType: ScratchpadResponse["challenge_suggestion"] extends
+    | { suggested_type: infer T }
+    | undefined
+    ? T
+    : never;
+
+  if (chainConfidence > 0.95) {
+    reason = `Very high confidence (${(chainConfidence * 100).toFixed(0)}%) warrants adversarial review`;
+    suggestedType = "all";
+  } else if (stepCount < 3 && !hasVerification) {
+    reason = `High confidence (${(chainConfidence * 100).toFixed(0)}%) with only ${stepCount} step(s) and no verification`;
+    suggestedType = "premise_check";
+  } else {
+    reason = `Confidence pattern suggests potential overconfidence`;
+    suggestedType = "assumption_inversion";
+  }
+
+  const nudge = `🎯 Consider using \`challenge\` operation: ${reason}`;
+
+  await streamContent({
+    type: "text",
+    text: `\n${nudge}\n`,
+  });
+
+  return {
+    should_challenge: true,
+    reason,
+    suggested_type: suggestedType,
+    nudge,
+  };
+}
+
+/**
+ * Calculate stepping guidance based on question complexity.
+ * Only runs on step 1 when a question is provided.
+ */
+async function calculateSteppingGuidance(
+  question: string | undefined,
+  stepNumber: number,
+  streamContent: MCPContext["streamContent"],
+): Promise<ScratchpadResponse["stepping_guidance"]> {
+  if (!question || stepNumber !== 1) {
+    return undefined;
+  }
+
+  const complexity = assessPromptComplexity(question);
+  const recommendedSteps = getRecommendedSteps(complexity.tier);
+  const guidance: ScratchpadResponse["stepping_guidance"] = {
+    complexity_tier: complexity.tier,
+    recommended_steps: recommendedSteps,
+    current_steps: 1,
+    needs_more_steps: recommendedSteps > 1,
+    nudge:
+      recommendedSteps > 2
+        ? `⚠️ This is a ${complexity.tier} complexity question. Take ${recommendedSteps}+ reasoning steps before concluding.`
+        : null,
+  };
+
+  if (guidance.nudge) {
+    await streamContent({
+      type: "text",
+      text: `${guidance.nudge}\n\n`,
+    });
+  }
+
+  return guidance;
+}
+
+/**
+ * Run verification on thought and return failure response if verification fails.
+ * Returns null if verification passes or is not required.
+ */
+async function runVerificationCheck(
+  args: ScratchpadArgs,
+  sessionId: string,
+  branchId: string,
+  stepNumber: number,
+  thought: string,
+  domain: "math" | "logic" | "code" | "general",
+  threshold: number,
+  compressionResult: {
+    applied: boolean;
+    original_tokens: number;
+    compressed_tokens: number;
+    ratio: number;
+  } | null,
+  streamContent: MCPContext["streamContent"],
+): Promise<
+  | {
+      passed: true;
+      result: ReturnType<typeof verify> | null;
+    }
+  | {
+      passed: false;
+      response: ScratchpadResponse;
+    }
+> {
+  // Run verification if requested OR auto-enabled for longer chains
+  // Auto-verify when: chain has >3 steps AND verify wasn't explicitly set to false
+  const priorThoughts = SessionManager.getThoughts(sessionId, branchId);
+  const shouldAutoVerify = priorThoughts.length >= 3 && args.verify !== false;
+  const shouldVerify = args.verify === true || shouldAutoVerify;
+
+  if (!shouldVerify) {
+    return { passed: true, result: null };
+  }
+
+  const autoVerifyEnabled = shouldAutoVerify && args.verify !== true;
+  const contextStrings = priorThoughts.map((t) => t.thought);
+  const verificationResult = verify(thought, domain, contextStrings, true);
+
+  // Note auto-verification in stream if it was triggered
+  if (autoVerifyEnabled) {
+    await streamContent({
+      type: "text",
+      text: `🔍 **Auto-verification enabled** (chain length: ${priorThoughts.length + 1} steps)\n`,
+    });
+  }
+
+  // HALT ON VERIFICATION FAILURE
+  if (!verificationResult.passed) {
+    const mistakeResult = domain === "math" ? detectCommonMistakesFromText(thought) : null;
+    const detectedMistakes = mistakeResult?.mistakes ?? [];
+
+    // Build and store pending record
+    const pendingRecord = buildPendingRecord({
+      sessionId,
+      branchId,
+      stepNumber,
+      thought,
+      domain,
+      verificationConfidence: verificationResult.confidence,
+      compressionResult,
+    });
+    const verificationError = {
+      issue: verificationResult.suggestions[0] || "Verification failed",
+      evidence: verificationResult.evidence,
+      suggestions: verificationResult.suggestions,
+      confidence: verificationResult.confidence,
+      domain,
+    };
+    SessionManager.setPendingThought(sessionId, pendingRecord, verificationError);
+
+    // Stream failure and return response
+    await streamVerificationFailure(
+      streamContent,
+      verificationResult,
+      detectedMistakes,
+      stepNumber,
+    );
+    return {
+      passed: false,
+      response: buildVerificationFailureResponse({
+        sessionId,
+        branchId,
+        stepNumber,
+        threshold,
+        verificationResult,
+        detectedMistakes,
+        domain,
+      }),
+    };
+  }
+
+  return { passed: true, result: verificationResult };
+}
+
 // ============================================================================
 // OPERATION HANDLERS
 // ============================================================================
@@ -717,28 +1027,11 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     : undefined;
 
   // Proactive stepping guidance: assess complexity on first step when question provided
-  let steppingGuidance: ScratchpadResponse["stepping_guidance"];
-  if (args.question && stepNumber === 1) {
-    const complexity = assessPromptComplexity(args.question);
-    const recommendedSteps = getRecommendedSteps(complexity.tier);
-    steppingGuidance = {
-      complexity_tier: complexity.tier,
-      recommended_steps: recommendedSteps,
-      current_steps: 1,
-      needs_more_steps: recommendedSteps > 1,
-      nudge:
-        recommendedSteps > 2
-          ? `⚠️ This is a ${complexity.tier} complexity question. Take ${recommendedSteps}+ reasoning steps before concluding.`
-          : null,
-    };
-
-    if (steppingGuidance.nudge) {
-      await streamContent({
-        type: "text",
-        text: `${steppingGuidance.nudge}\n\n`,
-      });
-    }
-  }
+  const steppingGuidance = await calculateSteppingGuidance(
+    args.question,
+    stepNumber,
+    streamContent,
+  );
 
   // Strip markdown and detect domain
   let strippedThought = stripMarkdown(thought);
@@ -786,71 +1079,22 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   const compressionResult = compression.result;
   const autoCompressed = compression.autoCompressed;
 
-  // Run verification if requested OR auto-enabled for longer chains
-  // Auto-verify when: chain has >3 steps AND verify wasn't explicitly set to false
-  const priorThoughts = SessionManager.getThoughts(sessionId, branchId);
-  const shouldAutoVerify = priorThoughts.length >= 3 && args.verify !== false;
-  const shouldVerify = args.verify === true || shouldAutoVerify;
-
-  let verificationResult = null;
-  let autoVerifyEnabled = false;
-
-  if (shouldVerify) {
-    autoVerifyEnabled = shouldAutoVerify && args.verify !== true;
-    const contextStrings = priorThoughts.map((t) => t.thought);
-    verificationResult = verify(strippedThought, domain, contextStrings, true);
-
-    // Note auto-verification in stream if it was triggered
-    if (autoVerifyEnabled) {
-      await streamContent({
-        type: "text",
-        text: `🔍 **Auto-verification enabled** (chain length: ${priorThoughts.length + 1} steps)\n`,
-      });
-    }
-
-    // HALT ON VERIFICATION FAILURE
-    if (!verificationResult.passed) {
-      const mistakeResult =
-        domain === "math" ? detectCommonMistakesFromText(strippedThought) : null;
-      const detectedMistakes = mistakeResult?.mistakes ?? [];
-
-      // Build and store pending record
-      const pendingRecord = buildPendingRecord({
-        sessionId,
-        branchId,
-        stepNumber,
-        thought: strippedThought,
-        domain,
-        verificationConfidence: verificationResult.confidence,
-        compressionResult,
-      });
-      const verificationError = {
-        issue: verificationResult.suggestions[0] || "Verification failed",
-        evidence: verificationResult.evidence,
-        suggestions: verificationResult.suggestions,
-        confidence: verificationResult.confidence,
-        domain,
-      };
-      SessionManager.setPendingThought(sessionId, pendingRecord, verificationError);
-
-      // Stream failure and return response
-      await streamVerificationFailure(
-        streamContent,
-        verificationResult,
-        detectedMistakes,
-        stepNumber,
-      );
-      return buildVerificationFailureResponse({
-        sessionId,
-        branchId,
-        stepNumber,
-        threshold,
-        verificationResult,
-        detectedMistakes,
-        domain,
-      });
-    }
+  // Run verification (extracted to helper to reduce complexity)
+  const verificationCheck = await runVerificationCheck(
+    args,
+    sessionId,
+    branchId,
+    stepNumber,
+    strippedThought,
+    domain,
+    threshold,
+    compressionResult,
+    streamContent,
+  );
+  if (!verificationCheck.passed) {
+    return verificationCheck.response;
   }
+  const verificationResult = verificationCheck.result;
 
   // Stream the thought (only if verification passed or wasn't requested)
   await streamContent({
@@ -1002,80 +1246,42 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   }
 
   // Consistency check: Run every 3 steps to catch contradictions early
-  // Only checks if there are prior steps to compare against
-  if (stepNumber >= 3 && stepNumber % 3 === 0) {
-    const thoughts = SessionManager.getThoughts(sessionId, branchId);
-    const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
-    const contradictions = checkStepConsistency(
-      { step: stepNumber, thought: strippedThought },
-      stepData.slice(0, -1), // Exclude current step (already in thoughts)
-    );
-
-    if (contradictions.length > 0) {
-      response.consistency_warning = {
-        has_contradictions: true,
-        count: contradictions.length,
-        contradictions: contradictions.map((c) => ({
-          type: c.type,
-          description: c.description,
-          subject: c.subject,
-          original_step: c.original_step,
-          conflicting_step: c.conflicting_step,
-          confidence: c.confidence,
-        })),
-        nudge: `⚠️ Found ${contradictions.length} potential contradiction(s). Review steps ${contradictions.map((c) => c.original_step).join(", ")} for consistency.`,
-      };
-
-      await streamContent({
-        type: "text",
-        text:
-          `\n⚠️ **Consistency Warning:** ${contradictions.length} contradiction(s) detected\n` +
-          contradictions.map((c) => `  - ${c.description}`).join("\n") +
-          "\n",
-      });
-    }
+  const consistencyWarning = await runConsistencyCheck(
+    sessionId,
+    branchId,
+    stepNumber,
+    strippedThought,
+    streamContent,
+  );
+  if (consistencyWarning) {
+    response.consistency_warning = consistencyWarning;
   }
 
-  // Hypothesis resolution: Check if any hypothesis in the session has been resolved
-  // This runs on every step to detect resolution signals in the reasoning
-  const session = SessionManager.get(sessionId);
-  if (session) {
-    // Check all branches with hypotheses
-    for (const branch of session.branches.values()) {
-      if (branch.hypothesis && branch.id !== "main") {
-        // Only check if the current step is on this branch
-        if (branchId === branch.id) {
-          // Current step is on this branch, include it
-          const resolution = analyzeStepForResolution(
-            strippedThought,
-            branch.hypothesis,
-            branch.success_criteria ?? null,
-            stepNumber,
-          );
+  // Hypothesis resolution: Check if branch hypothesis has been resolved
+  const { resolution, mergeSuggestion } = await runHypothesisResolution(
+    sessionId,
+    branchId,
+    stepNumber,
+    strippedThought,
+    streamContent,
+  );
+  if (resolution) {
+    response.hypothesis_resolution = resolution;
+  }
+  if (mergeSuggestion) {
+    response.merge_suggestion = mergeSuggestion;
+  }
 
-          if (resolution.resolved || resolution.confidence > 0.5) {
-            response.hypothesis_resolution = resolution;
-
-            if (resolution.resolved) {
-              const emoji =
-                resolution.outcome === "confirmed"
-                  ? "✅"
-                  : resolution.outcome === "refuted"
-                    ? "❌"
-                    : "❓";
-              await streamContent({
-                type: "text",
-                text:
-                  `\n${emoji} **Hypothesis ${resolution.outcome?.toUpperCase()}:** "${branch.hypothesis.slice(0, 60)}${branch.hypothesis.length > 60 ? "..." : ""}"\n` +
-                  `   Evidence: ${resolution.evidence}\n` +
-                  `   ${resolution.suggestion}\n`,
-              });
-            }
-            break; // Only report first resolution found
-          }
-        }
-      }
-    }
+  // Auto-challenge: Suggest adversarial review on overconfidence
+  const hasVerification = !!verificationResult?.passed;
+  const challengeSuggestion = await runAutoChallenge(
+    confState.chainConfidence,
+    stepNumber,
+    hasVerification,
+    streamContent,
+  );
+  if (challengeSuggestion) {
+    response.challenge_suggestion = challengeSuggestion;
   }
 
   return response;

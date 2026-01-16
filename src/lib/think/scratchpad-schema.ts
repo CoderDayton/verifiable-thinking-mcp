@@ -626,4 +626,37 @@ export interface ScratchpadResponse {
     /** Summary of findings */
     summary: string;
   };
+
+  // Auto-challenge suggestion - triggered when overconfidence detected
+  // Present when shouldChallenge() returns true (high confidence with few steps)
+  challenge_suggestion?: {
+    /** Whether a challenge is recommended */
+    should_challenge: boolean;
+    /** Why challenge is suggested */
+    reason: string;
+    /** Specific type of challenge recommended */
+    suggested_type:
+      | "assumption_inversion"
+      | "edge_case"
+      | "premise_check"
+      | "steelman_counter"
+      | "all";
+    /** Human-readable nudge */
+    nudge: string;
+  };
+
+  // Merge suggestion - triggered when branch hypothesis is confirmed
+  // Suggests merging branch findings back to main reasoning path
+  merge_suggestion?: {
+    /** Whether merge is recommended */
+    should_merge: boolean;
+    /** Branch ID to merge from */
+    from_branch: string;
+    /** The confirmed hypothesis */
+    confirmed_hypothesis: string;
+    /** Key findings to incorporate */
+    key_findings: string;
+    /** Human-readable suggestion */
+    nudge: string;
+  };
 }
