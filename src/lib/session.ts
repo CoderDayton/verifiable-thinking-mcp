@@ -4,12 +4,14 @@
  * - O(1) step lookup via stepIndex Map
  * - O(1) step existence check via stepNumbers Set
  * - O(1) step-to-branch lookup via stepToBranchMap
+ * - O(1) LRU eviction via LRUCache
+ * - O(n) TTL cleanup (scans only expired sessions)
  * - Revision tracking with revised_by marker
  * - Branch depth limits
- * - Batched TTL cleanup for efficiency
  * - Token tracking sync on cleanup
  */
 
+import { LRUCache } from "./LRUCache.ts";
 import { clearSessionTokens } from "./tokens.ts";
 
 export interface ThoughtRecord {
@@ -115,10 +117,8 @@ const DEFAULT_CONFIG: SessionManagerConfig = {
 const MAX_POOL_SIZE = 20;
 
 class SessionManagerImpl {
-  private sessions: Map<string, Session> = new Map();
+  private sessions: LRUCache<string, Session>;
   private config: SessionManagerConfig;
-  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
-  private stepsSinceCleanup = 0;
   /** Pool of recycled sessions to avoid allocation churn */
   private sessionPool: Session[] = [];
   /** Active session ID for single-session mode (server tracks instead of LLM) */
@@ -126,14 +126,24 @@ class SessionManagerImpl {
 
   constructor(config: Partial<SessionManagerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.startCleanup();
-  }
 
-  private startCleanup(): void {
-    if (this.cleanupTimer) return;
-    this.cleanupTimer = setInterval(() => {
-      this.cleanup();
-    }, this.config.cleanup_interval_ms);
+    // Initialize LRU cache with TTL and auto-cleanup
+    this.sessions = new LRUCache({
+      maxSize: this.config.max_sessions,
+      ttlMs: this.config.ttl_ms,
+      cleanupIntervalMs: this.config.cleanup_interval_ms,
+      cleanupBatchSize: this.config.cleanup_batch_size,
+      onEvict: (sessionId, session) => {
+        // Clear active session if it's being evicted
+        if (this.activeSessionId === sessionId) {
+          this.activeSessionId = null;
+        }
+        // Clear token tracking
+        clearSessionTokens(sessionId);
+        // Recycle session object
+        this.recycleSession(session as Session);
+      },
+    });
   }
 
   /**
@@ -185,44 +195,6 @@ class SessionManagerImpl {
     return this.createSession(sessionId);
   }
 
-  private cleanup(): void {
-    const now = Date.now();
-    const expired: string[] = [];
-
-    for (const [id, session] of this.sessions) {
-      if (now - session.updated_at > this.config.ttl_ms) {
-        expired.push(id);
-      }
-    }
-
-    for (const id of expired) {
-      // Clear active session if it's expiring
-      if (this.activeSessionId === id) {
-        this.activeSessionId = null;
-      }
-
-      // Clear token tracking FIRST (before session deletion and recycling)
-      clearSessionTokens(id);
-
-      const session = this.sessions.get(id);
-      // Delete from map BEFORE recycling to prevent use-after-free race
-      this.sessions.delete(id);
-      if (session) {
-        this.recycleSession(session);
-      }
-    }
-  }
-
-  /** Batched cleanup - only runs every N steps */
-  private batchedCleanup(force = false): void {
-    this.stepsSinceCleanup++;
-    if (!force && this.stepsSinceCleanup < this.config.cleanup_batch_size) {
-      return;
-    }
-    this.stepsSinceCleanup = 0;
-    this.cleanup();
-  }
-
   private createSession(sessionId: string): Session {
     return {
       id: sessionId,
@@ -244,23 +216,7 @@ class SessionManagerImpl {
     let session = this.sessions.get(sessionId);
 
     if (!session) {
-      // Enforce max sessions limit
-      if (this.sessions.size >= this.config.max_sessions) {
-        let oldest: [string, Session] | null = null;
-        for (const entry of this.sessions) {
-          if (!oldest || entry[1].updated_at < oldest[1].updated_at) {
-            oldest = entry;
-          }
-        }
-        if (oldest) {
-          const oldSession = this.sessions.get(oldest[0]);
-          if (oldSession) {
-            this.recycleSession(oldSession);
-          }
-          this.sessions.delete(oldest[0]);
-        }
-      }
-
+      // LRUCache automatically handles max size and eviction
       session = this.getPooledSession(sessionId);
       this.sessions.set(sessionId, session);
     }
@@ -301,9 +257,6 @@ class SessionManagerImpl {
   /** Add thought with O(1) index updates */
   addThought(sessionId: string, thought: ThoughtRecord): { success: boolean; error?: string } {
     const session = this.getOrCreate(sessionId);
-
-    // Batched cleanup
-    this.batchedCleanup();
 
     // Validate revision
     if (thought.revises_step !== undefined) {
@@ -837,11 +790,7 @@ class SessionManagerImpl {
   }
 
   destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-    this.sessions.clear();
+    this.sessions.destroy();
   }
 }
 
