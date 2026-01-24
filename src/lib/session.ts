@@ -28,6 +28,7 @@ export interface ThoughtRecord {
   compressed_context?: string;
   // Compression stats
   compression?: {
+    applied?: boolean; // True if compression was applied to this thought
     input_bytes_saved: number;
     output_bytes_saved: number;
     context_bytes_saved: number;

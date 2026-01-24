@@ -1169,6 +1169,7 @@ async function handleStep(
     // Track compression stats if compression was applied
     compression: compressionResult
       ? {
+          applied: true,
           input_bytes_saved:
             (compressionResult.original_tokens - compressionResult.compressed_tokens) * 4,
           output_bytes_saved: 0,
@@ -2697,16 +2698,26 @@ FLOW:
 
       // Add token usage to response
       // If compression was applied, account for compressed input (not original)
-      const argsForTokenCount = response.compression?.applied
-        ? { ...args, thought: "[compressed]" } // Placeholder - actual compressed tokens tracked in response.compression
-        : args;
-      const tokens = calculateTokenUsage(argsForTokenCount, response);
+      const tokens = calculateTokenUsage(args, response);
 
-      // If compression was applied, use the actual compressed token count
+      // If compression was applied, recalculate input using actual compressed thought tokens
       if (response.compression?.applied) {
-        tokens.input_tokens =
-          response.compression.compressed_tokens +
-          Math.ceil(JSON.stringify({ ...args, thought: undefined }).length / 4); // Args minus thought
+        // Import countTokens for accurate tiktoken-based counting
+        const { countTokens } = await import("../lib/tokens.ts");
+
+        // Get the compressed thought from the stored record
+        const session = SessionManager.get(response.session_id);
+        const currentThought = session?.thoughts[session.thoughts.length - 1];
+        const compressedThought = currentThought?.thought || "";
+
+        // Calculate actual compressed thought tokens with tiktoken
+        const compressedThoughtTokens = countTokens(compressedThought);
+
+        // Calculate tokens for everything except the thought
+        const argsWithoutThought = { ...args, thought: undefined };
+        const otherArgsTokens = countTokens(JSON.stringify(argsWithoutThought));
+
+        tokens.input_tokens = compressedThoughtTokens + otherArgsTokens;
         tokens.total_tokens = tokens.input_tokens + tokens.output_tokens;
       }
       response.tokens = tokens;
