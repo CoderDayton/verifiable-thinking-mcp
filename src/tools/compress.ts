@@ -8,58 +8,18 @@ import { calculateTokenUsage } from "../lib/tokens.ts";
  */
 export const compressTool = {
   name: "compress",
-  description: `Compress context using enhanced CPC-style sentence-level relevance scoring.
-
-Features:
-- TF-IDF + NCD (gzip-based) query relevance scoring
-- Coreference constraints (keeps pronoun antecedents)
-- Causal chain preservation (keeps premises for "therefore" etc.)
-- Filler/meta-cognition removal
-- Repetition detection and penalization
-
-Up to 10x faster than token-level compression methods. Keeps sentences most relevant 
-to the query while maintaining coherence by preserving original sentence order.
-
-Use this to reduce token costs before sending large contexts to LLMs.`,
+  description: `CPC-style sentence-level compression. TF-IDF + NCD scoring, coreference/causal chains, filler removal. 10× faster than token-level. Keeps query-relevant sentences.`,
 
   parameters: z.object({
-    context: z
-      .string()
-      .max(1_000_000, "Context exceeds 1MB limit - split into smaller chunks")
-      .describe("The text/context to compress"),
-    query: z
-      .string()
-      .max(10_000, "Query exceeds 10KB limit")
-      .describe("Focus query - sentences relevant to this are kept"),
-    target_ratio: z
-      .number()
-      .min(0.1)
-      .max(1.0)
-      .default(0.5)
-      .describe("Target compression ratio (0.5 = keep ~50%)"),
-    max_tokens: z
-      .number()
-      .int()
-      .min(50)
-      .optional()
-      .describe("Alternative: specify max tokens instead of ratio"),
-    boost_reasoning: z
-      .boolean()
-      .default(true)
-      .describe("Boost sentences with reasoning keywords (therefore, because, etc.)"),
-    use_ncd: z.boolean().default(true).describe("Use NCD (gzip-based) query similarity scoring"),
-    enforce_coref: z
-      .boolean()
-      .default(true)
-      .describe("Keep antecedent sentences when pronouns are selected"),
-    enforce_causal: z
-      .boolean()
-      .default(true)
-      .describe("Keep premise sentences when causal conclusions are selected"),
-    remove_fillers: z
-      .boolean()
-      .default(true)
-      .describe("Remove filler phrases (basically, actually, let me think, etc.)"),
+    context: z.string().max(1_000_000, "Max 1MB").describe("Text to compress"),
+    query: z.string().max(10_000, "Max 10KB").describe("Focus query"),
+    target_ratio: z.number().min(0.1).max(1.0).default(0.5).describe("Target ratio (0.5=50%)"),
+    max_tokens: z.number().int().min(50).optional().describe("Max tokens (alternative to ratio)"),
+    boost_reasoning: z.boolean().default(true).describe("Boost reasoning keywords"),
+    use_ncd: z.boolean().default(true).describe("Use NCD (gzip) scoring"),
+    enforce_coref: z.boolean().default(true).describe("Keep pronoun antecedents"),
+    enforce_causal: z.boolean().default(true).describe("Keep causal premises"),
+    remove_fillers: z.boolean().default(true).describe("Remove filler phrases"),
   }),
 
   execute: async (args: {
