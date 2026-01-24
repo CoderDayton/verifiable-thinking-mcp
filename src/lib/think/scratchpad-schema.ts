@@ -38,7 +38,6 @@ export const ScratchpadSchema = z.object({
     .describe("Operation to perform"),
 
   // Common fields (all operations)
-  session_id: z.string().optional().describe("Session ID (auto-generated if omitted)"),
   confidence_threshold: z
     .number()
     .min(0)

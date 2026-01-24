@@ -121,6 +121,8 @@ class SessionManagerImpl {
   private stepsSinceCleanup = 0;
   /** Pool of recycled sessions to avoid allocation churn */
   private sessionPool: Session[] = [];
+  /** Active session ID for single-session mode (server tracks instead of LLM) */
+  private activeSessionId: string | null = null;
 
   constructor(config: Partial<SessionManagerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -194,6 +196,11 @@ class SessionManagerImpl {
     }
 
     for (const id of expired) {
+      // Clear active session if it's expiring
+      if (this.activeSessionId === id) {
+        this.activeSessionId = null;
+      }
+
       // Clear token tracking FIRST (before session deletion and recycling)
       clearSessionTokens(id);
 
@@ -448,6 +455,10 @@ class SessionManagerImpl {
   }
 
   clear(sessionId: string): boolean {
+    // Clear active session tracking if this is the active session
+    if (this.activeSessionId === sessionId) {
+      this.activeSessionId = null;
+    }
     // Clear token tracking when session is explicitly cleared
     clearSessionTokens(sessionId);
     return this.sessions.delete(sessionId);
@@ -460,6 +471,8 @@ class SessionManagerImpl {
       clearSessionTokens(id);
     }
     this.sessions.clear();
+    // Also clear the active session tracking
+    this.activeSessionId = null;
     return count;
   }
 
@@ -806,6 +819,21 @@ class SessionManagerImpl {
   getQuestion(sessionId: string): string | undefined {
     const session = this.get(sessionId);
     return session?.question;
+  }
+
+  /** Set the active session ID (server-side tracking) */
+  setActiveSession(sessionId: string): void {
+    this.activeSessionId = sessionId;
+  }
+
+  /** Get the active session ID (server-side tracking) */
+  getActiveSession(): string | null {
+    return this.activeSessionId;
+  }
+
+  /** Clear the active session ID */
+  clearActiveSession(): void {
+    this.activeSessionId = null;
   }
 
   destroy(): void {

@@ -44,37 +44,43 @@ export const getSessionTool = {
   name: "get_session",
   description: "Get session: full/summary/compressed format",
   parameters: z.object({
-    session_id: z.string().describe("Session ID to retrieve"),
+    session_id: z.string().optional().describe("Session ID (uses active if omitted)"),
     format: z
       .enum(["full", "summary", "compressed"])
       .default("summary")
       .describe("Format: full (all), summary (overview), compressed (key only)"),
     branch_id: z.string().optional().describe("Filter by branch ID"),
   }),
-  execute: async (args: { session_id: string; format?: string; branch_id?: string }) => {
-    const session = SessionManager.get(args.session_id);
+  execute: async (args: { session_id?: string; format?: string; branch_id?: string }) => {
+    // Use active session if not specified
+    const sessionId = args.session_id || SessionManager.getActiveSession();
+    if (!sessionId) {
+      return "No session ID provided and no active session found.";
+    }
+
+    const session = SessionManager.get(sessionId);
 
     let result: string;
     if (!session) {
-      result = `Session not found: ${args.session_id}`;
+      result = `Session not found: ${sessionId}`;
     } else {
       const format = args.format || "summary";
 
       if (format === "compressed") {
-        result = SessionManager.getCompressed(args.session_id) || "No thoughts to compress.";
+        result = SessionManager.getCompressed(sessionId) || "No thoughts to compress.";
       } else if (format === "summary") {
-        result = SessionManager.getSummary(args.session_id) || "No summary available.";
+        result = SessionManager.getSummary(sessionId) || "No summary available.";
       } else {
         // Full format
         const thoughts = args.branch_id
-          ? SessionManager.getThoughts(args.session_id, args.branch_id)
-          : SessionManager.getThoughts(args.session_id);
+          ? SessionManager.getThoughts(sessionId, args.branch_id)
+          : SessionManager.getThoughts(sessionId);
 
         if (thoughts.length === 0) {
           result = "No thoughts in session.";
         } else {
           const lines = [
-            `**Session**: ${args.session_id}`,
+            `**Session**: ${sessionId}`,
             `**Branches**: ${Array.from(session.branches).join(", ")}`,
             `**Thoughts**: ${thoughts.length}`,
             "",

@@ -1012,7 +1012,11 @@ async function runVerificationCheck(
 // ============================================================================
 
 /** Handle step operation - add a new thought */
-async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleStep(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: thought is required for step operation
@@ -1021,7 +1025,7 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   }
   const thought = args.thought;
 
-  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
+  // sessionId managed server-side
   const branchId = "main"; // Default branch for step operation
   const threshold = args.confidence_threshold ?? 0.8;
   const tokenBudget = args.token_budget ?? 3000;
@@ -1312,11 +1316,12 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
 }
 
 /** Handle navigate operation - view history/branches/steps/paths */
-async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<ScratchpadResponse> {
-  const sessionId = args.session_id;
-  if (!sessionId) {
-    throw new Error("session_id required for navigate operation");
-  }
+async function handleNavigate(
+  args: ScratchpadArgs,
+  _ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
+  // sessionId passed from server-side management
 
   const session = SessionManager.get(sessionId);
   if (!session) {
@@ -1410,17 +1415,20 @@ async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<S
 }
 
 /** Handle branch operation - start alternative reasoning path */
-async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleBranch(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
-  // Runtime validation: session_id and thought are required for branch operation
-  if (!args.session_id) {
+  if (!sessionId) {
     throw new Error("session_id required for branch operation");
   }
   if (!args.thought) {
     throw new Error("thought is required for branch operation");
   }
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   const thought = args.thought;
 
   const session = SessionManager.get(sessionId);
@@ -1562,11 +1570,15 @@ async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
 }
 
 /** Handle revise operation - correct earlier step */
-async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleRevise(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: required fields for revise operation
-  if (!args.session_id) {
+  if (!sessionId) {
     throw new Error("session_id required for revise operation");
   }
   if (!args.thought) {
@@ -1575,7 +1587,7 @@ async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
   if (args.target_step === undefined) {
     throw new Error("target_step is required for revise operation");
   }
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   const thought = args.thought;
   const targetStep = args.target_step;
 
@@ -1725,9 +1737,13 @@ async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
 }
 
 /** Handle complete operation - finalize reasoning chain */
-async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleComplete(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   if (!sessionId) {
     throw new Error("session_id required for complete operation");
   }
@@ -1915,7 +1931,11 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
 }
 
 /** Handle augment operation - extract, compute, and inject math results */
-async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleAugment(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: text is required for augment operation
@@ -1924,7 +1944,7 @@ async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<Scr
   }
   const text = args.text;
 
-  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
   const branchId = "main";
 
@@ -1996,9 +2016,13 @@ async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<Scr
 }
 
 /** Handle override operation - commit a failed verification step anyway */
-async function handleOverride(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleOverride(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   if (!sessionId) {
     throw new Error("session_id required for override operation");
   }
@@ -2062,9 +2086,13 @@ async function handleOverride(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
 }
 
 /** Handle hint operation - progressive simplification hints with session state */
-async function handleHint(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleHint(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id || `hint-${Date.now()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
   const { cumulative = true, reset = false } = args;
 
@@ -2246,7 +2274,11 @@ async function handleHint(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
 }
 
 /** Handle mistakes operation - proactive error checking for math derivations */
-async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleMistakes(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: text is required for mistakes operation
@@ -2255,7 +2287,7 @@ async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
   }
   const text = args.text;
 
-  const sessionId = args.session_id || `mistakes-${Date.now()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
 
   // Run mistake detection
@@ -2321,7 +2353,11 @@ async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
 }
 
 /** Handle spot_check operation - detect trap patterns in answers */
-async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleSpotCheck(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: question and answer are required for spot_check operation
@@ -2334,7 +2370,7 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
   const question = args.question;
   const answer = args.answer;
 
-  const sessionId = args.session_id || `spot-check-${Date.now()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
 
   // Run spot-check
@@ -2392,9 +2428,13 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
 }
 
 /** Handle challenge operation - adversarial self-check for reasoning quality */
-async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleChallenge(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   if (!sessionId) {
     throw new Error("session_id required for challenge operation");
   }
@@ -2564,13 +2604,21 @@ FLOW:
   },
 
   execute: async (args: ScratchpadArgs, ctx: MCPContext) => {
+    // Server-side session tracking: get or create active session
+    // LLM never sees or manages session_id
+    let sessionId = SessionManager.getActiveSession();
+    if (!sessionId) {
+      sessionId = `s_${crypto.randomUUID()}`;
+      SessionManager.setActiveSession(sessionId);
+    }
+
     try {
       // Check hard budget limit BEFORE processing operation
-      if (args.hard_limit_tokens && args.session_id) {
-        const existingTokens = getSessionTokens(args.session_id);
+      if (args.hard_limit_tokens && sessionId) {
+        const existingTokens = getSessionTokens(sessionId);
         if (existingTokens && existingTokens.total >= args.hard_limit_tokens) {
           const budgetExhaustedResponse: ScratchpadResponse = {
-            session_id: args.session_id,
+            session_id: sessionId,
             current_step: 0,
             branch: "main",
             operation: args.operation,
@@ -2605,37 +2653,37 @@ FLOW:
 
       switch (args.operation) {
         case "step":
-          response = await handleStep(args, ctx);
+          response = await handleStep(args, ctx, sessionId);
           break;
         case "navigate":
-          response = await handleNavigate(args, ctx);
+          response = await handleNavigate(args, ctx, sessionId);
           break;
         case "branch":
-          response = await handleBranch(args, ctx);
+          response = await handleBranch(args, ctx, sessionId);
           break;
         case "revise":
-          response = await handleRevise(args, ctx);
+          response = await handleRevise(args, ctx, sessionId);
           break;
         case "complete":
-          response = await handleComplete(args, ctx);
+          response = await handleComplete(args, ctx, sessionId);
           break;
         case "augment":
-          response = await handleAugment(args, ctx);
+          response = await handleAugment(args, ctx, sessionId);
           break;
         case "override":
-          response = await handleOverride(args, ctx);
+          response = await handleOverride(args, ctx, sessionId);
           break;
         case "hint":
-          response = await handleHint(args, ctx);
+          response = await handleHint(args, ctx, sessionId);
           break;
         case "mistakes":
-          response = await handleMistakes(args, ctx);
+          response = await handleMistakes(args, ctx, sessionId);
           break;
         case "spot_check":
-          response = await handleSpotCheck(args, ctx);
+          response = await handleSpotCheck(args, ctx, sessionId);
           break;
         case "challenge":
-          response = await handleChallenge(args, ctx);
+          response = await handleChallenge(args, ctx, sessionId);
           break;
         default:
           throw new Error(`Unknown operation: ${(args as { operation: string }).operation}`);
@@ -2677,8 +2725,8 @@ FLOW:
       const tokens = calculateTokenUsage(args, errorResponse);
       errorResponse.tokens = tokens;
       // Track session tokens even on error for accurate budget monitoring
-      if (args.session_id) {
-        errorResponse.session_tokens = trackSessionTokens(args.session_id, tokens);
+      if (sessionId) {
+        errorResponse.session_tokens = trackSessionTokens(sessionId, tokens);
       }
       return {
         content: [{ type: "text" as const, text: JSON.stringify(errorResponse) }],
