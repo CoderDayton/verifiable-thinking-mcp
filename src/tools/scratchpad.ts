@@ -1028,14 +1028,24 @@ async function handleStep(
   if (!args.thought) {
     throw new Error("thought is required for step operation");
   }
-  const thought = args.thought;
+  let thought = args.thought;
 
   // sessionId managed server-side
   const branchId = "main"; // Default branch for step operation
   const threshold = args.confidence_threshold ?? 0.8;
   const tokenBudget = args.token_budget ?? 3000;
 
-  // S3: Check max_step_tokens limit before any processing
+  // S1: Token budget guard - check EARLY if session exceeds budget
+  const tokenUsage = SessionManager.getTokenUsage(sessionId);
+  const budgetExceeded = tokenUsage.total >= tokenBudget;
+
+  // Compression - apply EARLY to reduce input tokens (before all other processing)
+  const compression = await applyCompression(thought, args, budgetExceeded, streamContent);
+  thought = compression.thought;
+  const compressionResult = compression.result;
+  const autoCompressed = compression.autoCompressed;
+
+  // S3: Check max_step_tokens limit (after compression, so limit applies to compressed size)
   const maxStepTokens = args.max_step_tokens;
   if (maxStepTokens !== undefined && !args.force_large) {
     // Estimate tokens: ~4 chars per token
@@ -1098,16 +1108,6 @@ async function handleStep(
   );
   strippedThought = augmentation.thought;
   const augmentationResult = augmentation.result;
-
-  // S1: Token budget guard - check if session exceeds budget
-  const tokenUsage = SessionManager.getTokenUsage(sessionId);
-  const budgetExceeded = tokenUsage.total >= tokenBudget;
-
-  // Compression - check if requested, auto-detect, OR budget exceeded
-  const compression = await applyCompression(strippedThought, args, budgetExceeded, streamContent);
-  strippedThought = compression.thought;
-  const compressionResult = compression.result;
-  const autoCompressed = compression.autoCompressed;
 
   // Run verification (extracted to helper to reduce complexity)
   const verificationCheck = await runVerificationCheck(
