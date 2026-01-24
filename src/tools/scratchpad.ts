@@ -290,7 +290,11 @@ function enrichStepResponse(
   params: {
     verificationResult: { passed: boolean; confidence: number } | null;
     domain: string;
-    computeResult: { solved: boolean; result?: string | number; method?: string } | null;
+    computeResult: {
+      solved: boolean;
+      result?: string | number;
+      method?: string;
+    } | null;
     compressionResult: ScratchpadResponse["compression"] | null;
     tokenUsage: { total: number };
     tokenBudget: number;
@@ -462,7 +466,11 @@ function buildVerificationFailureResponse(params: {
 /** Stream verification failure notice with detected mistakes */
 async function streamVerificationFailure(
   streamContent: MCPContext["streamContent"],
-  verificationResult: { confidence: number; suggestions: string[]; evidence: string },
+  verificationResult: {
+    confidence: number;
+    suggestions: string[];
+    evidence: string;
+  },
   detectedMistakes: DetectedMistake[],
   stepNumber: number,
 ): Promise<void> {
@@ -503,7 +511,10 @@ function buildPendingRecord(params: {
   thought: string;
   domain: string;
   verificationConfidence: number;
-  compressionResult: { original_tokens: number; compressed_tokens: number } | null;
+  compressionResult: {
+    original_tokens: number;
+    compressed_tokens: number;
+  } | null;
 }): ThoughtRecord {
   const {
     sessionId,
@@ -542,7 +553,12 @@ async function applyAugmentation(
   streamContent: MCPContext["streamContent"],
 ): Promise<{
   thought: string;
-  result: { applied: boolean; computations: number; filtered: number; domain: string } | null;
+  result: {
+    applied: boolean;
+    computations: number;
+    filtered: number;
+    domain: string;
+  } | null;
 }> {
   if (!shouldAugment) {
     return { thought, result: null };
@@ -596,7 +612,9 @@ async function applyCompression(
 
   const query = args.compression_query || args.context || "";
   const targetRatio = budgetExceeded ? 0.4 : 0.6;
-  const compressOutput = compress(thought, query, { target_ratio: targetRatio });
+  const compressOutput = compress(thought, query, {
+    target_ratio: targetRatio,
+  });
   const autoCompressed = budgetExceeded && !args.compress;
 
   const budgetTag = autoCompressed ? " [budget guard]" : "";
@@ -693,7 +711,10 @@ async function runConsistencyCheck(
   }
 
   const thoughts = SessionManager.getThoughts(sessionId, branchId);
-  const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+  const stepData = thoughts.map((t) => ({
+    step: t.step_number,
+    thought: t.thought,
+  }));
   const contradictions = checkStepConsistency(
     { step: stepNumber, thought: currentThought },
     stepData.slice(0, -1), // Exclude current step (already in thoughts)
@@ -1108,7 +1129,10 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     });
   }
   if (args.outcome) {
-    await streamContent({ type: "text", text: `**Outcome:** ${args.outcome}\n` });
+    await streamContent({
+      type: "text",
+      text: `**Outcome:** ${args.outcome}\n`,
+    });
   }
 
   // Build thought record
@@ -1739,10 +1763,16 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
   }
 
   if (args.summary) {
-    await streamContent({ type: "text", text: `\n**Summary:** ${args.summary}\n` });
+    await streamContent({
+      type: "text",
+      text: `\n**Summary:** ${args.summary}\n`,
+    });
   }
   if (args.final_answer) {
-    await streamContent({ type: "text", text: `**Answer:** ${args.final_answer}\n` });
+    await streamContent({
+      type: "text",
+      text: `**Answer:** ${args.final_answer}\n`,
+    });
   }
 
   // Auto spot-check if question and final_answer provided
@@ -2405,7 +2435,10 @@ async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<S
   }
 
   // Convert to format expected by challenge function
-  const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+  const stepData = thoughts.map((t) => ({
+    step: t.step_number,
+    thought: t.thought,
+  }));
 
   // Run challenge with optional target claim
   const result = challenge(stepData, args.target_claim);
@@ -2496,37 +2529,33 @@ async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<S
 
 export const scratchpadTool = {
   name: "scratchpad",
-  description: `Structured reasoning with verification, trap detection, and self-challenge.
+  description: `Structured reasoning w/verification, trap detection, self-challenge. []=optional
 
-OPS:
-step       thought= [question= on 1st] → Add reasoning step. Auto-verifies at step 4+.
-complete   [final_answer=] [summary=]  → Finalize chain. Auto spot-checks answer.
-revise     target_step= thought= [reason=] → Fix a step (after verification fail or trap warning).
-branch     thought= [from_step=] [hypothesis=] → Fork reasoning path to test alternative.
-navigate   view=history|branches|step|path [step_id=] → Inspect session state.
-augment    text= → Compute math expressions, inject results.
-hint       [expression=] → Progressive simplification hints (auto-continues).
-mistakes   text= → Check for algebraic errors.
-spot_check question= answer= → Manual trap pattern detection.
-challenge  [target_claim=] → Adversarial self-check. Generates counterarguments.
-override   failed_step= [reason=] → Force-commit after verification fail.
+OPS (required: operation=):
+step thought= [question=1st] [confidence=] [verify=] [compress=true] [compression_query=]→add step. Auto-verify@4+. Disable compress to keep full text.
+complete [final_answer=] [summary=]→finalize+spot-check
+revise target_step= thought= [reason=]→fix step
+branch thought= [from_step=] [hypothesis=] [success_criteria=]→fork path
+navigate view=history|branches|step|path [step_id=] [limit=10]→inspect
+augment text= [store_as_step=false]→compute+inject math
+hint [expression=] [reveal_count=] [cumulative=true] [reset=false]→progressive hints (auto-continues)
+mistakes text=→check algebraic errors
+spot_check question= answer=→manual trap detect
+challenge [target_claim=] [challenge_type=all]→adversarial check
+override failed_step= [reason=]→force-commit
 
-DEFAULTS:
-confidence_threshold=0.8   token_budget=3000
+DEFAULTS: session_id=auto confidence_threshold=0.8 token_budget=3000 augment_compute=true local_compute=false compress=true
 
-STATUS → ACTION:
-continue            → Add more steps
-threshold_reached   → Consider complete or add verification step
-review              → Trap/drift detected. Use reconsideration.suggested_revise
-verification_failed → revise target_step | branch from prior | override
-budget_exhausted    → complete or new session
+STATUS→ACTION:
+continue→add steps | threshold_reached→complete or verify | review→use reconsideration.suggested_revise | verification_failed→revise|branch|override | budget_exhausted→complete or new session
 
 FLOW:
-1. step(question=, thought=) → primes trap detection
-2. step(thought=) × N       → auto-verify at 4+
-3. [optional] challenge()   → adversarial self-check
-4. complete(final_answer=)  → spot-check, returns status
-5. If review: revise per reconsideration.suggested_revise`,
+1.step(question=,thought=)→primes trap detect
+2.step(thought=)×N→auto-verify@4+, auto-compress if budget exceeded, CDD, consistency checks
+3.[optional]challenge()→adversarial self-check
+4.complete(final_answer=)→auto spot-check
+5.if review→revise per reconsideration.suggested_revise
+`,
 
   parameters: ScratchpadSchema,
 
