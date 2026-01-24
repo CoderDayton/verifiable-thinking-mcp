@@ -2,8 +2,8 @@
  * Question Classifier - Fast-path routing via bitmask
  *
  * Runs ONCE per question and returns a bitmask indicating which solver
- * types are likely to match. This allows skipping entire solver categories
- * without running their expensive regex patterns.
+ * types are likely to match. Skips entire solver categories
+ * without running expensive regex patterns.
  *
  * Performance: ~0.01ms to classify, saves ~0.05ms per skipped solver tier
  */

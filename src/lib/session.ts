@@ -730,8 +730,7 @@ class SessionManagerImpl {
       return { success: false, error: "No pending thought to commit" };
     }
 
-    // Clone the pending thought before attempting to add
-    // This ensures we can restore if addThought fails
+    // Clone pending thought for restoration on failure
     const pendingCopy = session.pendingThought;
 
     const result = this.addThought(sessionId, pendingCopy.thought);

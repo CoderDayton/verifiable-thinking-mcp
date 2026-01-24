@@ -175,7 +175,7 @@ export function analyzeConfidenceDrift(
 
   if (pattern === "v_shaped") {
     // V-shaped score: max of (drop alone) or (drop × recovery / steps)
-    // This ensures significant drops always produce significant scores
+    // Significant drops always produce significant scores
     const basicScore = maxDropFromPeak;
     const recoveryBonus = (maxDropFromPeak * recovery) / stepsToRecover;
     driftScore = Math.max(basicScore, recoveryBonus);

@@ -634,8 +634,8 @@ for (const [domain, def] of DOMAIN_LIST) {
 // Sort by:
 // 1. Domain weight descending (higher complexity domains match first)
 // 2. Keyword length descending (longer matches take priority within same weight tier)
-// This ensures "conditional probability" matches before "probability",
-// and higher-weight domains like "financial" match before lower-weight ones like "teaching"
+// Longer matches take priority: "conditional probability" before "probability"
+// Higher-weight domains match first: "financial" before "teaching"
 KEYWORD_INDEX.sort((a, b) => {
   const weightDiff = b.def.weight - a.def.weight;
   if (Math.abs(weightDiff) > 0.01) return weightDiff;
