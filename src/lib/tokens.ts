@@ -75,6 +75,147 @@ export function countTokens(text: string): number {
 }
 
 /**
+ * Async version of countTokens - prevents blocking event loop
+ * Uses tiktoken o200k_base encoding for accurate counts.
+ * Ideal for large texts or when called from async context.
+ */
+export async function countTokensAsync(text: string): Promise<number> {
+  if (!text) return 0;
+
+  // Check cache first (synchronous)
+  const cached = tokenCache.get(text);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Yield to event loop before expensive encoding
+  await Promise.resolve();
+
+  // Count with tiktoken
+  const encoder = getTiktoken();
+  const tokens = encoder.encode(text);
+  const count = tokens.length;
+
+  // Cache result
+  tokenCache.set(text, count);
+
+  return count;
+}
+
+/**
+ * Batch token counting - more efficient than individual calls
+ * Reduces tiktoken overhead by processing multiple strings together.
+ *
+ * @param texts - Array of strings to count tokens for
+ * @returns Array of token counts in same order as input
+ *
+ * @example
+ * const counts = countTokensBatch(["hello", "world", "foo"]);
+ * // → [1, 1, 1]
+ */
+export function countTokensBatch(texts: string[]): number[] {
+  if (texts.length === 0) return [];
+
+  const encoder = getTiktoken();
+  const results: number[] = [];
+  const uncachedIndices: number[] = [];
+  const uncachedTexts: string[] = [];
+
+  // First pass: check cache
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i]!; // Non-null assertion safe - array access
+    if (!text) {
+      results[i] = 0;
+      continue;
+    }
+
+    const cached = tokenCache.get(text);
+    if (cached !== undefined) {
+      results[i] = cached;
+    } else {
+      uncachedIndices.push(i);
+      uncachedTexts.push(text);
+    }
+  }
+
+  // Second pass: batch encode uncached texts
+  if (uncachedTexts.length > 0) {
+    for (let i = 0; i < uncachedTexts.length; i++) {
+      const text = uncachedTexts[i]!; // Non-null assertion safe - filtered array
+      const tokens = encoder.encode(text);
+      const count = tokens.length;
+
+      // Cache result
+      tokenCache.set(text, count);
+
+      // Store in results array at correct index
+      const originalIndex = uncachedIndices[i]!; // Non-null assertion safe - same length
+      results[originalIndex] = count;
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Async batch token counting - non-blocking version
+ * Prevents event loop blocking when processing large batches.
+ *
+ * @param texts - Array of strings to count tokens for
+ * @param batchSize - Number of texts to process before yielding (default: 10)
+ * @returns Array of token counts in same order as input
+ */
+export async function countTokensBatchAsync(
+  texts: string[],
+  batchSize: number = 10,
+): Promise<number[]> {
+  if (texts.length === 0) return [];
+
+  const encoder = getTiktoken();
+  const results: number[] = [];
+  const uncachedIndices: number[] = [];
+  const uncachedTexts: string[] = [];
+
+  // First pass: check cache
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i]!; // Non-null assertion safe - array access
+    if (!text) {
+      results[i] = 0;
+      continue;
+    }
+
+    const cached = tokenCache.get(text);
+    if (cached !== undefined) {
+      results[i] = cached;
+    } else {
+      uncachedIndices.push(i);
+      uncachedTexts.push(text);
+    }
+  }
+
+  // Second pass: batch encode uncached texts (with yielding)
+  for (let i = 0; i < uncachedTexts.length; i++) {
+    // Yield to event loop every N texts
+    if (i > 0 && i % batchSize === 0) {
+      await Promise.resolve();
+    }
+
+    const text = uncachedTexts[i]!; // Non-null assertion safe - filtered array
+    const tokens = encoder.encode(text);
+    const count = tokens.length;
+
+    // Cache result
+    tokenCache.set(text, count);
+
+    // Store in results array at correct index
+    const originalIndex = uncachedIndices[i]!; // Non-null assertion safe - same length
+    results[originalIndex] = count;
+  }
+
+  return results;
+}
+
+/**
  * Count tokens for a JSON-serializable object
  */
 export function countObjectTokens(obj: unknown): number {
