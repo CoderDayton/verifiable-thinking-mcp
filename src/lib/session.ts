@@ -4,13 +4,14 @@
  * - O(1) step lookup via stepIndex Map
  * - O(1) step existence check via stepNumbers Set
  * - O(1) step-to-branch lookup via stepToBranchMap
+ * - O(1) LRU eviction via LRUCache
+ * - O(n) TTL cleanup (scans only expired sessions)
  * - Revision tracking with revised_by marker
  * - Branch depth limits
- * - Batched TTL cleanup for efficiency
- * - Token tracking sync on cleanup
+ * - Embedded token tracking (no WeakMap indirection)
  */
 
-import { clearSessionTokens } from "./tokens.ts";
+import { LRUCache } from "./LRUCache.ts";
 
 export interface ThoughtRecord {
   id: string;
@@ -27,6 +28,7 @@ export interface ThoughtRecord {
   compressed_context?: string;
   // Compression stats
   compression?: {
+    applied?: boolean; // True if compression was applied to this thought
     input_bytes_saved: number;
     output_bytes_saved: number;
     context_bytes_saved: number;
@@ -91,6 +93,12 @@ export interface Session {
       domain: string;
     };
   };
+  // Embedded token tracking
+  tokenUsage: {
+    input: number;
+    output: number;
+    operations: number;
+  };
 }
 
 interface SessionManagerConfig {
@@ -115,23 +123,31 @@ const DEFAULT_CONFIG: SessionManagerConfig = {
 const MAX_POOL_SIZE = 20;
 
 class SessionManagerImpl {
-  private sessions: Map<string, Session> = new Map();
+  private sessions: LRUCache<string, Session>;
   private config: SessionManagerConfig;
-  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
-  private stepsSinceCleanup = 0;
   /** Pool of recycled sessions to avoid allocation churn */
   private sessionPool: Session[] = [];
+  /** Active session ID for single-session mode (server tracks instead of LLM) */
+  private activeSessionId: string | null = null;
 
   constructor(config: Partial<SessionManagerConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    this.startCleanup();
-  }
 
-  private startCleanup(): void {
-    if (this.cleanupTimer) return;
-    this.cleanupTimer = setInterval(() => {
-      this.cleanup();
-    }, this.config.cleanup_interval_ms);
+    // Initialize LRU cache with TTL and auto-cleanup
+    this.sessions = new LRUCache({
+      maxSize: this.config.max_sessions,
+      ttlMs: this.config.ttl_ms,
+      cleanupIntervalMs: this.config.cleanup_interval_ms,
+      cleanupBatchSize: this.config.cleanup_batch_size,
+      onEvict: (sessionId, session) => {
+        // Clear active session if it's being evicted
+        if (this.activeSessionId === sessionId) {
+          this.activeSessionId = null;
+        }
+        // Recycle session object
+        this.recycleSession(session as Session);
+      },
+    });
   }
 
   /**
@@ -154,6 +170,13 @@ class SessionManagerImpl {
     session.metadata = {};
     session.question = undefined;
     session.pendingThought = undefined;
+
+    // Reset token tracking
+    session.tokenUsage = {
+      input: 0,
+      output: 0,
+      operations: 0,
+    };
 
     this.sessionPool.push(session);
   }
@@ -183,39 +206,6 @@ class SessionManagerImpl {
     return this.createSession(sessionId);
   }
 
-  private cleanup(): void {
-    const now = Date.now();
-    const expired: string[] = [];
-
-    for (const [id, session] of this.sessions) {
-      if (now - session.updated_at > this.config.ttl_ms) {
-        expired.push(id);
-      }
-    }
-
-    for (const id of expired) {
-      // Clear token tracking FIRST (before session deletion and recycling)
-      clearSessionTokens(id);
-
-      const session = this.sessions.get(id);
-      // Delete from map BEFORE recycling to prevent use-after-free race
-      this.sessions.delete(id);
-      if (session) {
-        this.recycleSession(session);
-      }
-    }
-  }
-
-  /** Batched cleanup - only runs every N steps */
-  private batchedCleanup(force = false): void {
-    this.stepsSinceCleanup++;
-    if (!force && this.stepsSinceCleanup < this.config.cleanup_batch_size) {
-      return;
-    }
-    this.stepsSinceCleanup = 0;
-    this.cleanup();
-  }
-
   private createSession(sessionId: string): Session {
     return {
       id: sessionId,
@@ -230,6 +220,11 @@ class SessionManagerImpl {
       stepNumbers: new Set(),
       stepToBranchMap: new Map(),
       toolsUsedSet: new Set(),
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        operations: 0,
+      },
     };
   }
 
@@ -237,23 +232,7 @@ class SessionManagerImpl {
     let session = this.sessions.get(sessionId);
 
     if (!session) {
-      // Enforce max sessions limit
-      if (this.sessions.size >= this.config.max_sessions) {
-        let oldest: [string, Session] | null = null;
-        for (const entry of this.sessions) {
-          if (!oldest || entry[1].updated_at < oldest[1].updated_at) {
-            oldest = entry;
-          }
-        }
-        if (oldest) {
-          const oldSession = this.sessions.get(oldest[0]);
-          if (oldSession) {
-            this.recycleSession(oldSession);
-          }
-          this.sessions.delete(oldest[0]);
-        }
-      }
-
+      // LRUCache automatically handles max size and eviction
       session = this.getPooledSession(sessionId);
       this.sessions.set(sessionId, session);
     }
@@ -294,9 +273,6 @@ class SessionManagerImpl {
   /** Add thought with O(1) index updates */
   addThought(sessionId: string, thought: ThoughtRecord): { success: boolean; error?: string } {
     const session = this.getOrCreate(sessionId);
-
-    // Batched cleanup
-    this.batchedCleanup();
 
     // Validate revision
     if (thought.revises_step !== undefined) {
@@ -448,18 +424,18 @@ class SessionManagerImpl {
   }
 
   clear(sessionId: string): boolean {
-    // Clear token tracking when session is explicitly cleared
-    clearSessionTokens(sessionId);
+    // Clear active session tracking if this is the active session
+    if (this.activeSessionId === sessionId) {
+      this.activeSessionId = null;
+    }
     return this.sessions.delete(sessionId);
   }
 
   clearAll(): number {
     const count = this.sessions.size;
-    // Clear token tracking for all sessions
-    for (const id of this.sessions.keys()) {
-      clearSessionTokens(id);
-    }
     this.sessions.clear();
+    // Also clear the active session tracking
+    this.activeSessionId = null;
     return count;
   }
 
@@ -659,15 +635,30 @@ class SessionManagerImpl {
     return confidences.reduce((a, b) => a + b, 0) / confidences.length;
   }
 
-  /** Get total token usage for a session (estimated from thought lengths) */
+  /** Get token usage tracking and compression stats for a session */
   getTokenUsage(sessionId: string): {
+    // Real token tracking from LLM calls
+    total_input: number;
+    total_output: number;
     total: number;
+    operations: number;
+    // Compression stats (estimated)
     compressed: number;
     uncompressed: number;
   } {
     const session = this.get(sessionId);
-    if (!session) return { total: 0, compressed: 0, uncompressed: 0 };
+    if (!session) {
+      return {
+        total_input: 0,
+        total_output: 0,
+        total: 0,
+        operations: 0,
+        compressed: 0,
+        uncompressed: 0,
+      };
+    }
 
+    // Calculate compression stats
     let compressed = 0;
     let uncompressed = 0;
 
@@ -683,7 +674,10 @@ class SessionManagerImpl {
     }
 
     return {
-      total: compressed + uncompressed,
+      total_input: session.tokenUsage.input,
+      total_output: session.tokenUsage.output,
+      total: session.tokenUsage.input + session.tokenUsage.output,
+      operations: session.tokenUsage.operations,
       compressed,
       uncompressed,
     };
@@ -730,8 +724,7 @@ class SessionManagerImpl {
       return { success: false, error: "No pending thought to commit" };
     }
 
-    // Clone the pending thought before attempting to add
-    // This ensures we can restore if addThought fails
+    // Clone pending thought for restoration on failure
     const pendingCopy = session.pendingThought;
 
     const result = this.addThought(sessionId, pendingCopy.thought);
@@ -809,12 +802,23 @@ class SessionManagerImpl {
     return session?.question;
   }
 
+  /** Set the active session ID (server-side tracking) */
+  setActiveSession(sessionId: string): void {
+    this.activeSessionId = sessionId;
+  }
+
+  /** Get the active session ID (server-side tracking) */
+  getActiveSession(): string | null {
+    return this.activeSessionId;
+  }
+
+  /** Clear the active session ID */
+  clearActiveSession(): void {
+    this.activeSessionId = null;
+  }
+
   destroy(): void {
-    if (this.cleanupTimer) {
-      clearInterval(this.cleanupTimer);
-      this.cleanupTimer = null;
-    }
-    this.sessions.clear();
+    this.sessions.destroy();
   }
 }
 

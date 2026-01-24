@@ -1,41 +1,30 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  calculateTokenUsage,
-  clearAllSessionTokens,
-  clearSessionTokens,
-  estimateObjectTokens,
-  estimateTokens,
-  getSessionTokens,
-  trackSessionTokens,
-} from "../src/lib/tokens.ts";
+import { SessionManager } from "../src/lib/session.ts";
+import { calculateTokenUsage, estimateObjectTokens, estimateTokens } from "../src/lib/tokens.ts";
 
 describe("Token estimation", () => {
   test("estimateTokens returns 0 for empty string", () => {
     expect(estimateTokens("")).toBe(0);
   });
 
-  test("estimateTokens uses ~4 chars per token heuristic (default)", () => {
-    // 100 chars should be ~25 tokens with default ratio
+  test("estimateTokens uses tiktoken for accurate counting (not ~4 chars/token)", () => {
+    // 100 'a' chars = 13 tokens with tiktoken o200k_base (not 25 with old 4 char/token estimation)
     const text = "a".repeat(100);
-    expect(estimateTokens(text)).toBe(25);
+    expect(estimateTokens(text)).toBe(13);
   });
 
-  test("estimateTokens uses model-specific ratios", () => {
+  test("estimateTokens uses tiktoken regardless of model parameter (model param is ignored)", () => {
     const text = "a".repeat(100);
 
-    // Claude uses 3.5 ratio -> ceil(100/3.5) = 29
-    expect(estimateTokens(text, "claude-3-opus")).toBe(29);
-
-    // Llama uses 4.2 ratio -> ceil(100/4.2) = 24
-    expect(estimateTokens(text, "llama-3")).toBe(24);
-
-    // GPT uses 4.0 ratio -> 25
-    expect(estimateTokens(text, "gpt-4")).toBe(25);
+    // All models now use tiktoken o200k_base -> same result (13 tokens)
+    expect(estimateTokens(text, "claude-3-opus")).toBe(13);
+    expect(estimateTokens(text, "llama-3")).toBe(13);
+    expect(estimateTokens(text, "gpt-4")).toBe(13);
   });
 
-  test("estimateTokens rounds up", () => {
-    // 5 chars should be 2 tokens (ceil(5/4))
-    expect(estimateTokens("hello")).toBe(2);
+  test("estimateTokens uses exact tiktoken counts", () => {
+    // "hello" = 1 token with tiktoken (not 2 with old ceil(5/4) estimation)
+    expect(estimateTokens("hello")).toBe(1);
   });
 
   test("estimateObjectTokens handles null/undefined", () => {
@@ -43,10 +32,11 @@ describe("Token estimation", () => {
     expect(estimateObjectTokens(undefined)).toBe(0);
   });
 
-  test("estimateObjectTokens serializes objects", () => {
+  test("estimateObjectTokens uses tiktoken on serialized object", () => {
     const obj = { foo: "bar", count: 42 };
-    const json = JSON.stringify(obj);
-    expect(estimateObjectTokens(obj)).toBe(Math.ceil(json.length / 4));
+    // JSON.stringify(obj) = '{"foo":"bar","count":42}' = 24 chars
+    // tiktoken counts this as 9 tokens (not 6 with old ceil(24/4) estimation)
+    expect(estimateObjectTokens(obj)).toBe(9);
   });
 
   test("calculateTokenUsage returns input, output, and total", () => {
@@ -60,107 +50,120 @@ describe("Token estimation", () => {
     expect(usage.total_tokens).toBe(usage.input_tokens + usage.output_tokens);
   });
 
-  test("calculateTokenUsage handles string output", () => {
+  test("calculateTokenUsage uses tiktoken for accurate token counts", () => {
     const input = {};
     const output = "No active sessions.";
 
     const usage = calculateTokenUsage(input, output);
 
-    expect(usage.input_tokens).toBe(1); // "{}" = 2 chars = 1 token
-    expect(usage.output_tokens).toBe(Math.ceil(JSON.stringify(output).length / 4));
+    // "{}" = 1 token with tiktoken (not 1 with old ceil(2/4))
+    expect(usage.input_tokens).toBe(1);
+    // "No active sessions." (20 chars) = 4 tokens with tiktoken (not 6 with old ceil(20/4))
+    expect(usage.output_tokens).toBe(4);
   });
 });
 
 describe("Session token tracking", () => {
   afterEach(() => {
-    clearAllSessionTokens();
+    SessionManager.clearAll();
   });
 
-  test("trackSessionTokens accumulates usage", () => {
+  test("SessionManager.getTokenUsage accumulates usage", () => {
     const sessionId = "test-session-1";
+    const session = SessionManager.getOrCreate(sessionId);
 
-    const first = trackSessionTokens(sessionId, {
-      input_tokens: 10,
-      output_tokens: 20,
-      total_tokens: 30,
-    });
+    // First operation
+    session.tokenUsage.input += 10;
+    session.tokenUsage.output += 20;
+    session.tokenUsage.operations += 1;
 
-    expect(first.total_input).toBe(10);
-    expect(first.total_output).toBe(20);
-    expect(first.total).toBe(30);
-    expect(first.operations).toBe(1);
+    const first = SessionManager.getTokenUsage(sessionId);
+    expect(first).not.toBeNull();
+    expect(first!.total_input).toBe(10);
+    expect(first!.total_output).toBe(20);
+    expect(first!.total).toBe(30);
+    expect(first!.operations).toBe(1);
 
-    const second = trackSessionTokens(sessionId, {
-      input_tokens: 15,
-      output_tokens: 25,
-      total_tokens: 40,
-    });
+    // Second operation
+    session.tokenUsage.input += 15;
+    session.tokenUsage.output += 25;
+    session.tokenUsage.operations += 1;
 
-    expect(second.total_input).toBe(25);
-    expect(second.total_output).toBe(45);
-    expect(second.total).toBe(70);
-    expect(second.operations).toBe(2);
+    const second = SessionManager.getTokenUsage(sessionId);
+    expect(second!.total_input).toBe(25);
+    expect(second!.total_output).toBe(45);
+    expect(second!.total).toBe(70);
+    expect(second!.operations).toBe(2);
   });
 
-  test("getSessionTokens returns null for unknown session", () => {
-    expect(getSessionTokens("nonexistent")).toBeNull();
+  test("SessionManager.getTokenUsage returns zero object for unknown session (backward compat)", () => {
+    const usage = SessionManager.getTokenUsage("nonexistent");
+    expect(usage).not.toBeNull();
+    expect(usage.total).toBe(0);
   });
 
-  test("getSessionTokens returns tracked usage", () => {
+  test("SessionManager.getTokenUsage returns tracked usage", () => {
     const sessionId = "test-session-2";
-    trackSessionTokens(sessionId, {
-      input_tokens: 5,
-      output_tokens: 10,
-      total_tokens: 15,
-    });
+    const session = SessionManager.getOrCreate(sessionId);
 
-    const usage = getSessionTokens(sessionId);
+    session.tokenUsage.input += 5;
+    session.tokenUsage.output += 10;
+    session.tokenUsage.operations += 1;
+
+    const usage = SessionManager.getTokenUsage(sessionId);
     expect(usage).not.toBeNull();
     expect(usage?.total).toBe(15);
   });
 
-  test("clearSessionTokens removes session tracking", () => {
+  test("SessionManager.clear removes session (getTokenUsage returns zeros after)", () => {
     const sessionId = "test-session-3";
-    trackSessionTokens(sessionId, {
-      input_tokens: 5,
-      output_tokens: 10,
-      total_tokens: 15,
-    });
+    const session = SessionManager.getOrCreate(sessionId);
 
-    expect(clearSessionTokens(sessionId)).toBe(true);
-    expect(getSessionTokens(sessionId)).toBeNull();
-    expect(clearSessionTokens(sessionId)).toBe(false); // Already cleared
+    session.tokenUsage.input += 5;
+    session.tokenUsage.output += 10;
+    session.tokenUsage.operations += 1;
+
+    expect(SessionManager.clear(sessionId)).toBe(true);
+    // After clear, returns zero object (not null) for backward compat
+    const usage = SessionManager.getTokenUsage(sessionId);
+    expect(usage.total).toBe(0);
+    expect(SessionManager.clear(sessionId)).toBe(false); // Already cleared
   });
 
-  test("clearAllSessionTokens clears all sessions", () => {
-    trackSessionTokens("session-a", { input_tokens: 1, output_tokens: 2, total_tokens: 3 });
-    trackSessionTokens("session-b", { input_tokens: 4, output_tokens: 5, total_tokens: 9 });
+  test("SessionManager.clearAll clears all sessions", () => {
+    const sessionA = SessionManager.getOrCreate("session-a");
+    sessionA.tokenUsage.input += 1;
+    sessionA.tokenUsage.output += 2;
+    sessionA.tokenUsage.operations += 1;
 
-    const cleared = clearAllSessionTokens();
+    const sessionB = SessionManager.getOrCreate("session-b");
+    sessionB.tokenUsage.input += 4;
+    sessionB.tokenUsage.output += 5;
+    sessionB.tokenUsage.operations += 1;
+
+    const cleared = SessionManager.clearAll();
     expect(cleared).toBe(2);
 
-    expect(getSessionTokens("session-a")).toBeNull();
-    expect(getSessionTokens("session-b")).toBeNull();
+    // After clearAll, returns zero objects (not null) for backward compat
+    expect(SessionManager.getTokenUsage("session-a").total).toBe(0);
+    expect(SessionManager.getTokenUsage("session-b").total).toBe(0);
   });
 
-  test("trackSessionTokens tracks across success and error operations", () => {
+  test("SessionManager token tracking works across success and error operations", () => {
     const sessionId = "error-test-session";
+    const session = SessionManager.getOrCreate(sessionId);
 
     // First operation succeeds
-    trackSessionTokens(sessionId, {
-      input_tokens: 50,
-      output_tokens: 100,
-      total_tokens: 150,
-    });
+    session.tokenUsage.input += 50;
+    session.tokenUsage.output += 100;
+    session.tokenUsage.operations += 1;
 
     // Second operation errors (should still track)
-    trackSessionTokens(sessionId, {
-      input_tokens: 30,
-      output_tokens: 20, // Error responses are smaller
-      total_tokens: 50,
-    });
+    session.tokenUsage.input += 30;
+    session.tokenUsage.output += 20; // Error responses are smaller
+    session.tokenUsage.operations += 1;
 
-    const usage = getSessionTokens(sessionId);
+    const usage = SessionManager.getTokenUsage(sessionId);
     expect(usage).not.toBeNull();
     expect(usage?.total_input).toBe(80);
     expect(usage?.total_output).toBe(120);
@@ -171,18 +174,27 @@ describe("Session token tracking", () => {
 
 describe("Hard limit budget check", () => {
   afterEach(() => {
-    clearAllSessionTokens();
+    SessionManager.clearAll();
   });
 
-  test("getSessionTokens returns usage for budget check", () => {
+  test("SessionManager.getTokenUsage returns usage for budget check", () => {
     const sessionId = "budget-check-session";
+    const session = SessionManager.getOrCreate(sessionId);
 
     // Simulate several operations accumulating tokens
-    trackSessionTokens(sessionId, { input_tokens: 100, output_tokens: 200, total_tokens: 300 });
-    trackSessionTokens(sessionId, { input_tokens: 150, output_tokens: 250, total_tokens: 400 });
-    trackSessionTokens(sessionId, { input_tokens: 100, output_tokens: 200, total_tokens: 300 });
+    session.tokenUsage.input += 100;
+    session.tokenUsage.output += 200;
+    session.tokenUsage.operations += 1;
 
-    const usage = getSessionTokens(sessionId);
+    session.tokenUsage.input += 150;
+    session.tokenUsage.output += 250;
+    session.tokenUsage.operations += 1;
+
+    session.tokenUsage.input += 100;
+    session.tokenUsage.output += 200;
+    session.tokenUsage.operations += 1;
+
+    const usage = SessionManager.getTokenUsage(sessionId);
     expect(usage).not.toBeNull();
     expect(usage?.total).toBe(1000); // 300 + 400 + 300
 
@@ -191,17 +203,22 @@ describe("Hard limit budget check", () => {
     expect(usage!.total >= hardLimit).toBe(true);
   });
 
-  test("budget check returns null for non-existent session", () => {
-    // New sessions have no prior usage - should not trigger hard limit
-    const usage = getSessionTokens("new-session-no-history");
-    expect(usage).toBeNull();
+  test("budget check returns zero usage for non-existent session", () => {
+    // getTokenUsage for non-existent returns zero object (not null) for backward compat
+    const usage = SessionManager.getTokenUsage("new-session-no-history");
+    expect(usage).not.toBeNull();
+    expect(usage.total).toBe(0);
   });
 
   test("budget check allows operations under limit", () => {
     const sessionId = "under-limit-session";
-    trackSessionTokens(sessionId, { input_tokens: 50, output_tokens: 100, total_tokens: 150 });
+    const session = SessionManager.getOrCreate(sessionId);
 
-    const usage = getSessionTokens(sessionId);
+    session.tokenUsage.input += 50;
+    session.tokenUsage.output += 100;
+    session.tokenUsage.operations += 1;
+
+    const usage = SessionManager.getTokenUsage(sessionId);
     const hardLimit = 1000;
 
     // Under limit - should allow

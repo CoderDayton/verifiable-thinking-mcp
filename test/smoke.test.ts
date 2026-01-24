@@ -3,7 +3,7 @@
  * Spawns server via stdio and validates JSON-RPC responses for each tool
  */
 
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import { type Subprocess, spawn } from "bun";
 
 const TIMEOUT_MS = 10_000;
@@ -148,11 +148,25 @@ describe("MCP Server Smoke Tests", () => {
     await Bun.sleep(500); // Wait for server startup
   });
 
+  beforeEach(async () => {
+    // Clear all sessions before each test for isolation
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+  });
+
   afterAll(async () => {
     await client.close();
   });
 
   test("should initialize with correct server info", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
@@ -191,6 +205,12 @@ describe("MCP Server Smoke Tests", () => {
   });
 
   test("should execute scratchpad step operation", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -199,7 +219,6 @@ describe("MCP Server Smoke Tests", () => {
         purpose: "analysis",
         verify: true,
         domain: "math",
-        session_id: "smoke-test",
       },
     });
 
@@ -210,6 +229,21 @@ describe("MCP Server Smoke Tests", () => {
   });
 
   test("should list sessions including smoke-test", async () => {
+    // Clear first, then create a session so we have something to list
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
+    // Create a session
+    await client.request("tools/call", {
+      name: "scratchpad",
+      arguments: {
+        operation: "step",
+        thought: "Test thought for list_sessions",
+      },
+    });
+
     const response = await client.request("tools/call", {
       name: "list_sessions",
       arguments: {},
@@ -219,14 +253,19 @@ describe("MCP Server Smoke Tests", () => {
     const result = response.result as { content: Array<{ type: string; text: string }> };
     expect(Array.isArray(result.content)).toBe(true);
     const text = result.content[0]?.text || "";
-    expect(text).toContain("smoke-test");
+    expect(text).toContain("s_"); // Check for server-managed session ID pattern
   });
 
   test("should get session details", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "get_session",
       arguments: {
-        session_id: "smoke-test",
         format: "summary",
       },
     });
@@ -237,6 +276,12 @@ describe("MCP Server Smoke Tests", () => {
   });
 
   test("should compress context with CPC", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "compress",
       arguments: {
@@ -255,6 +300,12 @@ describe("MCP Server Smoke Tests", () => {
   });
 
   test("should list resources", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("resources/list");
 
     expect(response.error).toBeUndefined();
@@ -265,6 +316,12 @@ describe("MCP Server Smoke Tests", () => {
   });
 
   test("should list resource templates", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("resources/templates/list");
 
     expect(response.error).toBeUndefined();
@@ -278,9 +335,7 @@ describe("MCP Server Smoke Tests", () => {
   test("should clear session", async () => {
     const response = await client.request("tools/call", {
       name: "clear_session",
-      arguments: {
-        session_id: "smoke-test",
-      },
+      arguments: {},
     });
 
     expect(response.error).toBeUndefined();
@@ -308,7 +363,11 @@ describe("Scratchpad Tool Integration Tests", () => {
   });
 
   test("scratchpad: multi-step reasoning chain with auto-increment", async () => {
-    const sessionId = "integration-chain-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Step 1: Define the problem (auto-incremented to step 1)
     const step1 = await client.request("tools/call", {
@@ -319,7 +378,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "analysis",
         verify: true,
         domain: "math",
-        session_id: sessionId,
+
         confidence: 0.7,
       },
     });
@@ -341,7 +400,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "validation",
         verify: false, // Chained equals triggers false positive
         domain: "math",
-        session_id: sessionId,
+
         confidence: 0.85,
       },
     });
@@ -363,7 +422,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "validation",
         verify: false, // Chained equals triggers false positive
         domain: "math",
-        session_id: sessionId,
+
         confidence: 0.9,
       },
     });
@@ -377,7 +436,7 @@ describe("Scratchpad Tool Integration Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         summary: "Proof by induction complete",
         final_answer: "The formula n(n+1)/2 is proven correct for all natural numbers.",
       },
@@ -392,12 +451,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: navigate operation views history", async () => {
-    const sessionId = "navigate-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create some steps
     await client.request("tools/call", {
@@ -406,7 +469,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "First analysis step",
         purpose: "analysis",
-        session_id: sessionId,
+
         confidence: 0.6,
       },
     });
@@ -416,7 +479,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "Second exploration step",
         purpose: "exploration",
-        session_id: sessionId,
+
         confidence: 0.75,
       },
     });
@@ -427,7 +490,7 @@ describe("Scratchpad Tool Integration Tests", () => {
       arguments: {
         operation: "navigate",
         view: "history",
-        session_id: sessionId,
+
         limit: 10,
       },
     });
@@ -445,7 +508,6 @@ describe("Scratchpad Tool Integration Tests", () => {
       arguments: {
         operation: "navigate",
         view: "branches",
-        session_id: sessionId,
       },
     });
     expect(branchesResponse.error).toBeUndefined();
@@ -458,12 +520,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: branch operation creates alternative path", async () => {
-    const sessionId = "branch-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create initial step
     await client.request("tools/call", {
@@ -472,7 +538,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "Initial approach: Try direct calculation",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -485,7 +550,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         branch_name: "Alternative: Recursive approach",
         thought: "Try recursive definition instead",
         purpose: "exploration",
-        session_id: sessionId,
       },
     });
     expect(branchResponse.error).toBeUndefined();
@@ -498,12 +562,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: verification failure halts and provides recovery options", async () => {
-    const sessionId = "verify-fail-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a step that will fail verification (unbalanced parentheses)
     const failedStep = await client.request("tools/call", {
@@ -514,7 +582,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "analysis",
         verify: true,
         domain: "math",
-        session_id: sessionId,
       },
     });
     expect(failedStep.error).toBeUndefined();
@@ -543,7 +610,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         acknowledge: true,
         reason: "Testing override functionality - parenthesis is intentional",
         failed_step: 1,
-        session_id: sessionId,
       },
     });
     expect(overrideResponse.error).toBeUndefined();
@@ -558,12 +624,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: verification failure recovery via revise", async () => {
-    const sessionId = "verify-revise-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a step that will fail verification
     const failedStep = await client.request("tools/call", {
@@ -574,7 +644,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "analysis",
         verify: true,
         domain: "math",
-        session_id: sessionId,
       },
     });
     const failedData = extractJson(
@@ -590,7 +659,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         target_step: 1,
         reason: "Fix bracket mismatch",
         thought: "Calculate (x + 1) * 2", // Fixed version
-        session_id: sessionId,
+
         confidence: 0.9,
       },
     });
@@ -607,12 +676,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: auto-verification enables after 3 steps", async () => {
-    const sessionId = "auto-verify-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Steps 1-3: no auto-verification (chain length < 3 before each)
     for (let i = 1; i <= 3; i++) {
@@ -622,7 +695,7 @@ describe("Scratchpad Tool Integration Tests", () => {
           operation: "step",
           thought: `Step ${i}: Valid reasoning here`,
           purpose: "analysis",
-          session_id: sessionId,
+
           // Don't set verify - should NOT auto-enable for first 3 steps
         },
       });
@@ -637,7 +710,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         thought: "Step 4: Therefore the conclusion follows logically from the premises",
         purpose: "decision",
         domain: "logic",
-        session_id: sessionId,
+
         // Don't set verify - should auto-enable
       },
     });
@@ -655,12 +728,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: verify=false disables auto-verification", async () => {
-    const sessionId = "disable-auto-verify-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create 3 steps to enable auto-verification threshold
     for (let i = 1; i <= 3; i++) {
@@ -670,7 +747,6 @@ describe("Scratchpad Tool Integration Tests", () => {
           operation: "step",
           thought: `Step ${i}: Setup`,
           purpose: "analysis",
-          session_id: sessionId,
         },
       });
     }
@@ -685,7 +761,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "analysis",
         domain: "math",
         verify: false, // Explicitly disable
-        session_id: sessionId,
       },
     });
     const step4Text = (step4.result as { content: Array<{ text: string }> }).content[0]?.text || "";
@@ -701,12 +776,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: revise operation corrects earlier step", async () => {
-    const sessionId = "revise-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create initial steps
     await client.request("tools/call", {
@@ -715,7 +794,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "2 + 2 = 5 (mistake)",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
     await client.request("tools/call", {
@@ -724,7 +802,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "Therefore result is 5",
         purpose: "decision",
-        session_id: sessionId,
       },
     });
 
@@ -737,7 +814,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         reason: "Arithmetic error",
         thought: "2 + 2 = 4 (corrected)",
         confidence: 0.95,
-        session_id: sessionId,
       },
     });
     expect(reviseResponse.error).toBeUndefined();
@@ -750,12 +826,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: confidence threshold triggers warning", async () => {
-    const sessionId = "threshold-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Add high-confidence steps to reach threshold
     await client.request("tools/call", {
@@ -764,7 +844,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "High confidence step 1",
         purpose: "analysis",
-        session_id: sessionId,
+
         confidence: 0.85,
         confidence_threshold: 0.8,
       },
@@ -776,7 +856,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "High confidence step 2",
         purpose: "validation",
-        session_id: sessionId,
+
         confidence: 0.9,
         confidence_threshold: 0.8,
       },
@@ -791,12 +871,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: local_compute with step operation", async () => {
-    const sessionId = "local-compute-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Math problem WITH local_compute flag
     const response = await client.request("tools/call", {
@@ -806,7 +890,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         thought: "What is 17 + 28?",
         purpose: "analysis",
         domain: "math",
-        session_id: sessionId,
+
         local_compute: true,
       },
     });
@@ -826,12 +910,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: verification with different domains", async () => {
-    const sessionId = "domain-verification-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Math verification
     const mathResponse = await client.request("tools/call", {
@@ -842,7 +930,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "validation",
         verify: true,
         domain: "math",
-        session_id: sessionId,
       },
     });
     expect(mathResponse.error).toBeUndefined();
@@ -862,7 +949,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "validation",
         verify: true,
         domain: "logic",
-        session_id: `${sessionId}-logic`,
       },
     });
     expect(logicResponse.error).toBeUndefined();
@@ -876,16 +962,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
-    });
-    await client.request("tools/call", {
-      name: "clear_session",
-      arguments: { session_id: `${sessionId}-logic` },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: compression on large thoughts", async () => {
-    const sessionId = "compression-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a large thought with repetitive content (compressible)
     const largeThought = `
@@ -912,7 +998,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         purpose: "analysis",
         compress: true,
         compression_query: "quadratic equation solution",
-        session_id: sessionId,
       },
     });
 
@@ -935,12 +1020,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: navigate step view returns detail", async () => {
-    const sessionId = "navigate-step-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a step
     await client.request("tools/call", {
@@ -949,7 +1038,7 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "This is a detailed analysis of the problem at hand.",
         purpose: "analysis",
-        session_id: sessionId,
+
         confidence: 0.8,
       },
     });
@@ -961,7 +1050,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "navigate",
         view: "step",
         step_id: 1,
-        session_id: sessionId,
       },
     });
 
@@ -982,12 +1070,16 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: navigate path view returns lineage", async () => {
-    const sessionId = "navigate-path-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create chain of steps
     await client.request("tools/call", {
@@ -996,7 +1088,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "Step 1: Initial problem statement",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
     await client.request("tools/call", {
@@ -1005,7 +1096,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "Step 2: Break down into sub-problems",
         purpose: "planning",
-        session_id: sessionId,
       },
     });
     await client.request("tools/call", {
@@ -1014,7 +1104,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "step",
         thought: "Step 3: Solve first sub-problem",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -1025,7 +1114,6 @@ describe("Scratchpad Tool Integration Tests", () => {
         operation: "navigate",
         view: "path",
         step_id: 3,
-        session_id: sessionId,
       },
     });
 
@@ -1039,7 +1127,7 @@ describe("Scratchpad Tool Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 });
@@ -1066,7 +1154,11 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("agent mode: multi-step reasoning with operation routing", async () => {
-    const sessionId = "agent-mode-full-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Simulate agent calling scratchpad with step operation (like runner.ts does)
     // Step 1: Initial analysis
@@ -1077,7 +1169,7 @@ describe("Agent Mode Integration Tests", () => {
         thought: "The problem asks to calculate 15% of 80. I'll convert percentage to decimal.",
         purpose: "analysis",
         domain: "math",
-        session_id: sessionId,
+
         confidence: 0.75,
       },
     });
@@ -1097,7 +1189,7 @@ describe("Agent Mode Integration Tests", () => {
         purpose: "validation",
         verify: true,
         domain: "math",
-        session_id: sessionId,
+
         confidence: 0.9,
       },
     });
@@ -1117,7 +1209,6 @@ describe("Agent Mode Integration Tests", () => {
         reason: "Double-checking arithmetic",
         thought: "Verified: 0.15 × 80 = 12 is correct",
         confidence: 0.95,
-        session_id: sessionId,
       },
     });
     expect(revise.error).toBeUndefined();
@@ -1136,7 +1227,7 @@ describe("Agent Mode Integration Tests", () => {
         branch_name: "Alternative: fraction method",
         thought: "15/100 × 80 = 15 × 80/100 = 1200/100 = 12",
         purpose: "exploration",
-        session_id: sessionId,
+
         confidence: 0.9, // Add confidence to avoid cliff detection
       },
     });
@@ -1152,7 +1243,7 @@ describe("Agent Mode Integration Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         summary: "Both methods confirm 15% of 80 = 12",
         final_answer: "12",
       },
@@ -1170,7 +1261,7 @@ describe("Agent Mode Integration Tests", () => {
       arguments: {
         operation: "navigate",
         view: "history",
-        session_id: sessionId,
+
         limit: 50,
       },
     });
@@ -1184,12 +1275,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("agent mode: local compute integration", async () => {
-    const sessionId = "agent-local-compute-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Agent sends math problem with local_compute flag
     const response = await client.request("tools/call", {
@@ -1199,7 +1294,7 @@ describe("Agent Mode Integration Tests", () => {
         thought: "Calculate: 25 * 4 + 10",
         purpose: "analysis",
         domain: "math",
-        session_id: sessionId,
+
         local_compute: true,
       },
     });
@@ -1222,12 +1317,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("agent mode: confidence threshold triggers warning", async () => {
-    const sessionId = "agent-threshold-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Add steps with high confidence to reach threshold
     await client.request("tools/call", {
@@ -1236,7 +1335,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "High confidence assertion 1",
         purpose: "analysis",
-        session_id: sessionId,
+
         confidence: 0.85,
         confidence_threshold: 0.8,
       },
@@ -1248,7 +1347,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "High confidence assertion 2",
         purpose: "validation",
-        session_id: sessionId,
+
         confidence: 0.9,
         confidence_threshold: 0.8,
       },
@@ -1265,12 +1364,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("agent mode: navigate operation for self-correction", async () => {
-    const sessionId = "agent-navigate-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create some steps
     await client.request("tools/call", {
@@ -1279,7 +1382,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "Initial approach to the problem",
         purpose: "analysis",
-        session_id: sessionId,
+
         confidence: 0.7,
       },
     });
@@ -1289,7 +1392,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "Second step with more detail",
         purpose: "exploration",
-        session_id: sessionId,
+
         confidence: 0.8,
       },
     });
@@ -1300,7 +1403,7 @@ describe("Agent Mode Integration Tests", () => {
       arguments: {
         operation: "navigate",
         view: "history",
-        session_id: sessionId,
+
         limit: 10,
       },
     });
@@ -1318,12 +1421,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: augment operation extracts and computes math", async () => {
-    const sessionId = "augment-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Test basic augmentation
     const response = await client.request("tools/call", {
@@ -1331,7 +1438,6 @@ describe("Agent Mode Integration Tests", () => {
       arguments: {
         operation: "augment",
         text: "The sqrt(16) is important and 2^8 equals something big",
-        session_id: sessionId,
       },
     });
 
@@ -1350,19 +1456,22 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: augment operation with no math returns unchanged text", async () => {
-    const sessionId = "augment-no-math-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
         operation: "augment",
         text: "This is just plain text with no mathematical expressions at all.",
-        session_id: sessionId,
       },
     });
 
@@ -1380,12 +1489,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: augment operation with store_as_step saves to session", async () => {
-    const sessionId = "augment-store-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Augment with store_as_step=true
     const augmentResponse = await client.request("tools/call", {
@@ -1394,7 +1507,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "augment",
         text: "Calculate 5! for factorial",
         store_as_step: true,
-        session_id: sessionId,
       },
     });
 
@@ -1410,7 +1522,6 @@ describe("Agent Mode Integration Tests", () => {
       arguments: {
         operation: "navigate",
         view: "history",
-        session_id: sessionId,
       },
     });
 
@@ -1423,12 +1534,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: augment operation with domain filtering", async () => {
-    const sessionId = "augment-domain-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Test with a financial context that might filter certain math
     const response = await client.request("tools/call", {
@@ -1437,7 +1552,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "augment",
         text: "The sqrt(25) and 3^3 are values we need",
         system_context: "You are a math tutor helping with algebra",
-        session_id: sessionId,
       },
     });
 
@@ -1454,12 +1568,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: step with augment_compute injects values", async () => {
-    const sessionId = "augment-compute-step-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Step with augment_compute flag should compute and inject values into thought
     const response = await client.request("tools/call", {
@@ -1468,7 +1586,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "I need to calculate sqrt(49) and 2^10 for this problem",
         purpose: "analysis",
-        session_id: sessionId,
+
         augment_compute: true,
       },
     });
@@ -1491,12 +1609,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: token_usage is returned in step response", async () => {
-    const sessionId = "token-usage-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     const response = await client.request("tools/call", {
       name: "scratchpad",
@@ -1504,7 +1626,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "This is a test thought to verify token usage tracking",
         purpose: "analysis",
-        session_id: sessionId,
+
         token_budget: 5000,
       },
     });
@@ -1528,12 +1650,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: token budget guard auto-compresses when exceeded", async () => {
-    const sessionId = "token-budget-guard-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Use very low budget to trigger auto-compression
     const response = await client.request("tools/call", {
@@ -1545,7 +1671,7 @@ describe("Agent Mode Integration Tests", () => {
           The system should detect that we've exceeded the budget and automatically compress.
           This is important for maintaining context window efficiency in long reasoning chains.`,
         purpose: "analysis",
-        session_id: sessionId,
+
         token_budget: 100, // Very low to trigger compression
       },
     });
@@ -1568,12 +1694,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: max_step_tokens rejects oversized steps", async () => {
-    const sessionId = "max-step-tokens-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a thought that exceeds the limit (100 tokens ~ 400 chars)
     const largeThought = "x".repeat(500); // ~125 tokens
@@ -1584,7 +1714,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: largeThought,
         purpose: "analysis",
-        session_id: sessionId,
+
         max_step_tokens: 100,
       },
     });
@@ -1597,12 +1727,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: max_step_tokens allows small steps", async () => {
-    const sessionId = "max-step-tokens-allow-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a thought under the limit
     const smallThought = "This is a short thought"; // ~6 tokens
@@ -1613,7 +1747,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: smallThought,
         purpose: "analysis",
-        session_id: sessionId,
+
         max_step_tokens: 100,
       },
     });
@@ -1626,12 +1760,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: force_large bypasses max_step_tokens", async () => {
-    const sessionId = "force-large-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a thought that exceeds the limit
     const largeThought = "x".repeat(500); // ~125 tokens
@@ -1642,7 +1780,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: largeThought,
         purpose: "analysis",
-        session_id: sessionId,
+
         max_step_tokens: 100,
         force_large: true, // Override the limit
       },
@@ -1656,12 +1794,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("agent mode: compression_stats in complete operation", async () => {
-    const sessionId = "agent-compression-stats-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Create a step with compression
     const largeThought = `
@@ -1682,7 +1824,7 @@ describe("Agent Mode Integration Tests", () => {
         purpose: "analysis",
         compress: true,
         compression_query: "problem solving factors",
-        session_id: sessionId,
+
         confidence: 0.85,
       },
     });
@@ -1692,7 +1834,7 @@ describe("Agent Mode Integration Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         summary: "Analysis complete",
         final_answer: "The solution accounts for all factors.",
       },
@@ -1717,12 +1859,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: next_step_suggestion for math derivations", async () => {
-    const sessionId = "next-step-suggestion-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Step with a math derivation that has an applicable transformation
     const response = await client.request("tools/call", {
@@ -1732,7 +1878,6 @@ describe("Agent Mode Integration Tests", () => {
         thought: "Let me simplify this expression: x + 0 = x + 0",
         purpose: "analysis",
         domain: "math",
-        session_id: sessionId,
       },
     });
 
@@ -1755,12 +1900,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: no next_step_suggestion for non-math domains", async () => {
-    const sessionId = "no-suggestion-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Step with code domain should not have suggestion
     const response = await client.request("tools/call", {
@@ -1770,7 +1919,6 @@ describe("Agent Mode Integration Tests", () => {
         thought: "The function returns a promise that resolves to the user object.",
         purpose: "analysis",
         domain: "code",
-        session_id: sessionId,
       },
     });
 
@@ -1785,12 +1933,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: next_step_suggestion with no applicable transformations", async () => {
-    const sessionId = "no-transform-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Step with math domain but already simplified
     const response = await client.request("tools/call", {
@@ -1800,7 +1952,6 @@ describe("Agent Mode Integration Tests", () => {
         thought: "The final result is x = 5",
         purpose: "analysis",
         domain: "math",
-        session_id: sessionId,
       },
     });
 
@@ -1820,12 +1971,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: branch operation includes next_step_suggestion for math", async () => {
-    const sessionId = "branch-suggestion-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // First create a step to branch from
     await client.request("tools/call", {
@@ -1834,7 +1989,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "Initial step",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -1845,7 +1999,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "branch",
         thought: "Alternative approach to calculate: 5 * 1 = 5 * 1",
         purpose: "exploration",
-        session_id: sessionId,
       },
     });
 
@@ -1870,12 +2023,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: revise operation includes next_step_suggestion for math", async () => {
-    const sessionId = "revise-suggestion-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // First create a step to revise
     await client.request("tools/call", {
@@ -1884,7 +2041,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "Original step with error",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -1896,7 +2052,6 @@ describe("Agent Mode Integration Tests", () => {
         target_step: 1,
         reason: "Fixing calculation",
         thought: "Corrected calculation: 7 + 0 = 7 + 0",
-        session_id: sessionId,
       },
     });
 
@@ -1921,11 +2076,17 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: hint operation returns progressive simplification steps", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     // Test basic hint operation
     const response = await client.request("tools/call", {
       name: "scratchpad",
@@ -1954,6 +2115,12 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: hint operation reveals all steps with high reveal_count", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -1976,6 +2143,12 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: hint operation handles invalid expression", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -1996,6 +2169,12 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: hint operation with already simplified expression", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2018,7 +2197,11 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: hint operation with session state auto-increments", async () => {
-    const sessionId = `hint-session-${Date.now()}`;
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // First call - reveal 1 step
     const response1 = await client.request("tools/call", {
@@ -2026,7 +2209,6 @@ describe("Agent Mode Integration Tests", () => {
       arguments: {
         operation: "hint",
         expression: "(x + 0) * 1",
-        session_id: sessionId,
       },
     });
 
@@ -2042,7 +2224,6 @@ describe("Agent Mode Integration Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "hint",
-        session_id: sessionId,
       },
     });
 
@@ -2056,12 +2237,16 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: hint operation reset starts fresh", async () => {
-    const sessionId = `hint-reset-${Date.now()}`;
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // First call - reveal 2 steps
     const response1 = await client.request("tools/call", {
@@ -2070,7 +2255,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "hint",
         expression: "(x + 0) * 1",
         reveal_count: 2,
-        session_id: sessionId,
       },
     });
 
@@ -2087,7 +2271,6 @@ describe("Agent Mode Integration Tests", () => {
         operation: "hint",
         expression: "(x + 0) * 1",
         reset: true,
-        session_id: sessionId,
       },
     });
 
@@ -2100,19 +2283,22 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: hint operation without expression and no state errors", async () => {
-    const sessionId = `hint-no-expr-${Date.now()}`;
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Call without expression on fresh session
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
         operation: "hint",
-        session_id: sessionId,
       },
     });
 
@@ -2125,11 +2311,17 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: mistakes operation detects coefficient error", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2152,6 +2344,12 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: mistakes operation finds no errors in correct derivation", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2170,6 +2368,12 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: mistakes operation returns structured mistake info", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2192,7 +2396,12 @@ describe("Agent Mode Integration Tests", () => {
   });
 
   test("scratchpad: hard_limit_tokens blocks operations when budget exhausted", async () => {
-    const sessionId = "hard-limit-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const hardLimit = 500; // Set a low limit
 
     // First step should succeed (no prior tokens)
@@ -2202,7 +2411,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "First reasoning step with enough content to generate some tokens",
         purpose: "analysis",
-        session_id: sessionId,
+
         hard_limit_tokens: hardLimit,
       },
     });
@@ -2224,7 +2433,7 @@ describe("Agent Mode Integration Tests", () => {
               3,
             ),
           purpose: "analysis",
-          session_id: sessionId,
+
           // Don't pass hard_limit yet - let tokens accumulate
         },
       });
@@ -2237,7 +2446,7 @@ describe("Agent Mode Integration Tests", () => {
         operation: "step",
         thought: "This step should be blocked due to budget exhaustion",
         purpose: "analysis",
-        session_id: sessionId,
+
         hard_limit_tokens: hardLimit,
       },
     });
@@ -2265,7 +2474,7 @@ describe("Agent Mode Integration Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 });
@@ -2292,6 +2501,12 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
   });
 
   test("scratchpad: spot_check operation detects bat and ball trap", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2323,6 +2538,12 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
   });
 
   test("scratchpad: spot_check operation passes correct answer", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2346,7 +2567,11 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
   });
 
   test("scratchpad: complete operation with trap triggers reconsideration", async () => {
-    const sessionId = "reconsideration-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Build a reasoning chain
     await client.request("tools/call", {
@@ -2355,7 +2580,6 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
         operation: "step",
         thought: "The bat and ball cost $1.10 total. The bat costs $1 more than the ball.",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -2365,7 +2589,6 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
         operation: "step",
         thought: "If I subtract $1 from $1.10, I get $0.10. So the ball costs 10 cents.",
         purpose: "decision",
-        session_id: sessionId,
       },
     });
 
@@ -2374,7 +2597,7 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         question:
           "A bat and ball cost $1.10. The bat costs $1 more than the ball. How much does the ball cost in cents?",
         final_answer: "10",
@@ -2413,12 +2636,16 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: reconsideration loop - complete → trap → revise → complete", async () => {
-    const sessionId = "reconsideration-loop-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     // Step 1: Build reasoning chain with WRONG answer (trap)
     await client.request("tools/call", {
@@ -2427,7 +2654,6 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
         operation: "step",
         thought: "The lily pad doubles every day and takes 48 days to fill the lake.",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -2437,7 +2663,6 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
         operation: "step",
         thought: "Half the lake means half the time. 48 / 2 = 24 days.",
         purpose: "decision",
-        session_id: sessionId,
       },
     });
 
@@ -2446,7 +2671,7 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         question:
           "A lily pad doubles every day. If it takes 48 days to cover the entire lake, how many days to cover half?",
         final_answer: "24",
@@ -2480,7 +2705,7 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
         reason: reconsideration.suggested_revise.reason,
         thought:
           "Wait - if it doubles each day, then on day 47 it was half the size of day 48. Half the lake is day 47, not 24.",
-        session_id: sessionId,
+
         confidence: 0.9,
       },
     });
@@ -2490,7 +2715,7 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         question:
           "A lily pad doubles every day. If it takes 48 days to cover the entire lake, how many days to cover half?",
         final_answer: "47",
@@ -2518,12 +2743,16 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: complete without question/answer skips spot-check", async () => {
-    const sessionId = "no-spot-check-test";
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
 
     await client.request("tools/call", {
       name: "scratchpad",
@@ -2531,7 +2760,6 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
         operation: "step",
         thought: "This is just a simple reasoning step",
         purpose: "analysis",
-        session_id: sessionId,
       },
     });
 
@@ -2540,7 +2768,7 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
       name: "scratchpad",
       arguments: {
         operation: "complete",
-        session_id: sessionId,
+
         summary: "Done",
       },
     });
@@ -2558,11 +2786,17 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 
   test("scratchpad: monty hall trap detection", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2586,6 +2820,12 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
   });
 
   test("scratchpad: conjunction fallacy trap detection", async () => {
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
@@ -2609,12 +2849,17 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
   });
 
   test("scratchpad: step with question returns trap_analysis", async () => {
-    const sessionId = `trap-priming-${Date.now()}`;
+    // Explicitly clear to ensure fresh state
+    await client.request("tools/call", {
+      name: "clear_session",
+      arguments: { all: true },
+    });
+
     const response = await client.request("tools/call", {
       name: "scratchpad",
       arguments: {
         operation: "step",
-        session_id: sessionId,
+
         question:
           "A bat and ball cost $1.10 total. The bat costs $1.00 more than the ball. How much does the ball cost?",
         thought: "Let me set up equations to solve this problem.",
@@ -2643,7 +2888,7 @@ describe("Spot-Check and Reconsideration Loop Tests", () => {
     // Cleanup
     await client.request("tools/call", {
       name: "clear_session",
-      arguments: { session_id: sessionId },
+      arguments: { all: false },
     });
   });
 });

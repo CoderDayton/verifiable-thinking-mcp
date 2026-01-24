@@ -38,7 +38,7 @@ export interface CompressionResult {
 }
 
 export interface CompressionOptions {
-  /** Target compression ratio 0.1-1.0, default 0.5 (keep 50%) */
+  /** Target compression ratio 0.1-1.0, default 0.5 (keep 50%). If undefined, will be auto-tuned based on context. */
   target_ratio?: number;
   /** Minimum sentences to keep, default 1 */
   min_sentences?: number;
@@ -54,6 +54,8 @@ export interface CompressionOptions {
   removeFillers?: boolean;
   /** Jaccard threshold for repetition detection (default: 0.8) */
   repeatThreshold?: number;
+  /** Enable adaptive target_ratio based on context entropy/length (default: true) */
+  adaptiveCompression?: boolean;
 }
 
 interface SentenceMetadata {
@@ -81,6 +83,7 @@ const DEFAULT_OPTIONS: Required<CompressionOptions> = {
   enforceCausalChains: true,
   removeFillers: true,
   repeatThreshold: 0.8,
+  adaptiveCompression: true,
 };
 
 // Filler phrases to remove (research-backed)
@@ -206,6 +209,73 @@ const STOP_WORDS = new Set([
   "there",
   "then",
 ]);
+
+// ============================================================================
+// ADAPTIVE COMPRESSION - Auto-tune target_ratio based on context
+// ============================================================================
+
+/**
+ * Calculate optimal compression ratio based on context characteristics
+ *
+ * Uses entropy and context length to determine how aggressively to compress:
+ * - High entropy (dense content) → conservative compression (keep more)
+ * - Low entropy (redundant) → aggressive compression (keep less)
+ * - Long text → more aggressive (more redundancy expected)
+ * - Short text → conservative (preserve detail)
+ *
+ * @param context - Text to analyze
+ * @param query - Query for relevance analysis
+ * @returns Optimal target_ratio (0.1-0.9)
+ */
+export function calculateAdaptiveRatio(context: string, query: string): number {
+  const tokens = estimateTokens(context);
+  const entropy = calculateEntropy(context);
+
+  // Base ratio depends on entropy
+  // Low entropy (3.5-4.5) → aggressive compression (0.3-0.5)
+  // Medium entropy (4.5-5.5) → moderate compression (0.5-0.7)
+  // High entropy (5.5+) → conservative compression (0.7-0.9)
+  let baseRatio: number;
+
+  if (entropy < 4.0) {
+    // Very redundant content
+    baseRatio = 0.35;
+  } else if (entropy < 4.5) {
+    // Redundant content (typical verbose explanations)
+    baseRatio = 0.45;
+  } else if (entropy < 5.0) {
+    // Moderate redundancy (normal reasoning chains)
+    baseRatio = 0.55;
+  } else if (entropy < 5.5) {
+    // Low redundancy (technical content)
+    baseRatio = 0.65;
+  } else if (entropy < 6.0) {
+    // Dense content (code, math)
+    baseRatio = 0.75;
+  } else {
+    // Very dense or near-random (already compressed)
+    baseRatio = 0.85;
+  }
+
+  // Adjust based on length
+  // Longer texts can be compressed more aggressively (more likely to have redundancy)
+  if (tokens > 1000) {
+    baseRatio *= 0.85; // 15% more aggressive
+  } else if (tokens > 500) {
+    baseRatio *= 0.9; // 10% more aggressive
+  } else if (tokens < 150) {
+    baseRatio *= 1.1; // 10% more conservative (preserve detail)
+  }
+
+  // Query relevance adjustment
+  // If query is very short or empty, be more conservative (less signal for relevance)
+  if (query.length < 20) {
+    baseRatio *= 1.05; // 5% more conservative
+  }
+
+  // Clamp to reasonable range [0.25, 0.90]
+  return Math.max(0.25, Math.min(0.9, baseRatio));
+}
 
 // ============================================================================
 // Core Functions
@@ -387,6 +457,13 @@ export function compress(
   options: CompressionOptions = {},
 ): CompressionResult {
   const opts = { ...DEFAULT_OPTIONS, ...options };
+
+  // Apply adaptive compression if enabled and no explicit target_ratio provided
+  let targetRatio = opts.target_ratio;
+  if (opts.adaptiveCompression && options.target_ratio === undefined) {
+    targetRatio = calculateAdaptiveRatio(context, query);
+  }
+
   const rawSentences = splitSentences(context);
 
   // Early exit for short text
@@ -405,10 +482,7 @@ export function compress(
   computeSentenceScores(metadata, query, opts);
 
   // Phase 3: Select sentences
-  const keepCount = Math.max(
-    opts.min_sentences,
-    Math.ceil(rawSentences.length * opts.target_ratio),
-  );
+  const keepCount = Math.max(opts.min_sentences, Math.ceil(rawSentences.length * targetRatio));
   const selected = selectTopSentences(metadata, keepCount);
 
   // Phase 4: Enforce constraints

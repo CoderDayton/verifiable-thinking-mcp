@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { clearTracker } from "../lib/concepts.ts";
 import { SessionManager } from "../lib/session.ts";
-import { calculateTokenUsage, clearAllSessionTokens, clearSessionTokens } from "../lib/tokens.ts";
+import { calculateTokenUsage } from "../lib/tokens.ts";
 
 /**
  * Session management tools for reasoning chains
@@ -9,7 +9,7 @@ import { calculateTokenUsage, clearAllSessionTokens, clearSessionTokens } from "
 
 export const listSessionsTool = {
   name: "list_sessions",
-  description: "List all active reasoning sessions with their thought counts and branches",
+  description: "List active sessions with counts/branches",
   parameters: z.object({}),
   execute: async () => {
     const args = {};
@@ -42,41 +42,45 @@ export const listSessionsTool = {
 
 export const getSessionTool = {
   name: "get_session",
-  description: "Get reasoning chain for a session in full, summary, or compressed format",
+  description: "Get session: full/summary/compressed format",
   parameters: z.object({
-    session_id: z.string().describe("Session ID to retrieve"),
+    session_id: z.string().optional().describe("Session ID (uses active if omitted)"),
     format: z
       .enum(["full", "summary", "compressed"])
       .default("summary")
-      .describe(
-        "Output format: full (all thoughts), summary (overview), compressed (key thoughts only)",
-      ),
+      .describe("Format: full (all), summary (overview), compressed (key only)"),
     branch_id: z.string().optional().describe("Filter by branch ID"),
   }),
-  execute: async (args: { session_id: string; format?: string; branch_id?: string }) => {
-    const session = SessionManager.get(args.session_id);
+  execute: async (args: { session_id?: string; format?: string; branch_id?: string }) => {
+    // Use active session if not specified
+    const sessionId = args.session_id || SessionManager.getActiveSession();
+    if (!sessionId) {
+      return "No session ID provided and no active session found.";
+    }
+
+    const session = SessionManager.get(sessionId);
 
     let result: string;
     if (!session) {
-      result = `Session not found: ${args.session_id}`;
+      result = `Session not found: ${sessionId}`;
     } else {
       const format = args.format || "summary";
 
       if (format === "compressed") {
-        result = SessionManager.getCompressed(args.session_id) || "No thoughts to compress.";
+        result = SessionManager.getCompressed(sessionId) || "No thoughts to compress.";
       } else if (format === "summary") {
-        result = SessionManager.getSummary(args.session_id) || "No summary available.";
+        result = SessionManager.getSummary(sessionId) || "No summary available.";
       } else {
         // Full format
         const thoughts = args.branch_id
-          ? SessionManager.getThoughts(args.session_id, args.branch_id)
-          : SessionManager.getThoughts(args.session_id);
+          ? SessionManager.getThoughts(sessionId, args.branch_id)
+          : SessionManager.getThoughts(sessionId);
 
         if (thoughts.length === 0) {
           result = "No thoughts in session.";
         } else {
           const lines = [
-            `**Session**: ${args.session_id}`,
+            `**Session**: ${sessionId}`,
             `**Branches**: ${Array.from(session.branches).join(", ")}`,
             `**Thoughts**: ${thoughts.length}`,
             "",
@@ -107,7 +111,7 @@ export const getSessionTool = {
 
 export const clearSessionTool = {
   name: "clear_session",
-  description: "Clear a specific session or all sessions to free memory",
+  description: "Clear session(s) to free memory",
   parameters: z.object({
     session_id: z.string().optional().describe("Session ID to clear (omit for all)"),
     all: z.boolean().default(false).describe("Clear all sessions"),
@@ -117,14 +121,12 @@ export const clearSessionTool = {
 
     if (args.all) {
       const count = SessionManager.clearAll();
-      clearAllSessionTokens();
       result = `Cleared ${count} session(s).`;
     } else if (!args.session_id) {
       result = "Provide session_id or set all=true";
     } else {
-      // Also clear concept tracker and token tracking for this session
+      // Also clear concept tracker for this session
       clearTracker(args.session_id);
-      clearSessionTokens(args.session_id);
 
       const cleared = SessionManager.clear(args.session_id);
       result = cleared

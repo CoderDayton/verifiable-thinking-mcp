@@ -38,7 +38,6 @@ export const ScratchpadSchema = z.object({
     .describe("Operation to perform"),
 
   // Common fields (all operations)
-  session_id: z.string().optional().describe("Session ID (auto-generated if omitted)"),
   confidence_threshold: z
     .number()
     .min(0)
@@ -105,7 +104,7 @@ export const ScratchpadSchema = z.object({
     .boolean()
     .default(true)
     .describe("Auto-inject computed values into thought (default: true)"),
-  compress: z.boolean().default(false).describe("Compress thought before storing"),
+  compress: z.boolean().default(true).describe("Compress thought before storing"),
   compression_query: z.string().optional().describe("Query for context-aware compression"),
   max_step_tokens: z
     .number()

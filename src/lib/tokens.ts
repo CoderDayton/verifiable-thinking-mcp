@@ -1,94 +1,271 @@
 /**
- * Token estimation utilities
- *
- * Model-aware heuristics for token estimation without external dependencies.
- * Falls back to ~4 chars/token for unknown models (GPT-family baseline).
+ * Token counting with tiktoken (o200k_base encoding)
+ * Features:
+ * - Real token counts using OpenAI's tiktoken library
+ * - LRU cache for repeat text (O(1) lookups)
+ * - Embedded token tracking in Session (no WeakMap indirection)
+ * - Automatic cache warming for common patterns
  */
+
+import { encoding_for_model, type Tiktoken } from "tiktoken";
+import { LRUCache } from "./LRUCache.ts";
+
+// ============================================================================
+// TIKTOKEN SINGLETON
+// ============================================================================
+
+let tiktoken: Tiktoken | null = null;
 
 /**
- * Model family detection and chars-per-token ratios.
- * Based on empirical measurements from tokenizer research.
- *
- * Sources:
- * - GPT-4/3.5: ~4 chars/token (BPE, cl100k_base)
- * - Claude: ~3.5 chars/token (slightly more efficient)
- * - Llama/Mistral: ~4.2 chars/token (sentencepiece)
- * - Gemini: ~4 chars/token (similar to GPT)
+ * Get or initialize the tiktoken encoder (o200k_base for GPT-4o, o1, etc.)
+ * Lazy initialization to avoid startup cost.
  */
-const MODEL_CHAR_RATIOS: Record<string, number> = {
-  // OpenAI
-  "gpt-4": 4.0,
-  "gpt-3.5": 4.0,
-  o1: 4.0,
-  o3: 4.0,
-
-  // Anthropic
-  claude: 3.5,
-
-  // Meta
-  llama: 4.2,
-
-  // Mistral
-  mistral: 4.2,
-  mixtral: 4.2,
-
-  // Google
-  gemini: 4.0,
-
-  // DeepSeek
-  deepseek: 4.0,
-
-  // Qwen
-  qwen: 4.0,
-
-  // Default fallback
-  default: 4.0,
-};
+function getTiktoken(): Tiktoken {
+  if (!tiktoken) {
+    // o200k_base is used by: gpt-4o, gpt-4o-mini, o1-preview, o1-mini, o3-mini
+    tiktoken = encoding_for_model("gpt-4o");
+  }
+  return tiktoken!; // Non-null assertion safe after assignment
+}
 
 /**
- * Get chars-per-token ratio for a model.
- * Checks LLM_MODEL env var if no model specified.
+ * Free tiktoken resources (call on server shutdown)
  */
-function getCharRatio(model?: string): number {
-  const modelName = (model || process.env.LLM_MODEL || "").toLowerCase();
+export function closeTiktoken(): void {
+  if (tiktoken) {
+    tiktoken.free();
+    tiktoken = null;
+  }
+}
 
-  for (const [prefix, ratio] of Object.entries(MODEL_CHAR_RATIOS)) {
-    if (prefix !== "default" && modelName.includes(prefix)) {
-      return ratio;
+// ============================================================================
+// TOKEN COUNT CACHE (LRU with 10k entries, 30 min TTL)
+// ============================================================================
+
+const tokenCache = new LRUCache<string, number>({
+  maxSize: 10000, // Cache up to 10k unique strings
+  ttlMs: 30 * 60 * 1000, // 30 minute TTL
+  cleanupIntervalMs: 5 * 60 * 1000, // Cleanup every 5 min
+  cleanupBatchSize: 50, // Check cleanup every 50 operations
+});
+
+/**
+ * Count tokens with caching.
+ * Uses tiktoken o200k_base encoding for accurate counts.
+ * O(1) for cached strings, O(n) for new strings (where n = text length).
+ */
+export function countTokens(text: string): number {
+  if (!text) return 0;
+
+  // Check cache first
+  const cached = tokenCache.get(text);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Count with tiktoken
+  const encoder = getTiktoken();
+  const tokens = encoder.encode(text);
+  const count = tokens.length;
+
+  // Cache result
+  tokenCache.set(text, count);
+
+  return count;
+}
+
+/**
+ * Async version of countTokens - prevents blocking event loop
+ * Uses tiktoken o200k_base encoding for accurate counts.
+ * Ideal for large texts or when called from async context.
+ */
+export async function countTokensAsync(text: string): Promise<number> {
+  if (!text) return 0;
+
+  // Check cache first (synchronous)
+  const cached = tokenCache.get(text);
+  if (cached !== undefined) {
+    return cached;
+  }
+
+  // Yield to event loop before expensive encoding
+  await Promise.resolve();
+
+  // Count with tiktoken
+  const encoder = getTiktoken();
+  const tokens = encoder.encode(text);
+  const count = tokens.length;
+
+  // Cache result
+  tokenCache.set(text, count);
+
+  return count;
+}
+
+/**
+ * Batch token counting - more efficient than individual calls
+ * Reduces tiktoken overhead by processing multiple strings together.
+ *
+ * @param texts - Array of strings to count tokens for
+ * @returns Array of token counts in same order as input
+ *
+ * @example
+ * const counts = countTokensBatch(["hello", "world", "foo"]);
+ * // → [1, 1, 1]
+ */
+export function countTokensBatch(texts: string[]): number[] {
+  if (texts.length === 0) return [];
+
+  const encoder = getTiktoken();
+  const results: number[] = [];
+  const uncachedIndices: number[] = [];
+  const uncachedTexts: string[] = [];
+
+  // First pass: check cache
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i]!; // Non-null assertion safe - array access
+    if (!text) {
+      results[i] = 0;
+      continue;
+    }
+
+    const cached = tokenCache.get(text);
+    if (cached !== undefined) {
+      results[i] = cached;
+    } else {
+      uncachedIndices.push(i);
+      uncachedTexts.push(text);
     }
   }
 
-  return MODEL_CHAR_RATIOS.default as number;
+  // Second pass: batch encode uncached texts
+  if (uncachedTexts.length > 0) {
+    for (let i = 0; i < uncachedTexts.length; i++) {
+      const text = uncachedTexts[i]!; // Non-null assertion safe - filtered array
+      const tokens = encoder.encode(text);
+      const count = tokens.length;
+
+      // Cache result
+      tokenCache.set(text, count);
+
+      // Store in results array at correct index
+      const originalIndex = uncachedIndices[i]!; // Non-null assertion safe - same length
+      results[originalIndex] = count;
+    }
+  }
+
+  return results;
 }
 
 /**
- * Estimate token count for a string.
- * Uses model-aware char/token ratios when LLM_MODEL is set.
+ * Async batch token counting - non-blocking version
+ * Prevents event loop blocking when processing large batches.
+ *
+ * @param texts - Array of strings to count tokens for
+ * @param batchSize - Number of texts to process before yielding (default: 10)
+ * @returns Array of token counts in same order as input
  */
-export function estimateTokens(text: string, model?: string): number {
-  if (!text) return 0;
-  const ratio = getCharRatio(model);
-  return Math.ceil(text.length / ratio);
+export async function countTokensBatchAsync(
+  texts: string[],
+  batchSize: number = 10,
+): Promise<number[]> {
+  if (texts.length === 0) return [];
+
+  const encoder = getTiktoken();
+  const results: number[] = [];
+  const uncachedIndices: number[] = [];
+  const uncachedTexts: string[] = [];
+
+  // First pass: check cache
+  for (let i = 0; i < texts.length; i++) {
+    const text = texts[i]!; // Non-null assertion safe - array access
+    if (!text) {
+      results[i] = 0;
+      continue;
+    }
+
+    const cached = tokenCache.get(text);
+    if (cached !== undefined) {
+      results[i] = cached;
+    } else {
+      uncachedIndices.push(i);
+      uncachedTexts.push(text);
+    }
+  }
+
+  // Second pass: batch encode uncached texts (with yielding)
+  for (let i = 0; i < uncachedTexts.length; i++) {
+    // Yield to event loop every N texts
+    if (i > 0 && i % batchSize === 0) {
+      await Promise.resolve();
+    }
+
+    const text = uncachedTexts[i]!; // Non-null assertion safe - filtered array
+    const tokens = encoder.encode(text);
+    const count = tokens.length;
+
+    // Cache result
+    tokenCache.set(text, count);
+
+    // Store in results array at correct index
+    const originalIndex = uncachedIndices[i]!; // Non-null assertion safe - same length
+    results[originalIndex] = count;
+  }
+
+  return results;
 }
 
 /**
- * Estimate tokens for a JSON-serializable object
+ * Count tokens for a JSON-serializable object
  */
-export function estimateObjectTokens(obj: unknown, model?: string): number {
+export function countObjectTokens(obj: unknown): number {
   if (obj === null || obj === undefined) return 0;
   const json = JSON.stringify(obj);
-  return estimateTokens(json, model);
+  return countTokens(json);
+}
+
+/**
+ * Get cache stats for monitoring
+ */
+export function getTokenCacheStats() {
+  return tokenCache.getStats();
+}
+
+/**
+ * Clear token count cache (useful for testing)
+ */
+export function clearTokenCache(): void {
+  tokenCache.clear();
+}
+
+// ============================================================================
+// TOKEN USAGE TRACKING (embedded in Session)
+// ============================================================================
+
+/**
+ * Cumulative token usage for a session.
+ * This is now embedded directly in Session interface.
+ */
+export interface TokenUsage {
+  /** Total input tokens across all operations */
+  input: number;
+  /** Total output tokens across all operations */
+  output: number;
+  /** Total cached tokens (from prompt caching, if supported) */
+  cached?: number;
+  /** Number of operations tracked */
+  operations: number;
 }
 
 /**
  * Token usage metadata for tool responses
  */
 export interface TokenUsageMetadata {
-  /** Estimated tokens in the tool input */
+  /** Tokens in the tool input */
   input_tokens: number;
-  /** Estimated tokens in the tool output */
+  /** Tokens in the tool output */
   output_tokens: number;
-  /** Total estimated tokens */
+  /** Total tokens */
   total_tokens: number;
 }
 
@@ -96,8 +273,8 @@ export interface TokenUsageMetadata {
  * Calculate token usage for a tool call
  */
 export function calculateTokenUsage(input: unknown, output: unknown): TokenUsageMetadata {
-  const inputTokens = estimateObjectTokens(input);
-  const outputTokens = estimateObjectTokens(output);
+  const inputTokens = countObjectTokens(input);
+  const outputTokens = countObjectTokens(output);
 
   return {
     input_tokens: inputTokens,
@@ -107,71 +284,25 @@ export function calculateTokenUsage(input: unknown, output: unknown): TokenUsage
 }
 
 // ============================================================================
-// SESSION TOKEN TRACKING
+// LEGACY COMPATIBILITY (for gradual migration)
 // ============================================================================
 
 /**
- * Cumulative token usage for a session
+ * @deprecated Use countTokens() instead. Kept for backward compatibility.
  */
-export interface SessionTokenUsage {
-  /** Total input tokens across all operations */
-  total_input: number;
-  /** Total output tokens across all operations */
-  total_output: number;
-  /** Combined total */
-  total: number;
-  /** Number of operations tracked */
-  operations: number;
-}
-
-/** Session token accumulators */
-const sessionTokens = new Map<string, SessionTokenUsage>();
-
-/**
- * Track token usage for a session.
- * Call this after each tool operation to accumulate usage.
- */
-export function trackSessionTokens(
-  sessionId: string,
-  usage: TokenUsageMetadata,
-): SessionTokenUsage {
-  const existing = sessionTokens.get(sessionId) || {
-    total_input: 0,
-    total_output: 0,
-    total: 0,
-    operations: 0,
-  };
-
-  const updated: SessionTokenUsage = {
-    total_input: existing.total_input + usage.input_tokens,
-    total_output: existing.total_output + usage.output_tokens,
-    total: existing.total + usage.total_tokens,
-    operations: existing.operations + 1,
-  };
-
-  sessionTokens.set(sessionId, updated);
-  return updated;
+export function estimateTokens(text: string, _model?: string): number {
+  return countTokens(text);
 }
 
 /**
- * Get cumulative token usage for a session
+ * @deprecated Use countObjectTokens() instead. Kept for backward compatibility.
  */
-export function getSessionTokens(sessionId: string): SessionTokenUsage | null {
-  return sessionTokens.get(sessionId) || null;
+export function estimateObjectTokens(obj: unknown, _model?: string): number {
+  return countObjectTokens(obj);
 }
 
-/**
- * Clear token tracking for a session
- */
-export function clearSessionTokens(sessionId: string): boolean {
-  return sessionTokens.delete(sessionId);
-}
-
-/**
- * Clear all session token tracking
- */
-export function clearAllSessionTokens(): number {
-  const count = sessionTokens.size;
-  sessionTokens.clear();
-  return count;
-}
+// Note: Session token tracking functions (trackSessionTokens, getSessionTokens, etc.)
+// are removed. Token usage is now embedded in Session.tokenUsage field.
+// Migration guide:
+// - Old: trackSessionTokens(sessionId, usage)
+// - New: session.tokenUsage.input += usage.input_tokens

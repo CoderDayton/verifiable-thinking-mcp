@@ -37,7 +37,7 @@ import {
   ScratchpadSchema,
 } from "../lib/think/scratchpad-schema.ts";
 import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
-import { calculateTokenUsage, getSessionTokens, trackSessionTokens } from "../lib/tokens.ts";
+import { calculateTokenUsage } from "../lib/tokens.ts";
 import { verify } from "../lib/verification.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
@@ -290,7 +290,11 @@ function enrichStepResponse(
   params: {
     verificationResult: { passed: boolean; confidence: number } | null;
     domain: string;
-    computeResult: { solved: boolean; result?: string | number; method?: string } | null;
+    computeResult: {
+      solved: boolean;
+      result?: string | number;
+      method?: string;
+    } | null;
     compressionResult: ScratchpadResponse["compression"] | null;
     tokenUsage: { total: number };
     tokenBudget: number;
@@ -299,6 +303,7 @@ function enrichStepResponse(
     augmentationResult: ScratchpadResponse["augmentation"] | null;
     trapAnalysis: ScratchpadResponse["trap_analysis"] | undefined;
     nextStepSuggestion: ScratchpadResponse["next_step_suggestion"] | undefined;
+    thoughtText: string; // Add thought text for token estimation
   },
 ): void {
   const {
@@ -313,6 +318,7 @@ function enrichStepResponse(
     augmentationResult,
     trapAnalysis,
     nextStepSuggestion,
+    thoughtText,
   } = params;
 
   // Add verification info
@@ -338,10 +344,13 @@ function enrichStepResponse(
     response.compression = compressionResult;
   }
 
-  // Add token usage info
-  const budgetPercent = tokenBudget > 0 ? (tokenUsage.total / tokenBudget) * 100 : 0;
+  // Add token usage info (include estimated tokens for current operation)
+  const currentOpTokens =
+    Math.ceil((thoughtText?.length || 0) / 4) + Math.ceil(JSON.stringify(response).length / 4);
+  const totalWithCurrentOp = tokenUsage.total + currentOpTokens;
+  const budgetPercent = tokenBudget > 0 ? (totalWithCurrentOp / tokenBudget) * 100 : 0;
   response.token_usage = {
-    total: tokenUsage.total,
+    total: totalWithCurrentOp,
     budget: tokenBudget,
     exceeded: budgetExceeded,
     auto_compressed: autoCompressed,
@@ -462,7 +471,11 @@ function buildVerificationFailureResponse(params: {
 /** Stream verification failure notice with detected mistakes */
 async function streamVerificationFailure(
   streamContent: MCPContext["streamContent"],
-  verificationResult: { confidence: number; suggestions: string[]; evidence: string },
+  verificationResult: {
+    confidence: number;
+    suggestions: string[];
+    evidence: string;
+  },
   detectedMistakes: DetectedMistake[],
   stepNumber: number,
 ): Promise<void> {
@@ -503,7 +516,10 @@ function buildPendingRecord(params: {
   thought: string;
   domain: string;
   verificationConfidence: number;
-  compressionResult: { original_tokens: number; compressed_tokens: number } | null;
+  compressionResult: {
+    original_tokens: number;
+    compressed_tokens: number;
+  } | null;
 }): ThoughtRecord {
   const {
     sessionId,
@@ -542,7 +558,12 @@ async function applyAugmentation(
   streamContent: MCPContext["streamContent"],
 ): Promise<{
   thought: string;
-  result: { applied: boolean; computations: number; filtered: number; domain: string } | null;
+  result: {
+    applied: boolean;
+    computations: number;
+    filtered: number;
+    domain: string;
+  } | null;
 }> {
   if (!shouldAugment) {
     return { thought, result: null };
@@ -596,7 +617,9 @@ async function applyCompression(
 
   const query = args.compression_query || args.context || "";
   const targetRatio = budgetExceeded ? 0.4 : 0.6;
-  const compressOutput = compress(thought, query, { target_ratio: targetRatio });
+  const compressOutput = compress(thought, query, {
+    target_ratio: targetRatio,
+  });
   const autoCompressed = budgetExceeded && !args.compress;
 
   const budgetTag = autoCompressed ? " [budget guard]" : "";
@@ -693,7 +716,10 @@ async function runConsistencyCheck(
   }
 
   const thoughts = SessionManager.getThoughts(sessionId, branchId);
-  const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+  const stepData = thoughts.map((t) => ({
+    step: t.step_number,
+    thought: t.thought,
+  }));
   const contradictions = checkStepConsistency(
     { step: stepNumber, thought: currentThought },
     stepData.slice(0, -1), // Exclude current step (already in thoughts)
@@ -991,21 +1017,35 @@ async function runVerificationCheck(
 // ============================================================================
 
 /** Handle step operation - add a new thought */
-async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleStep(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: thought is required for step operation
   if (!args.thought) {
     throw new Error("thought is required for step operation");
   }
-  const thought = args.thought;
+  let thought = args.thought;
 
-  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
+  // sessionId managed server-side
   const branchId = "main"; // Default branch for step operation
   const threshold = args.confidence_threshold ?? 0.8;
   const tokenBudget = args.token_budget ?? 3000;
 
-  // S3: Check max_step_tokens limit before any processing
+  // S1: Token budget guard - check EARLY if session exceeds budget
+  const tokenUsage = SessionManager.getTokenUsage(sessionId);
+  const budgetExceeded = tokenUsage.total >= tokenBudget;
+
+  // Compression - apply EARLY to reduce input tokens (before all other processing)
+  const compression = await applyCompression(thought, args, budgetExceeded, streamContent);
+  thought = compression.thought;
+  const compressionResult = compression.result;
+  const autoCompressed = compression.autoCompressed;
+
+  // S3: Check max_step_tokens limit (after compression, so limit applies to compressed size)
   const maxStepTokens = args.max_step_tokens;
   if (maxStepTokens !== undefined && !args.force_large) {
     // Estimate tokens: ~4 chars per token
@@ -1069,16 +1109,6 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
   strippedThought = augmentation.thought;
   const augmentationResult = augmentation.result;
 
-  // S1: Token budget guard - check if session exceeds budget
-  const tokenUsage = SessionManager.getTokenUsage(sessionId);
-  const budgetExceeded = tokenUsage.total >= tokenBudget;
-
-  // Compression - check if requested, auto-detect, OR budget exceeded
-  const compression = await applyCompression(strippedThought, args, budgetExceeded, streamContent);
-  strippedThought = compression.thought;
-  const compressionResult = compression.result;
-  const autoCompressed = compression.autoCompressed;
-
   // Run verification (extracted to helper to reduce complexity)
   const verificationCheck = await runVerificationCheck(
     args,
@@ -1108,7 +1138,10 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     });
   }
   if (args.outcome) {
-    await streamContent({ type: "text", text: `**Outcome:** ${args.outcome}\n` });
+    await streamContent({
+      type: "text",
+      text: `**Outcome:** ${args.outcome}\n`,
+    });
   }
 
   // Build thought record
@@ -1136,6 +1169,7 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     // Track compression stats if compression was applied
     compression: compressionResult
       ? {
+          applied: true,
           input_bytes_saved:
             (compressionResult.original_tokens - compressionResult.compressed_tokens) * 4,
           output_bytes_saved: 0,
@@ -1198,6 +1232,7 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
     augmentationResult,
     trapAnalysis,
     nextStepSuggestion,
+    thoughtText: thought, // Pass thought text for token estimation
   });
 
   // Stream next step suggestion if available
@@ -1288,11 +1323,12 @@ async function handleStep(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
 }
 
 /** Handle navigate operation - view history/branches/steps/paths */
-async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<ScratchpadResponse> {
-  const sessionId = args.session_id;
-  if (!sessionId) {
-    throw new Error("session_id required for navigate operation");
-  }
+async function handleNavigate(
+  args: ScratchpadArgs,
+  _ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
+  // sessionId passed from server-side management
 
   const session = SessionManager.get(sessionId);
   if (!session) {
@@ -1386,17 +1422,20 @@ async function handleNavigate(args: ScratchpadArgs, _ctx: MCPContext): Promise<S
 }
 
 /** Handle branch operation - start alternative reasoning path */
-async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleBranch(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
-  // Runtime validation: session_id and thought are required for branch operation
-  if (!args.session_id) {
+  if (!sessionId) {
     throw new Error("session_id required for branch operation");
   }
   if (!args.thought) {
     throw new Error("thought is required for branch operation");
   }
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   const thought = args.thought;
 
   const session = SessionManager.get(sessionId);
@@ -1538,11 +1577,15 @@ async function handleBranch(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
 }
 
 /** Handle revise operation - correct earlier step */
-async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleRevise(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: required fields for revise operation
-  if (!args.session_id) {
+  if (!sessionId) {
     throw new Error("session_id required for revise operation");
   }
   if (!args.thought) {
@@ -1551,7 +1594,7 @@ async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
   if (args.target_step === undefined) {
     throw new Error("target_step is required for revise operation");
   }
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   const thought = args.thought;
   const targetStep = args.target_step;
 
@@ -1701,9 +1744,13 @@ async function handleRevise(args: ScratchpadArgs, ctx: MCPContext): Promise<Scra
 }
 
 /** Handle complete operation - finalize reasoning chain */
-async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleComplete(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   if (!sessionId) {
     throw new Error("session_id required for complete operation");
   }
@@ -1739,10 +1786,16 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
   }
 
   if (args.summary) {
-    await streamContent({ type: "text", text: `\n**Summary:** ${args.summary}\n` });
+    await streamContent({
+      type: "text",
+      text: `\n**Summary:** ${args.summary}\n`,
+    });
   }
   if (args.final_answer) {
-    await streamContent({ type: "text", text: `**Answer:** ${args.final_answer}\n` });
+    await streamContent({
+      type: "text",
+      text: `**Answer:** ${args.final_answer}\n`,
+    });
   }
 
   // Auto spot-check if question and final_answer provided
@@ -1885,7 +1938,11 @@ async function handleComplete(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
 }
 
 /** Handle augment operation - extract, compute, and inject math results */
-async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleAugment(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: text is required for augment operation
@@ -1894,7 +1951,7 @@ async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<Scr
   }
   const text = args.text;
 
-  const sessionId = args.session_id || `s_${crypto.randomUUID()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
   const branchId = "main";
 
@@ -1966,9 +2023,13 @@ async function handleAugment(args: ScratchpadArgs, ctx: MCPContext): Promise<Scr
 }
 
 /** Handle override operation - commit a failed verification step anyway */
-async function handleOverride(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleOverride(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   if (!sessionId) {
     throw new Error("session_id required for override operation");
   }
@@ -2032,9 +2093,13 @@ async function handleOverride(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
 }
 
 /** Handle hint operation - progressive simplification hints with session state */
-async function handleHint(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleHint(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id || `hint-${Date.now()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
   const { cumulative = true, reset = false } = args;
 
@@ -2216,7 +2281,11 @@ async function handleHint(args: ScratchpadArgs, ctx: MCPContext): Promise<Scratc
 }
 
 /** Handle mistakes operation - proactive error checking for math derivations */
-async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleMistakes(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: text is required for mistakes operation
@@ -2225,7 +2294,7 @@ async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
   }
   const text = args.text;
 
-  const sessionId = args.session_id || `mistakes-${Date.now()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
 
   // Run mistake detection
@@ -2291,7 +2360,11 @@ async function handleMistakes(args: ScratchpadArgs, ctx: MCPContext): Promise<Sc
 }
 
 /** Handle spot_check operation - detect trap patterns in answers */
-async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleSpotCheck(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
 
   // Runtime validation: question and answer are required for spot_check operation
@@ -2304,7 +2377,7 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
   const question = args.question;
   const answer = args.answer;
 
-  const sessionId = args.session_id || `spot-check-${Date.now()}`;
+  // sessionId managed server-side
   const threshold = args.confidence_threshold ?? 0.8;
 
   // Run spot-check
@@ -2362,9 +2435,13 @@ async function handleSpotCheck(args: ScratchpadArgs, ctx: MCPContext): Promise<S
 }
 
 /** Handle challenge operation - adversarial self-check for reasoning quality */
-async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<ScratchpadResponse> {
+async function handleChallenge(
+  args: ScratchpadArgs,
+  ctx: MCPContext,
+  sessionId: string,
+): Promise<ScratchpadResponse> {
   const { streamContent } = ctx;
-  const sessionId = args.session_id;
+  // sessionId managed server-side
   if (!sessionId) {
     throw new Error("session_id required for challenge operation");
   }
@@ -2405,7 +2482,10 @@ async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<S
   }
 
   // Convert to format expected by challenge function
-  const stepData = thoughts.map((t) => ({ step: t.step_number, thought: t.thought }));
+  const stepData = thoughts.map((t) => ({
+    step: t.step_number,
+    thought: t.thought,
+  }));
 
   // Run challenge with optional target claim
   const result = challenge(stepData, args.target_claim);
@@ -2496,37 +2576,33 @@ async function handleChallenge(args: ScratchpadArgs, ctx: MCPContext): Promise<S
 
 export const scratchpadTool = {
   name: "scratchpad",
-  description: `Structured reasoning with verification, trap detection, and self-challenge.
+  description: `Structured reasoning w/verification, trap detection, self-challenge. []=optional
 
-OPS:
-step       thought= [question= on 1st] → Add reasoning step. Auto-verifies at step 4+.
-complete   [final_answer=] [summary=]  → Finalize chain. Auto spot-checks answer.
-revise     target_step= thought= [reason=] → Fix a step (after verification fail or trap warning).
-branch     thought= [from_step=] [hypothesis=] → Fork reasoning path to test alternative.
-navigate   view=history|branches|step|path [step_id=] → Inspect session state.
-augment    text= → Compute math expressions, inject results.
-hint       [expression=] → Progressive simplification hints (auto-continues).
-mistakes   text= → Check for algebraic errors.
-spot_check question= answer= → Manual trap pattern detection.
-challenge  [target_claim=] → Adversarial self-check. Generates counterarguments.
-override   failed_step= [reason=] → Force-commit after verification fail.
+OPS (required: operation=):
+step thought= [question=1st] [confidence=] [verify=] [compress=true] [compression_query=]→add step. Auto-verify@4+. Disable compress to keep full text.
+complete [final_answer=] [summary=]→finalize+spot-check
+revise target_step= thought= [reason=]→fix step
+branch thought= [from_step=] [hypothesis=] [success_criteria=]→fork path
+navigate view=history|branches|step|path [step_id=] [limit=10]→inspect
+augment text= [store_as_step=false]→compute+inject math
+hint [expression=] [reveal_count=] [cumulative=true] [reset=false]→progressive hints (auto-continues)
+mistakes text=→check algebraic errors
+spot_check question= answer=→manual trap detect
+challenge [target_claim=] [challenge_type=all]→adversarial check
+override failed_step= [reason=]→force-commit
 
-DEFAULTS:
-confidence_threshold=0.8   token_budget=3000
+DEFAULTS: session_id=auto confidence_threshold=0.8 token_budget=3000 augment_compute=true local_compute=false compress=true
 
-STATUS → ACTION:
-continue            → Add more steps
-threshold_reached   → Consider complete or add verification step
-review              → Trap/drift detected. Use reconsideration.suggested_revise
-verification_failed → revise target_step | branch from prior | override
-budget_exhausted    → complete or new session
+STATUS→ACTION:
+continue→add steps | threshold_reached→complete or verify | review→use reconsideration.suggested_revise | verification_failed→revise|branch|override | budget_exhausted→complete or new session
 
 FLOW:
-1. step(question=, thought=) → primes trap detection
-2. step(thought=) × N       → auto-verify at 4+
-3. [optional] challenge()   → adversarial self-check
-4. complete(final_answer=)  → spot-check, returns status
-5. If review: revise per reconsideration.suggested_revise`,
+1.step(question=,thought=)→primes trap detect
+2.step(thought=)×N→auto-verify@4+, auto-compress if budget exceeded, CDD, consistency checks
+3.[optional]challenge()→adversarial self-check
+4.complete(final_answer=)→auto spot-check
+5.if review→revise per reconsideration.suggested_revise
+`,
 
   parameters: ScratchpadSchema,
 
@@ -2535,13 +2611,21 @@ FLOW:
   },
 
   execute: async (args: ScratchpadArgs, ctx: MCPContext) => {
+    // Server-side session tracking: get or create active session
+    // LLM never sees or manages session_id
+    let sessionId = SessionManager.getActiveSession();
+    if (!sessionId) {
+      sessionId = `s_${crypto.randomUUID()}`;
+      SessionManager.setActiveSession(sessionId);
+    }
+
     try {
       // Check hard budget limit BEFORE processing operation
-      if (args.hard_limit_tokens && args.session_id) {
-        const existingTokens = getSessionTokens(args.session_id);
+      if (args.hard_limit_tokens && sessionId) {
+        const existingTokens = SessionManager.getTokenUsage(sessionId);
         if (existingTokens && existingTokens.total >= args.hard_limit_tokens) {
           const budgetExhaustedResponse: ScratchpadResponse = {
-            session_id: args.session_id,
+            session_id: sessionId,
             current_step: 0,
             branch: "main",
             operation: args.operation,
@@ -2576,48 +2660,82 @@ FLOW:
 
       switch (args.operation) {
         case "step":
-          response = await handleStep(args, ctx);
+          response = await handleStep(args, ctx, sessionId);
           break;
         case "navigate":
-          response = await handleNavigate(args, ctx);
+          response = await handleNavigate(args, ctx, sessionId);
           break;
         case "branch":
-          response = await handleBranch(args, ctx);
+          response = await handleBranch(args, ctx, sessionId);
           break;
         case "revise":
-          response = await handleRevise(args, ctx);
+          response = await handleRevise(args, ctx, sessionId);
           break;
         case "complete":
-          response = await handleComplete(args, ctx);
+          response = await handleComplete(args, ctx, sessionId);
           break;
         case "augment":
-          response = await handleAugment(args, ctx);
+          response = await handleAugment(args, ctx, sessionId);
           break;
         case "override":
-          response = await handleOverride(args, ctx);
+          response = await handleOverride(args, ctx, sessionId);
           break;
         case "hint":
-          response = await handleHint(args, ctx);
+          response = await handleHint(args, ctx, sessionId);
           break;
         case "mistakes":
-          response = await handleMistakes(args, ctx);
+          response = await handleMistakes(args, ctx, sessionId);
           break;
         case "spot_check":
-          response = await handleSpotCheck(args, ctx);
+          response = await handleSpotCheck(args, ctx, sessionId);
           break;
         case "challenge":
-          response = await handleChallenge(args, ctx);
+          response = await handleChallenge(args, ctx, sessionId);
           break;
         default:
           throw new Error(`Unknown operation: ${(args as { operation: string }).operation}`);
       }
 
       // Add token usage to response
+      // If compression was applied, account for compressed input (not original)
       const tokens = calculateTokenUsage(args, response);
+
+      // If compression was applied, recalculate input using actual compressed thought tokens
+      if (response.compression?.applied) {
+        // Import countTokens for accurate tiktoken-based counting
+        const { countTokens } = await import("../lib/tokens.ts");
+
+        // Get the compressed thought from the stored record
+        const session = SessionManager.get(response.session_id);
+        const currentThought = session?.thoughts[session.thoughts.length - 1];
+        const compressedThought = currentThought?.thought || "";
+
+        // Calculate actual compressed thought tokens with tiktoken
+        const compressedThoughtTokens = countTokens(compressedThought);
+
+        // Calculate tokens for everything except the thought
+        const argsWithoutThought = { ...args, thought: undefined };
+        const otherArgsTokens = countTokens(JSON.stringify(argsWithoutThought));
+
+        tokens.input_tokens = compressedThoughtTokens + otherArgsTokens;
+        tokens.total_tokens = tokens.input_tokens + tokens.output_tokens;
+      }
       response.tokens = tokens;
 
       // Track cumulative session tokens
-      const sessionTokens = trackSessionTokens(response.session_id, tokens);
+      const session = SessionManager.get(response.session_id);
+      if (session) {
+        session.tokenUsage.input += tokens.input_tokens;
+        session.tokenUsage.output += tokens.output_tokens;
+        session.tokenUsage.operations += 1;
+      }
+
+      const sessionTokens = SessionManager.getTokenUsage(response.session_id) || {
+        total_input: 0,
+        total_output: 0,
+        total: 0,
+        operations: 0,
+      };
       response.session_tokens = sessionTokens;
 
       // Check token budget warning threshold
@@ -2643,13 +2761,29 @@ FLOW:
       const errorResponse: {
         error: string;
         tokens?: ReturnType<typeof calculateTokenUsage>;
-        session_tokens?: ReturnType<typeof trackSessionTokens>;
+        session_tokens?: {
+          total_input: number;
+          total_output: number;
+          total: number;
+          operations: number;
+        };
       } = { error: message };
       const tokens = calculateTokenUsage(args, errorResponse);
       errorResponse.tokens = tokens;
       // Track session tokens even on error for accurate budget monitoring
-      if (args.session_id) {
-        errorResponse.session_tokens = trackSessionTokens(args.session_id, tokens);
+      if (sessionId) {
+        const session = SessionManager.get(sessionId);
+        if (session) {
+          session.tokenUsage.input += tokens.input_tokens;
+          session.tokenUsage.output += tokens.output_tokens;
+          session.tokenUsage.operations += 1;
+        }
+        errorResponse.session_tokens = SessionManager.getTokenUsage(sessionId) || {
+          total_input: 0,
+          total_output: 0,
+          total: 0,
+          operations: 0,
+        };
       }
       return {
         content: [{ type: "text" as const, text: JSON.stringify(errorResponse) }],
