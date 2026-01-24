@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { clearTracker } from "../lib/concepts.ts";
 import { SessionManager } from "../lib/session.ts";
-import { calculateTokenUsage, clearAllSessionTokens, clearSessionTokens } from "../lib/tokens.ts";
+import { calculateTokenUsage } from "../lib/tokens.ts";
 
 /**
  * Session management tools for reasoning chains
@@ -121,14 +121,12 @@ export const clearSessionTool = {
 
     if (args.all) {
       const count = SessionManager.clearAll();
-      clearAllSessionTokens();
       result = `Cleared ${count} session(s).`;
     } else if (!args.session_id) {
       result = "Provide session_id or set all=true";
     } else {
-      // Also clear concept tracker and token tracking for this session
+      // Also clear concept tracker for this session
       clearTracker(args.session_id);
-      clearSessionTokens(args.session_id);
 
       const cleared = SessionManager.clear(args.session_id);
       result = cleared

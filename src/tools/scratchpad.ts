@@ -37,7 +37,7 @@ import {
   ScratchpadSchema,
 } from "../lib/think/scratchpad-schema.ts";
 import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
-import { calculateTokenUsage, getSessionTokens, trackSessionTokens } from "../lib/tokens.ts";
+import { calculateTokenUsage } from "../lib/tokens.ts";
 import { verify } from "../lib/verification.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
@@ -303,6 +303,7 @@ function enrichStepResponse(
     augmentationResult: ScratchpadResponse["augmentation"] | null;
     trapAnalysis: ScratchpadResponse["trap_analysis"] | undefined;
     nextStepSuggestion: ScratchpadResponse["next_step_suggestion"] | undefined;
+    thoughtText: string; // Add thought text for token estimation
   },
 ): void {
   const {
@@ -317,6 +318,7 @@ function enrichStepResponse(
     augmentationResult,
     trapAnalysis,
     nextStepSuggestion,
+    thoughtText,
   } = params;
 
   // Add verification info
@@ -342,10 +344,13 @@ function enrichStepResponse(
     response.compression = compressionResult;
   }
 
-  // Add token usage info
-  const budgetPercent = tokenBudget > 0 ? (tokenUsage.total / tokenBudget) * 100 : 0;
+  // Add token usage info (include estimated tokens for current operation)
+  const currentOpTokens =
+    Math.ceil((thoughtText?.length || 0) / 4) + Math.ceil(JSON.stringify(response).length / 4);
+  const totalWithCurrentOp = tokenUsage.total + currentOpTokens;
+  const budgetPercent = tokenBudget > 0 ? (totalWithCurrentOp / tokenBudget) * 100 : 0;
   response.token_usage = {
-    total: tokenUsage.total,
+    total: totalWithCurrentOp,
     budget: tokenBudget,
     exceeded: budgetExceeded,
     auto_compressed: autoCompressed,
@@ -1226,6 +1231,7 @@ async function handleStep(
     augmentationResult,
     trapAnalysis,
     nextStepSuggestion,
+    thoughtText: thought, // Pass thought text for token estimation
   });
 
   // Stream next step suggestion if available
@@ -2615,7 +2621,7 @@ FLOW:
     try {
       // Check hard budget limit BEFORE processing operation
       if (args.hard_limit_tokens && sessionId) {
-        const existingTokens = getSessionTokens(sessionId);
+        const existingTokens = SessionManager.getTokenUsage(sessionId);
         if (existingTokens && existingTokens.total >= args.hard_limit_tokens) {
           const budgetExhaustedResponse: ScratchpadResponse = {
             session_id: sessionId,
@@ -2694,7 +2700,19 @@ FLOW:
       response.tokens = tokens;
 
       // Track cumulative session tokens
-      const sessionTokens = trackSessionTokens(response.session_id, tokens);
+      const session = SessionManager.get(response.session_id);
+      if (session) {
+        session.tokenUsage.input += tokens.input_tokens;
+        session.tokenUsage.output += tokens.output_tokens;
+        session.tokenUsage.operations += 1;
+      }
+
+      const sessionTokens = SessionManager.getTokenUsage(response.session_id) || {
+        total_input: 0,
+        total_output: 0,
+        total: 0,
+        operations: 0,
+      };
       response.session_tokens = sessionTokens;
 
       // Check token budget warning threshold
@@ -2720,13 +2738,29 @@ FLOW:
       const errorResponse: {
         error: string;
         tokens?: ReturnType<typeof calculateTokenUsage>;
-        session_tokens?: ReturnType<typeof trackSessionTokens>;
+        session_tokens?: {
+          total_input: number;
+          total_output: number;
+          total: number;
+          operations: number;
+        };
       } = { error: message };
       const tokens = calculateTokenUsage(args, errorResponse);
       errorResponse.tokens = tokens;
       // Track session tokens even on error for accurate budget monitoring
       if (sessionId) {
-        errorResponse.session_tokens = trackSessionTokens(sessionId, tokens);
+        const session = SessionManager.get(sessionId);
+        if (session) {
+          session.tokenUsage.input += tokens.input_tokens;
+          session.tokenUsage.output += tokens.output_tokens;
+          session.tokenUsage.operations += 1;
+        }
+        errorResponse.session_tokens = SessionManager.getTokenUsage(sessionId) || {
+          total_input: 0,
+          total_output: 0,
+          total: 0,
+          operations: 0,
+        };
       }
       return {
         content: [{ type: "text" as const, text: JSON.stringify(errorResponse) }],

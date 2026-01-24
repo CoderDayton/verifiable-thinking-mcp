@@ -39,6 +39,7 @@
   "dependencies": {
     "dotenv": "^17.2.3",
     "fastmcp": "^3.26.7",
+    "tiktoken": "^1.0.22",
     "zod": "^4.3.4"
   },
   "devDependencies": {

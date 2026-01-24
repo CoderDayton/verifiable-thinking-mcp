@@ -8,11 +8,10 @@
  * - O(n) TTL cleanup (scans only expired sessions)
  * - Revision tracking with revised_by marker
  * - Branch depth limits
- * - Token tracking sync on cleanup
+ * - Embedded token tracking (no WeakMap indirection)
  */
 
 import { LRUCache } from "./LRUCache.ts";
-import { clearSessionTokens } from "./tokens.ts";
 
 export interface ThoughtRecord {
   id: string;
@@ -93,6 +92,12 @@ export interface Session {
       domain: string;
     };
   };
+  // Embedded token tracking
+  tokenUsage: {
+    input: number;
+    output: number;
+    operations: number;
+  };
 }
 
 interface SessionManagerConfig {
@@ -138,8 +143,6 @@ class SessionManagerImpl {
         if (this.activeSessionId === sessionId) {
           this.activeSessionId = null;
         }
-        // Clear token tracking
-        clearSessionTokens(sessionId);
         // Recycle session object
         this.recycleSession(session as Session);
       },
@@ -166,6 +169,13 @@ class SessionManagerImpl {
     session.metadata = {};
     session.question = undefined;
     session.pendingThought = undefined;
+
+    // Reset token tracking
+    session.tokenUsage = {
+      input: 0,
+      output: 0,
+      operations: 0,
+    };
 
     this.sessionPool.push(session);
   }
@@ -209,6 +219,11 @@ class SessionManagerImpl {
       stepNumbers: new Set(),
       stepToBranchMap: new Map(),
       toolsUsedSet: new Set(),
+      tokenUsage: {
+        input: 0,
+        output: 0,
+        operations: 0,
+      },
     };
   }
 
@@ -412,17 +427,11 @@ class SessionManagerImpl {
     if (this.activeSessionId === sessionId) {
       this.activeSessionId = null;
     }
-    // Clear token tracking when session is explicitly cleared
-    clearSessionTokens(sessionId);
     return this.sessions.delete(sessionId);
   }
 
   clearAll(): number {
     const count = this.sessions.size;
-    // Clear token tracking for all sessions
-    for (const id of this.sessions.keys()) {
-      clearSessionTokens(id);
-    }
     this.sessions.clear();
     // Also clear the active session tracking
     this.activeSessionId = null;
@@ -625,15 +634,30 @@ class SessionManagerImpl {
     return confidences.reduce((a, b) => a + b, 0) / confidences.length;
   }
 
-  /** Get total token usage for a session (estimated from thought lengths) */
+  /** Get token usage tracking and compression stats for a session */
   getTokenUsage(sessionId: string): {
+    // Real token tracking from LLM calls
+    total_input: number;
+    total_output: number;
     total: number;
+    operations: number;
+    // Compression stats (estimated)
     compressed: number;
     uncompressed: number;
   } {
     const session = this.get(sessionId);
-    if (!session) return { total: 0, compressed: 0, uncompressed: 0 };
+    if (!session) {
+      return {
+        total_input: 0,
+        total_output: 0,
+        total: 0,
+        operations: 0,
+        compressed: 0,
+        uncompressed: 0,
+      };
+    }
 
+    // Calculate compression stats
     let compressed = 0;
     let uncompressed = 0;
 
@@ -649,7 +673,10 @@ class SessionManagerImpl {
     }
 
     return {
-      total: compressed + uncompressed,
+      total_input: session.tokenUsage.input,
+      total_output: session.tokenUsage.output,
+      total: session.tokenUsage.input + session.tokenUsage.output,
+      operations: session.tokenUsage.operations,
       compressed,
       uncompressed,
     };
