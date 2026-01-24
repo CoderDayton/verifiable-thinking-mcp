@@ -111,6 +111,18 @@ It maps to `o200k_base`, the latest OpenAI tokenizer. Even if you use Claude or 
 - **TTL policy:** Prune entries older than 30 minutes every 1,000 operations
 - **Memory safety:** Max 1.47 MB (147 bytes/entry × 10,000)
 
+**Batch counting:**  
+```typescript
+// Process multiple strings efficiently
+const counts = countTokensBatch(["hello", "world", "test"]);
+// → [1, 1, 1]
+
+// Async version with yielding
+const counts = await countTokensBatchAsync(largeArray, 50); // Yield every 50 items
+```
+
+**Benefit:** Separates cached/uncached strings to minimize tiktoken overhead. ~2× faster for 100+ strings.
+
 ### Compression (`src/lib/compression.ts`)
 
 CPC-style sentence-level relevance scoring:
@@ -120,7 +132,7 @@ CPC-style sentence-level relevance scoring:
 3. **Coref preservation** — Keep sentences containing pronouns' antecedents
 4. **Causal enforcement** — Preserve "because", "therefore", "thus" for reasoning chains
 
-**Target ratio:** 50% by default (configurable per-operation).
+**Target ratio:** 50% by default (configurable per-operation, or auto-tuned).
 
 ```typescript
 compress({
@@ -131,6 +143,27 @@ compress({
   enforce_causal: true,
 })
 // → "Key sentences... Final answer: 42."
+```
+
+**Adaptive compression (NEW in v0.5.0):**  
+Auto-tunes `target_ratio` based on context entropy and length:
+
+| Context Type | Entropy | Auto Ratio | Rationale |
+|--------------|---------|------------|-----------|
+| Redundant text | <4.5 | 0.35-0.45 | High repetition, safe to compress aggressively |
+| Normal reasoning | 4.5-5.5 | 0.55-0.65 | Balance detail vs brevity |
+| Technical/code | 5.5-6.0 | 0.75-0.85 | Dense content, preserve detail |
+
+**Length adjustments:**
+- Long text (>1000 tokens) → 15% more aggressive
+- Short text (<150 tokens) → 10% more conservative
+
+```typescript
+// Enable adaptive compression (default)
+compress(context, query, { adaptiveCompression: true });
+
+// Explicit ratio overrides adaptive
+compress(context, query, { target_ratio: 0.7, adaptiveCompression: true });
 ```
 
 **When compression triggers:**
@@ -384,12 +417,17 @@ Every tool response includes token metadata:
 
 ## Future Optimizations
 
-### Planned (v0.5.0)
+### ✅ Implemented (v0.5.0)
+
+- ✅ **Batch token counting** — `countTokensBatch()` processes multiple strings efficiently (~2× faster for 100+ strings)
+- ✅ **Async token API** — `countTokensAsync()` and `countTokensBatchAsync()` prevent event loop blocking
+- ✅ **Adaptive compression** — Auto-tunes `target_ratio` based on entropy and context length
+
+### Planned (v0.6.0)
 
 - **Streaming compression** — Compress incrementally as tokens arrive (saves 200-300ms)
-- **Adaptive target ratios** — Machine learning model predicts optimal compression based on reasoning type
 - **Token budget inheritance** — Child branches inherit parent's remaining budget
-- **Batch token counting** — Count multiple strings in one tiktoken call (~2× faster)
+- **Parallel encoding** — Use Web Workers for concurrent tiktoken calls
 
 ### Under Consideration
 

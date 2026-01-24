@@ -44,6 +44,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Trade-offs and edge case documentation
   - See `docs/token-optimization.md`
 
+- **Batch Token Counting** - Efficient multi-string processing (v0.5.0)
+  - `countTokensBatch()` processes cached/uncached strings separately
+  - ~2× faster than individual calls for 100+ strings
+  - Returns array of counts in same order as input
+  - `countTokensBatchAsync()` with configurable yielding (default: every 10 items)
+
+- **Async Token Counting API** - Non-blocking token operations (v0.5.0)
+  - `countTokensAsync()` yields to event loop before encoding
+  - `countTokensBatchAsync()` processes large batches without blocking
+  - Ideal for large texts or high-concurrency scenarios
+  - Same accuracy as synchronous versions
+
+- **Adaptive Compression** - Context-aware target ratio tuning (v0.5.0)
+  - Auto-calculates optimal `target_ratio` based on entropy + length
+  - Low entropy (redundant) → aggressive (0.3-0.5)
+  - High entropy (dense/code) → conservative (0.7-0.9)
+  - Enabled by default, explicit `target_ratio` always takes precedence
+  - See `calculateAdaptiveRatio()` in `src/lib/compression.ts`
+
 ### Changed
 
 - **Token Accounting Accuracy** - Compression now reflects actual input tokens
