@@ -1,6 +1,6 @@
 {
   "name": "verifiable-thinking-mcp",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "MCP server for structured reasoning with cognitive trap detection",
   "author": "CoderDayton",
   "license": "MIT",
