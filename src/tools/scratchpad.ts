@@ -2696,7 +2696,19 @@ FLOW:
       }
 
       // Add token usage to response
-      const tokens = calculateTokenUsage(args, response);
+      // If compression was applied, account for compressed input (not original)
+      const argsForTokenCount = response.compression?.applied
+        ? { ...args, thought: "[compressed]" } // Placeholder - actual compressed tokens tracked in response.compression
+        : args;
+      const tokens = calculateTokenUsage(argsForTokenCount, response);
+
+      // If compression was applied, use the actual compressed token count
+      if (response.compression?.applied) {
+        tokens.input_tokens =
+          response.compression.compressed_tokens +
+          Math.ceil(JSON.stringify({ ...args, thought: undefined }).length / 4); // Args minus thought
+        tokens.total_tokens = tokens.input_tokens + tokens.output_tokens;
+      }
       response.tokens = tokens;
 
       // Track cumulative session tokens
