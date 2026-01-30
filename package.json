@@ -52,7 +52,7 @@
     "typescript": "^5.9.3"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --minify --external sury --external effect --external @valibot/to-json-schema && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js",
+    "build": "bun build src/index.ts --outdir dist --target node --minify --external sury --external effect --external @valibot/to-json-schema --external tiktoken && echo '#!/usr/bin/env node' | cat - dist/index.js > dist/index.tmp && mv dist/index.tmp dist/index.js",
     "dev": "fastmcp dev src/index.ts",
     "inspect": "fastmcp inspect src/index.ts",
     "start": "bun run src/index.ts",
