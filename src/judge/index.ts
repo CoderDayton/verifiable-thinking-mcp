@@ -53,7 +53,7 @@ export interface JudgeInput {
 const JUDGE_SYSTEM_PROMPT = `You are an expert evaluator comparing two AI responses to the same question.
 
 Your task is to evaluate both responses on these dimensions (1-5 scale):
-1. **Accuracy**: Factual correctness, no hallucinations or errors
+1. **Accuracy**: Factual correctness and precision
 2. **Reasoning Quality**: Logical flow, clear step-by-step thinking
 3. **Completeness**: Fully addresses the question, no missing parts
 4. **Clarity**: Well-written, easy to understand

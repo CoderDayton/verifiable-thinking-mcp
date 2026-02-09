@@ -2579,29 +2579,29 @@ export const scratchpadTool = {
   description: `Structured reasoning w/verification, trap detection, self-challenge. []=optional
 
 OPS (required: operation=):
-step thought= [question=1st] [confidence=] [verify=] [compress=true] [compression_query=]→add step. Auto-verify@4+. Disable compress to keep full text.
+step thought= [question=1st] [confidence=] [verify=] [domain=math|logic|code|general] [compress=true]→add step. Auto-verifies when chain >3 steps.
 complete [final_answer=] [summary=]→finalize+spot-check
 revise target_step= thought= [reason=]→fix step
 branch thought= [from_step=] [hypothesis=] [success_criteria=]→fork path
 navigate view=history|branches|step|path [step_id=] [limit=10]→inspect
-augment text= [store_as_step=false]→compute+inject math
+augment text= [store_as_step=false]→compute+inject math results
 hint [expression=] [reveal_count=] [cumulative=true] [reset=false]→progressive hints (auto-continues)
 mistakes text=→check algebraic errors
-spot_check question= answer=→manual trap detect
-challenge [target_claim=] [challenge_type=all]→adversarial check
-override failed_step= [reason=]→force-commit
+spot_check question= answer=→check for common reasoning traps
+challenge [target_claim=] [challenge_type=all]→adversarial self-check
+override failed_step= [reason=]→force-commit failed step
 
-DEFAULTS: session_id=auto confidence_threshold=0.8 token_budget=3000 augment_compute=true local_compute=false compress=true
+DEFAULTS: session_id=auto confidence_threshold=0.8 token_budget=3000 augment_compute=true compress=true
 
 STATUS→ACTION:
 continue→add steps | threshold_reached→complete or verify | review→use reconsideration.suggested_revise | verification_failed→revise|branch|override | budget_exhausted→complete or new session
 
 FLOW:
-1.step(question=,thought=)→primes trap detect
-2.step(thought=)×N→auto-verify@4+, auto-compress if budget exceeded, CDD, consistency checks
-3.[optional]challenge()→adversarial self-check
-4.complete(final_answer=)→auto spot-check
-5.if review→revise per reconsideration.suggested_revise
+1.step(question="...",thought="...")→primes trap detection for the question
+2.step(thought="...")×N→auto-verify, auto-compress, confidence-drift detection, consistency checks
+3.[optional]challenge()→adversarial self-check of claims
+4.complete(final_answer="...")→auto spot-check against common traps
+5.if status=review→revise per reconsideration.suggested_revise
 `,
 
   parameters: ScratchpadSchema,
