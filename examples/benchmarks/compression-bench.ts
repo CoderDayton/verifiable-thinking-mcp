@@ -18,7 +18,7 @@ import {
   calculateEntropy,
   type CompressionAnalysis,
   type CompressionResult,
-} from "../../src/lib/compression";
+} from "../../src/text/compression";
 import { LLMClient } from "./llm-client";
 
 // ============================================================================

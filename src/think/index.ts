@@ -16,7 +16,6 @@ export {
   FAILURE_PATTERNS,
   type FailurePattern,
   type ThoughtAnalysis,
-  VALID_PURPOSES,
 } from "./guidance.ts";
 
 // Helpers (extracted for cognitive complexity reduction)

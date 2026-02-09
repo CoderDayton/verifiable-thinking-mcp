@@ -32,7 +32,7 @@ pre-push:
   commands:
     coverage:
       run: bun run test:ci
-      fail_text: "Coverage check failed. Ensure >85% line coverage on src/lib/ (excludes src/tools/)"
+      fail_text: "Coverage check failed. Ensure >85% line coverage on src modules (excludes src/tools/)"
 
 commit-msg:
   commands:

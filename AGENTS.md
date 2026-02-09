@@ -2,31 +2,57 @@
 
 <section name="Code Organization">
 
-<subsection name="Shared Utilities Belong in src/lib/">
+<subsection name="Module Structure">
 
-**Do NOT put reusable functionality in benchmark runners or test files.**
+The codebase is organized into layered domain modules under `src/`:
 
-Utilities that could be used by both the main tool AND benchmarks/tests should live in `src/lib/`:
+```
+src/
+├── index.ts          # Entry point (MCP server)
+├── infra/            # L0: Zero internal deps (LRUCache, ContentHashCache)
+├── text/             # L0.5: Depends on infra (compression, tokens, extraction, patterns)
+├── math/             # L1: Zero internal deps (AST, operators, tokenizer)
+├── domain/           # L1: Depends on math, compute (detection, verification)
+├── compute/          # L2: Depends on domain (solvers, classifier, registry)
+├── session/          # L2: Depends on infra (manager, concepts)
+├── judge/            # L2: Zero internal deps (LLM-as-judge)
+├── think/            # L3: Depends on text, domain, compute, session
+├── tools/            # L4: Interface layer (scratchpad, compress, sessions)
+└── resources/        # L4: Interface layer (MCP resources)
+```
 
-- `src/lib/extraction.ts` - Answer extraction, markdown stripping, thinking tag removal
-- `src/lib/verification.ts` - Domain-specific verifiers
-- `src/lib/compression.ts` - CPC-style compression
-- `src/lib/compute/` - Local compute helpers (math solvers)
-- `src/lib/cache.ts` - Caching utilities
-- `src/lib/think/complexity.ts` - Local complexity assessment
-- `src/lib/think/route.ts` - Question routing (complexity-based path selection)
-- `src/lib/think/prompts.ts` - Domain-aware prompt templates
-- `src/lib/domain.ts` - Unified domain detection
+**Dependency layers are strict — no circular deps allowed.**
 
-The benchmark runner (`examples/benchmarks/runner.ts`) should IMPORT from `src/lib/`, not duplicate logic.
+</subsection>
+
+<subsection name="Where New Code Goes">
+
+- **Infrastructure** (caches, data structures) → `src/infra/`
+- **Text processing** (compression, tokenization, extraction) → `src/text/`
+- **Math operations** (AST, parsing, operators) → `src/math/`
+- **Domain detection & verification** → `src/domain/`
+- **Compute/solvers** (arithmetic, formulas, word problems) → `src/compute/`
+- **Session management** (thought records, concepts) → `src/session/`
+- **Reasoning orchestration** (routing, complexity, guidance) → `src/think/`
+- **MCP tool definitions** → `src/tools/`
+- **MCP resources** → `src/resources/`
+
+</subsection>
+
+<subsection name="Import Rules">
+
+1. **Lower layers must not import from higher layers**
+2. **Each module has a barrel `index.ts`** — prefer importing from the barrel
+3. **Direct file imports are fine within a module** (e.g., `./helpers.ts`)
+4. **Cross-module imports use the module path** (e.g., `../domain/verification.ts`)
 
 </subsection>
 
 <subsection name="Why This Matters">
 
-1. **Single source of truth** - Fixes apply everywhere
-2. **Testable** - Shared code gets unit tested in `test/`
-3. **The tool uses it** - If logic is in the runner, the actual MCP tool can't use it
+1. **Single source of truth** — Fixes apply everywhere
+2. **Testable** — Shared code gets unit tested in `test/`
+3. **The tool uses it** — Logic must be importable, not buried in runners
 
 </subsection>
 
@@ -38,8 +64,8 @@ function extractAnswer(response: string): string {
   // ... 50 lines of logic that should be shared
 }
 
-// GOOD: Import from lib
-import { extractAnswer } from "../../src/lib/extraction.ts";
+// GOOD: Import from the appropriate module
+import { extractAnswer } from "../../src/text/extraction.ts";
 ```
 
 </subsection>
@@ -52,30 +78,30 @@ import { extractAnswer } from "../../src/lib/extraction.ts";
 
 Each tool should be self-contained and use shared libraries:
 
-- `think.ts` - Structured reasoning with guidance
-- `sessions.ts` - Session management
-- `compress.ts` - Text compression
+- `scratchpad.ts` — Structured reasoning with guidance
+- `sessions.ts` — Session management
+- `compress.ts` — Text compression
 
 </subsection>
 
-<subsection name="New Features Go in Tools First">
+<subsection name="New Features Go in Modules First">
 
 When adding new capabilities:
 
-1. **Add shared logic to `src/lib/`** - The reusable algorithm/detection
-2. **Add tool in `src/tools/`** - Expose via MCP for LLM to call
-3. **Update benchmarks to use the tool** - Not duplicate the logic
+1. **Add shared logic to the appropriate module** — The reusable algorithm/detection
+2. **Add tool in `src/tools/`** — Expose via MCP for LLM to call
+3. **Update benchmarks to use the module** — Not duplicate the logic
 
 Example: Complexity assessment
 ```typescript
-// src/lib/think/complexity.ts - The algorithm
+// src/think/complexity.ts - The algorithm
 export function assessPromptComplexity(text: string): ComplexityResult { ... }
 
-// src/tools/think.ts - Exposed via tool response
+// src/tools/scratchpad.ts - Exposed via tool response
 // The think tool can include complexity metadata in its response
 
-// examples/benchmarks/runner.ts - Uses the lib
-import { estimateBudgetLocal } from "../../src/lib/think/complexity";
+// examples/benchmarks/runner.ts - Uses the module
+import { estimateBudgetLocal } from "../../src/think/complexity";
 ```
 
 </subsection>
@@ -84,7 +110,7 @@ import { estimateBudgetLocal } from "../../src/lib/think/complexity";
 
 <section name="Complexity-Based Routing">
 
-The `src/lib/think/complexity.ts` module provides O(n) complexity assessment:
+The `src/think/complexity.ts` module provides O(n) complexity assessment:
 
 - **Low** → direct answer (1 LLM call)
 - **Moderate** → reasoning prompt (1 LLM call)
@@ -99,19 +125,19 @@ This replaces LLM-based budget estimation, saving ~500ms per question.
 
 Questions starting with "explain", "describe", "compare" are detected as explanatory:
 
-- **Skip verification** - spot-check hurts open-ended quality
-- **Domain-aware prompts** - `src/lib/think/prompts.ts` provides domain-specific steering
-- **No expected answer** - use `expected_answer: null` in questions.json for judge-only evaluation
+- **Skip verification** — spot-check hurts open-ended quality
+- **Domain-aware prompts** — `src/think/prompts.ts` provides domain-specific steering
+- **No expected answer** — use `expected_answer: null` in questions.json for judge-only evaluation
 
 </section>
 
 <section name="Response Processing">
 
-The `src/lib/extraction.ts` module handles:
+The `src/text/extraction.ts` module handles:
 
-- **Thinking tag removal** - strips `<think>...</think>` tags from model responses
-- **Answer extraction** - priority-based pattern matching for structured answers
-- **Markdown stripping** - cleans formatting for comparison
+- **Thinking tag removal** — strips `<think>...</think>` tags from model responses
+- **Answer extraction** — priority-based pattern matching for structured answers
+- **Markdown stripping** — cleans formatting for comparison
 
 </section>
 
@@ -119,9 +145,9 @@ The `src/lib/extraction.ts` module handles:
 
 The benchmark runner loads `.env` from project root via dotenv. Key variables:
 
-- `LLM_MODEL` - Model name for API calls
-- `LLM_BASE_URL` - API endpoint
-- `LLM_API_KEY` - Authentication
+- `LLM_MODEL` — Model name for API calls
+- `LLM_BASE_URL` — API endpoint
+- `LLM_API_KEY` — Authentication
 
 Note: `examples/benchmarks/.env` overrides root `.env` if present (Bun loads from cwd first).
 
@@ -132,7 +158,7 @@ Note: `examples/benchmarks/.env` overrides root `.env` if present (Bun loads fro
 <rule number="1" name="Never Duplicate Logic">
 
 If you write a function that could be reused:
-- **STOP** - check if it exists in `src/lib/`
+- **STOP** — check if it exists in the appropriate module
 - If it doesn't exist, **add it there first**
 - Import it everywhere else
 
@@ -147,7 +173,7 @@ Before any PR:
 bun test --timeout 60000
 ```
 
-- **All 564+ tests must pass**
+- **All 1,967+ tests must pass**
 - New features require new tests in `test/`
 - Test file naming: `<module>.test.ts`
 
@@ -168,7 +194,7 @@ bunx tsc --noEmit
 <rule number="4" name="Preserve O(n) Complexity">
 
 The routing and domain detection are intentionally O(n) single-pass:
-- **Do NOT add nested loops** to `complexity.ts`, `domain.ts`, or `route.ts`
+- **Do NOT add nested loops** to `complexity.ts`, `detection.ts`, or `route.ts`
 - **Do NOT call LLM** for complexity estimation (defeats purpose)
 - If you need O(n²), justify with benchmarks proving <1ms impact
 
@@ -199,11 +225,11 @@ These patterns are forbidden in commits:
 
 <rule number="7" name="Prompt Changes Need A/B Testing">
 
-Before changing prompts in `src/lib/think/prompts.ts`:
+Before changing prompts in `src/think/prompts.ts`:
 1. Run baseline benchmark: `bun run runner.ts --baseline-only --full`
 2. Make change
 3. Run tool benchmark: `bun run runner.ts --tool-only --full`
-4. Compare accuracy delta - reject if >2% regression
+4. Compare accuracy delta — reject if >2% regression
 
 </rule>
 
@@ -226,18 +252,29 @@ System prompts should be <30 tokens. User prompts should add minimal boilerplate
 For explanatory/descriptive questions:
 - Set `expected_answer: null` in questions.json
 - Do NOT invent fake "correct" answers
-- Evaluation is via `judge.ts`, not accuracy
+- Evaluation is via `judge/index.ts`, not accuracy
 
 </rule>
 
 <rule number="10" name="One Responsibility Per Function">
 
-Functions in `src/lib/` should do ONE thing:
-- `extractAnswer()` - extracts answers
-- `stripThinkingTags()` - strips tags
-- `assessPromptComplexity()` - assesses complexity
+Functions should do ONE thing:
+- `extractAnswer()` — extracts answers
+- `stripThinkingTags()` — strips tags
+- `assessPromptComplexity()` — assesses complexity
 
 If a function does multiple things, split it.
+
+</rule>
+
+<rule number="11" name="Respect Layer Boundaries">
+
+Never import upward in the dependency graph:
+- `infra/` must NOT import from `text/`, `domain/`, `think/`, etc.
+- `text/` must NOT import from `domain/`, `compute/`, `think/`, etc.
+- `think/` must NOT import from `tools/`
+
+Violations create circular dependencies and break the build.
 
 </rule>
 

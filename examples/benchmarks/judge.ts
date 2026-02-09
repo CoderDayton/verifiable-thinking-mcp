@@ -17,7 +17,7 @@ import {
   summarizeJudgments,
   type JudgeInput,
   type JudgeResult,
-} from "../../src/lib/judge";
+} from "../../src/judge/index";
 import { readdir, readFile } from "fs/promises";
 import { join } from "path";
 

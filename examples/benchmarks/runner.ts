@@ -25,10 +25,10 @@ import {
   type ChatMessageWithTools,
   type ToolCall,
 } from "./llm-client";
-import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
-import { routeQuestion, spotCheck, primeQuestion, type SpotCheckResult, type PrimeResult } from "../../src/lib/think/index";
-import { detectCommonMistakesFromText, type MistakeType } from "../../src/lib/compute/solvers/derivation";
-import { analyzeConfidenceDrift, type DriftAnalysis, type DriftPattern } from "../../src/lib/think/confidence-drift";
+import { extractAnswer, stripThinkingTags } from "../../src/text/extraction";
+import { routeQuestion, spotCheck, primeQuestion, type SpotCheckResult, type PrimeResult } from "../../src/think/index";
+import { detectCommonMistakesFromText, type MistakeType } from "../../src/compute/solvers/derivation";
+import { analyzeConfidenceDrift, type DriftAnalysis, type DriftPattern } from "../../src/think/confidence-drift";
 
 // ============================================================================
 // RESULT CACHING
@@ -1208,7 +1208,7 @@ async function runBaseline(
 // With Tool: Option A - Single Direct Call + Local Compute
 // Simple architecture:
 // 1. Try local compute first (math, logic)
-// 2. Route question using src/lib/think/route.ts
+// 2. Route question using src/think/route.ts
 // 3. Record in MCP (CRASH-style scratchpad)
 async function runWithTool(
   llm: LLMClient,
@@ -1275,7 +1275,7 @@ async function runWithTool(
       ? "code"
       : "general";
 
-  // === ROUTING: Use centralized logic from src/lib/think/route.ts ===
+  // === ROUTING: Use centralized logic from src/think/route.ts ===
   const routeStart = Date.now();
   const route = routeQuestion(question.question);
   latency.routing_ms = Date.now() - routeStart;

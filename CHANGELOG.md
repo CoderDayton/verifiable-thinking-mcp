@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **God-Optimized Compression Module** - `src/lib/compression.ts` reduced from 1,707 → 1,158 lines (32% reduction) via 8 optimization passes while preserving all behavior
+- **God-Optimized Compression Module** - `src/text/compression.ts` reduced from 1,707 → 1,158 lines (32% reduction) via 8 optimization passes while preserving all behavior
   - Removed dead code: `estimateTokens()` wrapper (inlined `estimateTokensFast` at all call sites), `computeNCDAsync()` and its `gzipAsync`/`promisify` imports, duplicate filler penalty in `relevanceScore()`
   - Collapsed `STOP_WORDS` (88 lines → 1 line) and `ABBREVIATIONS` (32 lines → 1 line) using `.split(" ")`
   - Extracted `makeSentenceMetadata()` factory replacing 3 identical object literals
@@ -102,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Low entropy (redundant) → aggressive (0.3-0.5)
   - High entropy (dense/code) → conservative (0.7-0.9)
   - Enabled by default, explicit `target_ratio` always takes precedence
-  - See `calculateAdaptiveRatio()` in `src/lib/compression.ts`
+  - See `calculateAdaptiveRatio()` in `src/text/compression.ts`
 
 ### Changed
 

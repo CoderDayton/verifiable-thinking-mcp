@@ -8,7 +8,7 @@
  *   bun run priming-latency.ts [--iterations N] [--verbose]
  */
 
-import { primeQuestion } from "../../src/lib/think/spot-check";
+import { primeQuestion } from "../../src/think/spot-check";
 
 // ============================================================================
 // CONFIG

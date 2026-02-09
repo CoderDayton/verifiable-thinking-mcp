@@ -18,8 +18,8 @@ const projectRoot = resolve(__dirname, "../..");
 config({ path: resolve(projectRoot, ".env") });
 
 import { LLMClient, type LLMConfig } from "./llm-client";
-import { extractAnswer, stripThinkingTags } from "../../src/lib/extraction";
-import { primeQuestion } from "../../src/lib/think/spot-check";
+import { extractAnswer, stripThinkingTags } from "../../src/text/extraction";
+import { primeQuestion } from "../../src/think/spot-check";
 
 // ============================================================================
 // TYPES

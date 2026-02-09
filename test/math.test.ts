@@ -1,5 +1,5 @@
 /**
- * Unit tests for src/lib/math module
+ * Unit tests for src/math module
  * Tests operators, tokenizer, and AST functionality
  */
 

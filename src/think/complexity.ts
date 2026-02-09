@@ -12,7 +12,7 @@
  * - Intensity modifiers for quantifiers, impossibility, comparative language
  * - Negation correction ("not difficult" → lower score)
  * - Compositional semantics: no magic weights, principled formula
- * - Domain detection now uses unified src/lib/domain.ts
+ * - Domain detection now uses unified src/domain/detection.ts
  */
 
 import { getDomainWeight } from "../domain/detection.ts";
@@ -230,7 +230,7 @@ export function assessPromptComplexity(text: string): ComplexityResult {
   verb_boosted = Math.min(0.99, verb_boosted); // cap at 0.99
 
   // ===== PHASE 3: DOMAIN DETECTION =====
-  // Use unified domain detector from src/lib/domain.ts
+  // Use unified domain detector from src/domain/detection.ts
   const { domain: domain_name, weight: domain_weight } = getDomainWeight(text);
 
   // ===== PHASE 4: INTENSITY MODIFIERS =====

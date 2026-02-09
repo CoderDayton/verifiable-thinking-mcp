@@ -86,7 +86,7 @@ interface Session {
 
 ## Implementation Details
 
-### Token Counting (`src/lib/tokens.ts`)
+### Token Counting (`src/text/tokens.ts`)
 
 ```typescript
 import { encodingForModel } from "js-tiktoken";
@@ -123,7 +123,7 @@ const counts = await countTokensBatchAsync(largeArray, 50); // Yield every 50 it
 
 **Benefit:** Separates cached/uncached strings to minimize tiktoken overhead. ~2× faster for 100+ strings.
 
-### Compression (`src/lib/compression.ts`)
+### Compression (`src/text/compression.ts`)
 
 CPC-style sentence-level relevance scoring:
 
@@ -196,7 +196,7 @@ compress(context, query, { target_ratio: 0.7, adaptiveCompression: true });
 - **Manual:** Set `compress: true` on any `step()` operation
 - **Always:** If `max_step_tokens` set and input exceeds limit
 
-### Session Token Tracking (`src/lib/session.ts`)
+### Session Token Tracking (`src/session/manager.ts`)
 
 Every operation updates embedded token usage:
 

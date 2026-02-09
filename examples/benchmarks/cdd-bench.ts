@@ -10,8 +10,8 @@
 
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { analyzeConfidenceDrift, type DriftAnalysis, type DriftPattern } from "../../src/lib/think/confidence-drift";
-import type { ThoughtRecord } from "../../src/lib/session";
+import { analyzeConfidenceDrift, type DriftAnalysis, type DriftPattern } from "../../src/think/confidence-drift";
+import type { ThoughtRecord } from "../../src/session/manager";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
