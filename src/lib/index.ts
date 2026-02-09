@@ -11,10 +11,13 @@ export {
   cleanFillers,
   compress,
   computeNCD,
+  computeNCDAsync,
   isMetaSentence,
   jaccardSimilarity,
   needsCompression,
   quickCompress,
+  splitSentences,
+  tokenizeForTfIdf,
 } from "./compression";
 // Local compute
 export {
@@ -84,6 +87,8 @@ export {
   estimateTokens,
   estimateTokensBatch,
 } from "./think/verification";
+// Fast token estimation (dependency-free)
+export { clearEstimateCache, estimateTokensFast } from "./tokens-fast";
 // Verification (domain-specific)
 export {
   type ASTNode,

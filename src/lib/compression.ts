@@ -14,7 +14,11 @@
  * - Information Bottleneck methods: Preserve task-relevant info
  */
 
-import { gzipSync } from "node:zlib";
+import { promisify } from "node:util";
+import { gzip, gzipSync } from "node:zlib";
+import { estimateTokensFast } from "./tokens-fast.ts";
+
+const gzipAsync = promisify(gzip);
 
 // ============================================================================
 // Types
@@ -281,14 +285,83 @@ export function calculateAdaptiveRatio(context: string, query: string): number {
 // Core Functions
 // ============================================================================
 
+// Common abbreviations that should not trigger sentence splitting
+const ABBREVIATIONS = new Set([
+  "dr",
+  "mr",
+  "mrs",
+  "ms",
+  "prof",
+  "sr",
+  "jr",
+  "st",
+  "vs",
+  "etc",
+  "inc",
+  "ltd",
+  "co",
+  "corp",
+  "jan",
+  "feb",
+  "mar",
+  "apr",
+  "jun",
+  "jul",
+  "aug",
+  "sep",
+  "oct",
+  "nov",
+  "dec",
+  "fig",
+  "eq",
+  "ref",
+  "vol",
+  "no",
+  "approx",
+]);
+
+// Patterns like "e.g.", "i.e.", "a.m.", "p.m."
+const DOTTED_ABBREV = /^(?:[a-z]\.){2,}$/i;
+
 /**
- * Split text into sentences
+ * Split text into sentences with abbreviation awareness.
+ *
+ * Handles common abbreviations (Dr., Mr., e.g., i.e., etc.) to avoid
+ * false splits. Uses a two-pass approach: first splits on sentence-ending
+ * punctuation followed by whitespace, then merges back splits caused by
+ * abbreviations.
  */
-function splitSentences(text: string): string[] {
-  return text
+export function splitSentences(text: string): string[] {
+  const raw = text
     .split(/(?<=[.!?])\s+/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+
+  if (raw.length <= 1) return raw;
+
+  // Merge back false splits caused by abbreviations
+  const merged: string[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const segment = raw[i]!;
+    if (merged.length === 0) {
+      merged.push(segment);
+      continue;
+    }
+
+    const prev = merged[merged.length - 1]!;
+    // Check if previous segment ends with an abbreviation
+    const lastWord = prev.replace(/\.$/, "").split(/\s+/).pop()?.toLowerCase() ?? "";
+    const endsWithDot = prev.endsWith(".");
+
+    if (endsWithDot && (ABBREVIATIONS.has(lastWord) || DOTTED_ABBREV.test(`${lastWord}.`))) {
+      // Merge: this was a false split on an abbreviation
+      merged[merged.length - 1] = `${prev} ${segment}`;
+    } else {
+      merged.push(segment);
+    }
+  }
+
+  return merged;
 }
 
 /**
@@ -314,14 +387,26 @@ function tokenizeForTfIdf(text: string): string[] {
 }
 
 /**
- * Estimate token count (rough: ~4 chars per token for English)
+ * Estimate token count using feature-based estimation.
+ *
+ * Uses estimateTokensFast() which decomposes text into content classes
+ * (words, numbers, punctuation, URLs, operators, CJK) and applies
+ * calibrated chars-per-token ratios. ~95% accurate vs tiktoken o200k_base.
+ * ~100x faster than tiktoken for texts >1KB.
+ *
+ * For exact counts, use countTokens() from tokens.ts (requires tiktoken).
  */
 function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 4);
+  return estimateTokensFast(text);
 }
 
 /**
- * Calculate TF-IDF-like relevance score for a sentence
+ * Calculate TF-IDF relevance score for a sentence.
+ *
+ * Scoring uses standard TF-IDF:
+ * - TF: log(1 + term_frequency) — rewards terms appearing in the sentence
+ * - IDF: from idfMap if provided, otherwise uniform weight
+ * Combined: TF * IDF per matching query term, summed.
  */
 function relevanceScore(
   sentence: string,
@@ -329,19 +414,23 @@ function relevanceScore(
   position: number,
   totalSentences: number,
   boostReasoning: boolean,
+  idfMap?: Map<string, number>,
 ): number {
   let score = 0;
 
-  // 1. Term overlap with query (TF-IDF-like)
+  // 1. Term overlap with query (TF-IDF)
   const queryTerms = tokenizeForTfIdf(query);
   const sentenceTerms = tokenizeForTfIdf(sentence);
   const sentenceTermSet = new Set(sentenceTerms);
 
   for (const term of queryTerms) {
     if (sentenceTermSet.has(term)) {
-      // IDF-like: rarer terms in sentence = higher weight
+      // TF: log-normalized term frequency in sentence
       const termFreq = sentenceTerms.filter((t) => t === term).length;
-      score += 1 / Math.log(1 + termFreq);
+      const tf = Math.log(1 + termFreq);
+      // IDF: inverse document frequency across all sentences
+      const idf = idfMap?.get(term) ?? 1;
+      score += tf * idf;
     }
   }
 
@@ -548,6 +637,9 @@ function buildSentenceMetadata(
     }
   }
 
+  // Cache for sentence gzip sizes — avoids redundant compression in NCD
+  const sentenceGzipCache = new Map<number, number>();
+
   const metadata: SentenceMetadata[] = rawSentences.map((sentence, index) => {
     if (opts.removeFillers && isMetaSentence(sentence)) {
       fillersRemoved++;
@@ -569,8 +661,20 @@ function buildSentenceMetadata(
       : { cleaned: sentence, removedCount: 0 };
     fillersRemoved += removedCount;
 
-    // Use cached query gzip size for NCD computation
-    const ncdScore = opts.useNCD ? computeNCD(cleaned, query, undefined, cachedQueryGzipSize) : 0.5;
+    // Cache sentence gzip size for potential reuse
+    let cachedSentenceGzipSize: number | undefined;
+    if (opts.useNCD && cleaned.length > 0) {
+      try {
+        cachedSentenceGzipSize = gzipSync(Buffer.from(cleaned)).length;
+        sentenceGzipCache.set(index, cachedSentenceGzipSize);
+      } catch {
+        // Fallback: let computeNCD handle it
+      }
+    }
+
+    const ncdScore = opts.useNCD
+      ? computeNCD(cleaned, query, cachedSentenceGzipSize, cachedQueryGzipSize)
+      : 0.5;
     const startsWithPronoun = PRONOUN_START.test(cleaned);
     const hasCausalConnective =
       CAUSAL_CONNECTIVES.test(cleaned) || CONTRASTIVE_CONNECTIVES.test(cleaned);
@@ -588,20 +692,56 @@ function buildSentenceMetadata(
     };
   });
 
-  // Compute repetition similarity and mark dependencies
+  // Compute repetition similarity against all prior sentences (not just adjacent)
+  // For each sentence, find the maximum Jaccard similarity to any earlier sentence.
+  // This catches non-adjacent repetitions (e.g., sentence 1 repeated at sentence 5).
   for (let i = 1; i < metadata.length; i++) {
     const current = metadata[i];
+    if (!current || current.cleaned.length === 0) continue;
+
+    let maxSim = 0;
+    for (let j = 0; j < i; j++) {
+      const earlier = metadata[j];
+      if (!earlier || earlier.cleaned.length === 0) continue;
+      const sim = jaccardSimilarity(current.cleaned, earlier.cleaned);
+      if (sim > maxSim) maxSim = sim;
+    }
+    current.repeatSimilarity = maxSim;
+    if (maxSim > opts.repeatThreshold) repetitionsPenalized++;
+
+    // Mark coreference/causal dependencies (still adjacent-only — these are discourse-level)
     const previous = metadata[i - 1];
-    if (current && previous) {
-      const sim = jaccardSimilarity(current.cleaned, previous.cleaned);
-      current.repeatSimilarity = sim;
-      if (sim > opts.repeatThreshold) repetitionsPenalized++;
+    if (previous) {
       if (current.startsWithPronoun) previous.requiredBy = i;
       if (current.hasCausalConnective) previous.requiredBy = i;
     }
   }
 
   return { metadata, fillersRemoved, repetitionsPenalized };
+}
+
+/** Build IDF map across all sentences for proper TF-IDF scoring */
+function buildIdfMap(metadata: SentenceMetadata[]): Map<string, number> {
+  const docCount = metadata.filter((m) => m.cleaned.length > 0).length;
+  if (docCount === 0) return new Map();
+
+  // Count how many sentences contain each term
+  const termDocFreq = new Map<string, number>();
+  for (const m of metadata) {
+    if (m.cleaned.length === 0) continue;
+    const terms = new Set(tokenizeForTfIdf(m.cleaned));
+    for (const term of terms) {
+      termDocFreq.set(term, (termDocFreq.get(term) ?? 0) + 1);
+    }
+  }
+
+  // IDF = log(N / df) where N = total docs, df = docs containing term
+  const idfMap = new Map<string, number>();
+  for (const [term, df] of termDocFreq) {
+    idfMap.set(term, Math.log(docCount / df));
+  }
+
+  return idfMap;
 }
 
 /** Compute relevance scores for sentences */
@@ -611,11 +751,19 @@ function computeSentenceScores(
   opts: Required<CompressionOptions>,
 ): void {
   const totalSentences = metadata.filter((m) => m.cleaned.length > 0).length;
+  const idfMap = buildIdfMap(metadata);
 
   for (const m of metadata) {
     if (m.cleaned.length === 0) continue;
 
-    let score = relevanceScore(m.cleaned, query, m.index, totalSentences, opts.boost_reasoning);
+    let score = relevanceScore(
+      m.cleaned,
+      query,
+      m.index,
+      totalSentences,
+      opts.boost_reasoning,
+      idfMap,
+    );
     if (opts.useNCD) score += (1 - m.ncdScore) * 0.5;
     if (m.repeatSimilarity > opts.repeatThreshold) score *= 0.3;
     if (m.requiredBy !== null) score *= 1.2;
@@ -671,6 +819,14 @@ function enforceConstraints(
         changed = true;
       }
     }
+  }
+
+  if (iterations >= maxIterations) {
+    console.warn(
+      `[compress] Constraint iteration limit reached (${maxIterations}). ` +
+        `Some coreference/causal dependencies may not be fully resolved. ` +
+        `coref=${corefConstraints}, causal=${causalConstraints}`,
+    );
   }
 
   return { coref: corefConstraints, causal: causalConstraints };
@@ -871,8 +1027,37 @@ export function needsCompression(text: string, query?: string): CompressionAnaly
   };
 }
 
+/**
+ * Async NCD computation for large texts.
+ * Uses non-blocking gzip to avoid blocking the event loop on texts >50KB.
+ *
+ * @param a - First string
+ * @param b - Second string
+ * @returns NCD value (0 = identical, 1 = unrelated)
+ */
+export async function computeNCDAsync(a: string, b: string): Promise<number> {
+  if (a.length === 0 || b.length === 0) return 1;
+
+  try {
+    const [bufA, bufB, bufAB] = await Promise.all([
+      gzipAsync(Buffer.from(a)),
+      gzipAsync(Buffer.from(b)),
+      gzipAsync(Buffer.from(`${a} ${b}`)),
+    ]);
+
+    const Ca = bufA.length;
+    const Cb = bufB.length;
+    const Cab = bufAB.length;
+
+    const ncd = (Cab - Math.min(Ca, Cb)) / Math.max(Ca, Cb);
+    return Math.min(1, Math.max(0, ncd));
+  } catch {
+    return 0.5;
+  }
+}
+
 // ============================================================================
 // Utility Exports
 // ============================================================================
 
-export { cleanFillers, isMetaSentence };
+export { cleanFillers, isMetaSentence, tokenizeForTfIdf };
