@@ -207,15 +207,10 @@ describe("CompressionDetection - needsCompression", () => {
 
 // ============================================================================
 // New test sections for splitSentences, estimateTokensFast, compress edge
-// cases, and computeNCDAsync / computeNCD / jaccardSimilarity
+// cases, computeNCD / jaccardSimilarity
 // ============================================================================
 
-import {
-  computeNCD,
-  computeNCDAsync,
-  jaccardSimilarity,
-  splitSentences,
-} from "../src/lib/compression";
+import { computeNCD, jaccardSimilarity, splitSentences } from "../src/lib/compression";
 import { countTokens } from "../src/lib/tokens";
 import { clearEstimateCache, estimateTokensFast } from "../src/lib/tokens-fast";
 
@@ -471,36 +466,6 @@ describe("computeNCD", () => {
 });
 
 // ----------------------------------------------------------------------------
-// computeNCDAsync
-// ----------------------------------------------------------------------------
-
-describe("computeNCDAsync", () => {
-  test("identical strings produce NCD close to 0", async () => {
-    const ncd = await computeNCDAsync("hello world", "hello world");
-    expect(ncd).toBeLessThan(0.2);
-  });
-
-  test("completely different strings produce NCD close to 1", async () => {
-    const a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const b = "zyxwvutsrqponmlkjihgfedcba123456";
-    const ncd = await computeNCDAsync(a, b);
-    expect(ncd).toBeGreaterThan(0.5);
-  });
-
-  test("empty strings return NCD = 1", async () => {
-    expect(await computeNCDAsync("", "hello")).toBe(1);
-    expect(await computeNCDAsync("hello", "")).toBe(1);
-    expect(await computeNCDAsync("", "")).toBe(1);
-  });
-
-  test("async result matches sync result", async () => {
-    const a = "The quick brown fox jumps over the lazy dog.";
-    const b = "A completely different sentence about mathematics.";
-    const syncNcd = computeNCD(a, b);
-    const asyncNcd = await computeNCDAsync(a, b);
-    expect(asyncNcd).toBeCloseTo(syncNcd, 2);
-  });
-});
 
 // ----------------------------------------------------------------------------
 // jaccardSimilarity
@@ -525,5 +490,583 @@ describe("jaccardSimilarity", () => {
     const sim = jaccardSimilarity("the quick brown fox", "the slow brown cat");
     expect(sim).toBeGreaterThan(0);
     expect(sim).toBeLessThan(1);
+  });
+});
+
+// ============================================================================
+// New test sections for compression scoring improvements:
+// extractCodeBlocks, restoreCodeBlocks, isCodeHeavySentence, isFillerSentence,
+// extractEntities, informationDensity, rougeLScore, tokenize
+// ============================================================================
+
+import {
+  extractCodeBlocks,
+  extractEntities,
+  informationDensity,
+  isCodeHeavySentence,
+  isFillerSentence,
+  restoreCodeBlocks,
+  rougeLScore,
+  tokenize,
+} from "../src/lib/compression";
+
+// ----------------------------------------------------------------------------
+// extractCodeBlocks / restoreCodeBlocks
+// ----------------------------------------------------------------------------
+
+describe("extractCodeBlocks", () => {
+  test("extracts single fenced code block and replaces with placeholder", () => {
+    const input = "Some prose.\n```js\nconsole.log('hi');\n```\nMore prose.";
+    const { prose, blocks } = extractCodeBlocks(input);
+    expect(blocks.size).toBe(1);
+    expect(prose).toContain("\x00CODE0\x00");
+    expect(prose).not.toContain("console.log");
+    expect(prose).toContain("Some prose.");
+    expect(prose).toContain("More prose.");
+  });
+
+  test("extracts multiple code blocks", () => {
+    const input = "Before.\n```py\nx = 1\n```\nMiddle.\n```ts\nconst y = 2;\n```\nAfter.";
+    const { prose, blocks } = extractCodeBlocks(input);
+    expect(blocks.size).toBe(2);
+    expect(prose).toContain("\x00CODE0\x00");
+    expect(prose).toContain("\x00CODE1\x00");
+    expect(prose).toContain("Before.");
+    expect(prose).toContain("Middle.");
+    expect(prose).toContain("After.");
+  });
+
+  test("handles text with no code blocks", () => {
+    const input = "Just plain text with no fences.";
+    const { prose, blocks } = extractCodeBlocks(input);
+    expect(prose).toBe(input);
+    expect(blocks.size).toBe(0);
+  });
+
+  test("round-trip: extract then restore returns original", () => {
+    const input = "Intro.\n```js\nfunction foo() { return 42; }\n```\nOutro.";
+    const { prose, blocks } = extractCodeBlocks(input);
+    const restored = restoreCodeBlocks(prose, blocks);
+    expect(restored).toBe(input);
+  });
+
+  test("handles tilde fences", () => {
+    const input = "Text.\n~~~\ncode here\n~~~\nMore text.";
+    const { prose, blocks } = extractCodeBlocks(input);
+    expect(blocks.size).toBe(1);
+    expect(prose).toContain("\x00CODE0\x00");
+    expect(prose).not.toContain("code here");
+  });
+});
+
+// ----------------------------------------------------------------------------
+// isCodeHeavySentence
+// ----------------------------------------------------------------------------
+
+describe("isCodeHeavySentence", () => {
+  test("returns true for sentence heavy in backticks", () => {
+    const sentence = "The function `foo(x)` calls `bar(y)` and returns `baz()` with `qux`";
+    expect(isCodeHeavySentence(sentence)).toBe(true);
+  });
+
+  test("returns false for normal English sentence", () => {
+    const sentence = "The algorithm runs efficiently on sorted input data.";
+    expect(isCodeHeavySentence(sentence)).toBe(false);
+  });
+
+  test("returns true for symbol-dense sentence", () => {
+    const sentence = "if (x > 0 && y < 10 || z == 42) { return x; }";
+    expect(isCodeHeavySentence(sentence)).toBe(true);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// isFillerSentence
+// ----------------------------------------------------------------------------
+
+describe("isFillerSentence", () => {
+  test('returns true for "Let me think about this problem."', () => {
+    expect(isFillerSentence("Let me think about this problem.")).toBe(true);
+  });
+
+  test('returns true for "Okay, so we need to consider..."', () => {
+    expect(isFillerSentence("Okay, so we need to consider...")).toBe(true);
+  });
+
+  test('returns true for "I\'m confident that this is correct."', () => {
+    expect(isFillerSentence("I'm confident that this is correct.")).toBe(true);
+  });
+
+  test('returns true for "The question is about sorting."', () => {
+    expect(isFillerSentence("The question is about sorting.")).toBe(true);
+  });
+
+  test('returns true for "That said, we should note..."', () => {
+    expect(isFillerSentence("That said, we should note...")).toBe(true);
+  });
+
+  test('returns false for "The algorithm runs in O(n log n) time."', () => {
+    expect(isFillerSentence("The algorithm runs in O(n log n) time.")).toBe(false);
+  });
+
+  test('returns false for "Binary search requires sorted input."', () => {
+    expect(isFillerSentence("Binary search requires sorted input.")).toBe(false);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// extractEntities
+// ----------------------------------------------------------------------------
+
+describe("extractEntities", () => {
+  test("extracts numbers", () => {
+    const entities = extractEntities("There are 42 items");
+    expect(entities.has("42")).toBe(true);
+  });
+
+  test("extracts capitalized multi-word names", () => {
+    const entities = extractEntities("John Smith went home");
+    expect(entities.has("John Smith")).toBe(true);
+  });
+
+  test("extracts camelCase terms", () => {
+    const entities = extractEntities("Use myFunction here");
+    expect(entities.has("myFunction")).toBe(true);
+  });
+
+  test("extracts snake_case terms", () => {
+    const entities = extractEntities("call my_func now");
+    expect(entities.has("my_func")).toBe(true);
+  });
+
+  test("extracts ALL_CAPS terms and numbers together", () => {
+    const entities = extractEntities("Set MAX_SIZE to 100");
+    expect(entities.has("MAX_SIZE")).toBe(true);
+    expect(entities.has("100")).toBe(true);
+  });
+
+  test("empty text returns empty set", () => {
+    const entities = extractEntities("");
+    expect(entities.size).toBe(0);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// informationDensity
+// ----------------------------------------------------------------------------
+
+describe("informationDensity", () => {
+  test("dense sentence has higher density than filler", () => {
+    const dense = informationDensity(
+      "HashMap provides O(1) average lookup via hash-based bucket addressing.",
+    );
+    const filler = informationDensity("Well let me think about this thing here now.");
+    expect(dense).toBeGreaterThan(filler);
+  });
+
+  test("empty string returns 0", () => {
+    expect(informationDensity("")).toBe(0);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// rougeLScore
+// ----------------------------------------------------------------------------
+
+describe("rougeLScore", () => {
+  test("identical arrays return 1.0", () => {
+    const tokens = ["the", "cat", "sat"];
+    expect(rougeLScore(tokens, tokens)).toBeCloseTo(1.0, 5);
+  });
+
+  test("completely different arrays return 0.0", () => {
+    expect(rougeLScore(["aaa", "bbb"], ["ccc", "ddd"])).toBe(0);
+  });
+
+  test("empty arrays return 0.0", () => {
+    expect(rougeLScore([], [])).toBe(0);
+    expect(rougeLScore(["a"], [])).toBe(0);
+    expect(rougeLScore([], ["a"])).toBe(0);
+  });
+
+  test("partial overlap gives value between 0 and 1", () => {
+    const score = rougeLScore(["the", "quick", "brown", "fox"], ["the", "slow", "brown", "dog"]);
+    expect(score).toBeGreaterThan(0);
+    expect(score).toBeLessThan(1);
+  });
+
+  test("paraphrased order yields high score", () => {
+    const a = ["the", "cat", "sat", "on", "mat"];
+    const b = ["the", "cat", "on", "the", "mat"];
+    const score = rougeLScore(a, b);
+    // Shares long subsequence ["the", "cat", "on", "mat"] → high score
+    expect(score).toBeGreaterThan(0.7);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// tokenize
+// ----------------------------------------------------------------------------
+
+describe("tokenize", () => {
+  test("lowercases and splits into words > 2 chars", () => {
+    const result = tokenize("The Quick Fox");
+    expect(result).toEqual(["the", "quick", "fox"]);
+  });
+
+  test("filters out short words", () => {
+    const result = tokenize("I am a big dog");
+    // "I", "am", "a" are <= 2 chars
+    expect(result).toEqual(["big", "dog"]);
+  });
+
+  test("strips punctuation", () => {
+    const result = tokenize("hello, world! foo-bar.");
+    expect(result).toContain("hello");
+    expect(result).toContain("world");
+    expect(result).toContain("foo");
+    expect(result).toContain("bar");
+  });
+
+  test("empty string returns empty array", () => {
+    expect(tokenize("")).toEqual([]);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// compress() with code blocks
+// ----------------------------------------------------------------------------
+
+describe("compress() with code blocks", () => {
+  test("code block survives compression intact", () => {
+    const codeBlock = "```js\nfunction add(a, b) { return a + b; }\n```";
+    const text = `Here is an addition function.\n${codeBlock}\nThis function adds two numbers together.`;
+    const result = compress(text, "addition function", { target_ratio: 0.8 });
+    expect(result.compressed).toContain("function add(a, b) { return a + b; }");
+  });
+
+  test("filler sentences around code blocks get dropped, code kept", () => {
+    const codeBlock = "```py\ndef sort(arr): return sorted(arr)\n```";
+    const text =
+      "Let me think about this. " +
+      "Okay, so we need sorting. " +
+      "Hmm, this is interesting. " +
+      "Here is the implementation.\n" +
+      codeBlock +
+      "\n" +
+      "The function sorts an array in O(n log n) time. " +
+      "Well, let me also mention it uses Timsort.";
+    const result = compress(text, "sorting algorithm", { target_ratio: 0.5 });
+    // Code block must survive
+    expect(result.compressed).toContain("def sort(arr)");
+    // At least some filler should be dropped
+    expect(result.compressed.length).toBeLessThan(text.length);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// compress() filler scoring
+// ----------------------------------------------------------------------------
+
+describe("compress() filler scoring", () => {
+  test("filler sentence gets lower priority than informative sentence", () => {
+    const text =
+      "Let me think about quicksort. " +
+      "Quicksort uses divide and conquer with O(n log n) average case. " +
+      "Hmm, that is interesting. " +
+      "Well, I need to think about this more.";
+    const result = compress(text, "quicksort", { target_ratio: 0.4 });
+    // The informative sentence should survive
+    expect(result.compressed).toContain("divide and conquer");
+    // At least one filler should be dropped
+    expect(result.dropped_sentences.length).toBeGreaterThan(0);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// getFillerTier
+// ----------------------------------------------------------------------------
+
+import { getFillerTier, median, telegraphicCompress } from "../src/lib/compression";
+
+describe("getFillerTier", () => {
+  test("returns 1 for pure filler: Let me think", () => {
+    expect(getFillerTier("Let me think about this problem.")).toBe(1);
+  });
+
+  test("returns 1 for self-reassurance filler", () => {
+    expect(getFillerTier("I'm quite sure this is right.")).toBe(1);
+  });
+
+  test("returns 1 for let me also filler", () => {
+    expect(getFillerTier("Let me also mention something.")).toBe(1);
+  });
+
+  test("returns 1 for hmm filler", () => {
+    expect(getFillerTier("Hmm, this is interesting.")).toBe(1);
+  });
+
+  test("returns 2 for stylistic wrapper: Okay", () => {
+    expect(getFillerTier("Okay, so the algorithm works.")).toBe(2);
+  });
+
+  test("returns 2 for that said wrapper", () => {
+    expect(getFillerTier("That said, we should consider this.")).toBe(2);
+  });
+
+  test("returns 0 for non-filler: algorithm description", () => {
+    expect(getFillerTier("The algorithm uses binary search.")).toBe(0);
+  });
+
+  test("returns 0 for non-filler: technical requirement", () => {
+    expect(getFillerTier("Binary search requires sorted input.")).toBe(0);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// extractEntities - improved extraction
+// ----------------------------------------------------------------------------
+
+describe("extractEntities - improved", () => {
+  test("extracts currency amounts", () => {
+    const entities = extractEntities("Revenue grew by $2.3M");
+    expect(entities.has("$2.3M")).toBe(true);
+  });
+
+  test("extracts percentages", () => {
+    const entities = extractEntities("A 23% increase");
+    expect(entities.has("23%")).toBe(true);
+  });
+
+  test("extracts alphanumeric codes", () => {
+    const entities = extractEntities("Results from Q3");
+    expect(entities.has("Q3")).toBe(true);
+  });
+
+  test("still extracts camelCase", () => {
+    const entities = extractEntities("Use myFunction");
+    expect(entities.has("myFunction")).toBe(true);
+  });
+
+  test("still extracts snake_case", () => {
+    const entities = extractEntities("call my_func");
+    expect(entities.has("my_func")).toBe(true);
+  });
+});
+
+// ----------------------------------------------------------------------------
+// compress() - quality floor drops pure tier 1 fillers
+// ----------------------------------------------------------------------------
+
+describe("compress() - quality floor", () => {
+  test("pure tier 1 fillers are dropped even with spare capacity", () => {
+    const text =
+      "Let me think about this. " +
+      "Hmm, let me consider. " +
+      "The answer is 42. " +
+      "I'm confident about this.";
+    const result = compress(text, "answer", { target_ratio: 0.8 });
+    // Should contain the informative sentence
+    expect(result.compressed).toContain("42");
+    // Should NOT contain tier 1 fillers
+    expect(result.compressed).not.toContain("Let me think");
+  });
+});
+
+// ----------------------------------------------------------------------------
+// compress() - filler detection on original sentence
+// ----------------------------------------------------------------------------
+
+describe("compress() - filler detection on original", () => {
+  test("detects filler even when cleanFillers strips the prefix", () => {
+    const text =
+      "Let me think about quicksort. " +
+      "Quicksort partitions the array recursively. " +
+      "Hmm, let me verify. " +
+      "It has O(n log n) average complexity.";
+    const result = compress(text, "quicksort", { target_ratio: 0.5 });
+    // Should keep the informative sentences
+    expect(result.compressed).toContain("partitions");
+    expect(result.compressed).toContain("complexity");
+    // "Let me think about quicksort" should be detected as filler
+    // even though cleanFillers would strip "let me think" to leave "quicksort"
+    // We verify by checking that at least one filler sentence was dropped
+    expect(result.dropped_sentences.length).toBeGreaterThan(0);
+  });
+});
+
+// ── median helper ────────────────────────────────────────────────────────────
+
+describe("median", () => {
+  test("empty array returns 0", () => {
+    expect(median([])).toBe(0);
+  });
+
+  test("single element", () => {
+    expect(median([5])).toBe(5);
+  });
+
+  test("odd count returns middle", () => {
+    expect(median([3, 1, 2])).toBe(2);
+  });
+
+  test("even count returns average of two middles", () => {
+    expect(median([1, 2, 3, 4])).toBe(2.5);
+  });
+
+  test("handles duplicates", () => {
+    expect(median([1, 1, 1])).toBe(1);
+  });
+
+  test("does not mutate input", () => {
+    const arr = [3, 1, 2];
+    median(arr);
+    expect(arr).toEqual([3, 1, 2]);
+  });
+});
+
+// ── Dual-threshold selection (noiseScore) ────────────────────────────────────
+
+describe("dual-threshold selection", () => {
+  test("fillers get high noise scores and are dropped first", () => {
+    const text =
+      "Let me think about this question. " +
+      "Hmm, let me consider what I know. " +
+      "The answer involves quantum mechanics. " +
+      "Quantum entanglement allows particles to be correlated. " +
+      "I'm confident that is correct. " +
+      "Bell's theorem proves local hidden variables cannot explain entanglement.";
+    const result = compress(text, "quantum entanglement", { target_ratio: 0.5 });
+    expect(result.compressed).toContain("entanglement");
+    expect(result.compressed).toContain("Bell");
+    expect(result.compressed).not.toContain("Let me think");
+    expect(result.compressed).not.toContain("confident");
+  });
+
+  test("low-noise supporting sentences survive over high-noise relevant ones", () => {
+    const text =
+      "Let me think about sorting algorithms. " +
+      "Okay, so sorting is important in computer science. " +
+      "Merge sort divides the array into halves recursively. " +
+      "Each half is sorted and then merged back together. " +
+      "The time complexity of merge sort is O(n log n). " +
+      "Let me also mention that merge sort is stable.";
+    const result = compress(text, "merge sort complexity", { target_ratio: 0.5 });
+    expect(result.compressed).toContain("O(n log n)");
+    expect(result.compressed).toContain("divides");
+    expect(result.compressed).not.toContain("Let me think");
+  });
+
+  test("noiseScore computation does not break short inputs", () => {
+    const text =
+      "Let me think. The sky is blue due to Rayleigh scattering. " + "I'm sure about this.";
+    const result = compress(text, "why is sky blue", { target_ratio: 0.5 });
+    expect(result.compressed.length).toBeGreaterThan(0);
+    expect(result.ratio).toBeLessThan(1);
+  });
+});
+
+// ── Telegraphic compression ──────────────────────────────────────────────────
+
+describe("telegraphicCompress", () => {
+  test("strips articles", () => {
+    const result = telegraphicCompress("The cat sat on a mat");
+    expect(result).not.toMatch(/\bThe\b/);
+    expect(result).not.toMatch(/\ba\b/);
+    expect(result).toContain("cat");
+    expect(result).toContain("mat");
+  });
+
+  test("strips filler adverbs", () => {
+    const result = telegraphicCompress("It is basically very simple");
+    expect(result).not.toContain("basically");
+    expect(result).not.toContain("very");
+    expect(result).toContain("simple");
+  });
+
+  test("strips auxiliary verbs", () => {
+    const result = telegraphicCompress("I am going to the store");
+    expect(result).not.toMatch(/\bam\b/);
+    expect(result).toContain("going");
+    expect(result).toContain("store");
+  });
+
+  test("keeps reasoning connectives", () => {
+    const result = telegraphicCompress("X fails because Y is broken");
+    expect(result).toContain("because");
+    expect(result).toContain("fails");
+  });
+
+  test("keeps numbers", () => {
+    const result = telegraphicCompress("The value is 42 and the rate is 3.14");
+    expect(result).toContain("42");
+    expect(result).toContain("3.14");
+  });
+
+  test("keeps technical terms (camelCase, ALL_CAPS, snake_case)", () => {
+    const result = telegraphicCompress("The variable myVar and MY_CONST are used");
+    expect(result).toContain("myVar");
+    expect(result).toContain("MY_CONST");
+  });
+
+  test("applies phrase replacements", () => {
+    expect(telegraphicCompress("in order to do X")).toContain("to");
+    expect(telegraphicCompress("in order to do X")).not.toContain("in order");
+    expect(telegraphicCompress("due to the fact that it fails")).toContain("because");
+  });
+
+  test("protects URLs", () => {
+    const result = telegraphicCompress("Visit https://example.com/path for details");
+    expect(result).toContain("https://example.com/path");
+  });
+
+  test("protects inline code", () => {
+    const result = telegraphicCompress("Use the `Array.map` method");
+    expect(result).toContain("`Array.map`");
+  });
+
+  test("protects dates", () => {
+    const result = telegraphicCompress("The deadline is 2024-01-15");
+    expect(result).toContain("2024-01-15");
+  });
+
+  test("protects version numbers", () => {
+    const result = telegraphicCompress("It requires version v3.2.1");
+    expect(result).toContain("v3.2.1");
+  });
+
+  test("protects slash-separated terms like A/B", () => {
+    const result = telegraphicCompress("A/B testing showed results");
+    expect(result).toContain("A/B");
+  });
+
+  test("protects model IDs", () => {
+    const result = telegraphicCompress("Using claude-sonnet-4-20250514 for inference");
+    expect(result).toContain("claude-sonnet-4-20250514");
+  });
+
+  test("end-to-end: produces readable telegraphic output", () => {
+    const input =
+      "The time complexity of the algorithm is O(n log n) because it uses a divide-and-conquer approach";
+    const result = telegraphicCompress(input);
+    expect(result).toContain("time complexity");
+    expect(result).toContain("O(n");
+    expect(result).toContain("because");
+    expect(result).toContain("divide-and-conquer");
+    // Should be notably shorter
+    expect(result.length).toBeLessThan(input.length);
+  });
+
+  test("compress() applies telegraphic compression to kept sentences", () => {
+    const text =
+      "Let me think about this. " +
+      "The algorithm is fundamentally based on the principle of dynamic programming. " +
+      "It has a time complexity of O(n^2).";
+    const result = compress(text, "algorithm complexity", { target_ratio: 0.7 });
+    // "fundamentally" should be stripped
+    expect(result.compressed).not.toContain("fundamentally");
+    // Core content preserved
+    expect(result.compressed).toContain("dynamic programming");
+    expect(result.compressed).toContain("O(n^2)");
   });
 });

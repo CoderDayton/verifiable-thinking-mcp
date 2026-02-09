@@ -11,7 +11,6 @@ export {
   cleanFillers,
   compress,
   computeNCD,
-  computeNCDAsync,
   isMetaSentence,
   jaccardSimilarity,
   needsCompression,

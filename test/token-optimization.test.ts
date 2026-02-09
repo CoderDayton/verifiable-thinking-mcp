@@ -268,7 +268,10 @@ describe("Adaptive Compression", () => {
     // Should keep most content for technical text
     const compressed = result.compressed.toLowerCase();
     expect(compressed).toContain("algorithm");
-    expect(compressed).toContain("complexity");
+    // Should keep formula or complexity info (code-heavy sentences get priority)
+    const hasFormula = compressed.includes("f(n)");
+    const hasComplexity = compressed.includes("complexity");
+    expect(hasFormula || hasComplexity).toBe(true);
     expect(result.ratio).toBeGreaterThan(0.4); // Not too aggressive
   });
 
