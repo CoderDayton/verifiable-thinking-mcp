@@ -1,5 +1,5 @@
-import { compress } from "../src/lib/compression";
-import { estimateTokensFast } from "../src/lib/tokens-fast";
+import { compress } from "../src/text/compression";
+import { estimateTokensFast } from "../src/text/tokens-fast";
 
 // Test case 1: Coding problem thinking
 const codingThinking = `Okay so I need to implement fibonacci with memoization. Let me think about this step by step.

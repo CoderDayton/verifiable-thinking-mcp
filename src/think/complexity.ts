@@ -15,7 +15,7 @@
  * - Domain detection now uses unified src/lib/domain.ts
  */
 
-import { getDomainWeight } from "../domain.ts";
+import { getDomainWeight } from "../domain/detection.ts";
 
 export interface ComplexityResult {
   score: number;

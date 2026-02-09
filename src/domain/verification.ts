@@ -4,7 +4,7 @@
  * Includes content-hash caching for repeated verifications
  */
 
-import { verificationCache } from "./cache.ts";
+import { verificationCache } from "../infra/cache.ts";
 
 // Re-export math module for backwards compatibility
 export {
@@ -43,7 +43,7 @@ export {
   type UnaryNode,
   type VariableNode,
   validateExpression,
-} from "./math/index.ts";
+} from "../math/index.ts";
 
 // Import for internal use
 import {
@@ -51,7 +51,7 @@ import {
   isMathOperator,
   MATH_OPERATOR_PATTERN,
   validateExpression,
-} from "./math/index.ts";
+} from "../math/index.ts";
 
 export type VerificationDomain = "math" | "logic" | "code" | "general";
 

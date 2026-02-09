@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { challenge, shouldChallenge } from "../src/lib/think/challenge.ts";
+import { challenge, shouldChallenge } from "../src/think/challenge.ts";
 
 describe("challenge", () => {
   describe("basic functionality", () => {

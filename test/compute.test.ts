@@ -11,7 +11,7 @@ import {
   SolverGroup,
   SolverType,
   shouldTrySolver,
-} from "../src/lib/compute/classifier";
+} from "../src/compute/classifier";
 import {
   clearCache,
   computeAndReplace,
@@ -26,9 +26,9 @@ import {
   tryMultiStepWordProblem,
   tryProbability,
   tryWordProblem,
-} from "../src/lib/compute/index";
-import { getRegistryStats, getSolvers, getSolversForMask } from "../src/lib/compute/registry";
-import { tryStatistics } from "../src/lib/compute/solvers/statistics";
+} from "../src/compute/index";
+import { getRegistryStats, getSolvers, getSolversForMask } from "../src/compute/registry";
+import { tryStatistics } from "../src/compute/solvers/statistics";
 
 describe("LocalCompute - tryArithmetic", () => {
   test("basic addition: 17 + 28", () => {

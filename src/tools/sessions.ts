@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { clearTracker } from "../lib/concepts.ts";
-import { SessionManager } from "../lib/session.ts";
-import { calculateTokenUsage } from "../lib/tokens.ts";
+import { clearTracker } from "../session/concepts.ts";
+import { SessionManager } from "../session/manager.ts";
+import { calculateTokenUsage } from "../text/tokens.ts";
 
 /**
  * Session management tools for reasoning chains

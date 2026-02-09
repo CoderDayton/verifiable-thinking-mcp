@@ -10,7 +10,7 @@
  * 3. Filter computations that match both
  */
 
-import { detectMetaDomain, getRelevantSolvers, type MetaDomain } from "../domain.ts";
+import { detectMetaDomain, getRelevantSolvers, type MetaDomain } from "../domain/detection.ts";
 import { type SolverMask, SolverType } from "./classifier.ts";
 import type { ExtractedComputation } from "./types.ts";
 

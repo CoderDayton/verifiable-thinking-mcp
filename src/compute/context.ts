@@ -8,7 +8,7 @@
  * calculus injections even if the user mentions derivatives.
  */
 
-import { detectMetaDomain, getRelevantSolvers, type MetaDomain } from "../domain.ts";
+import { detectMetaDomain, getRelevantSolvers, type MetaDomain } from "../domain/detection.ts";
 import { extractAndCompute } from "./extract.ts";
 import { filterByDomainRelevance, isMethodRelevant } from "./filter.ts";
 import type { AugmentedResult, ExtractedComputation } from "./types.ts";

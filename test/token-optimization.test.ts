@@ -6,14 +6,14 @@
  */
 
 import { beforeEach, describe, expect, test } from "bun:test";
-import { calculateAdaptiveRatio, calculateEntropy, compress } from "../src/lib/compression";
+import { calculateAdaptiveRatio, calculateEntropy, compress } from "../src/text/compression";
 import {
   clearTokenCache,
   countTokens,
   countTokensAsync,
   countTokensBatch,
   countTokensBatchAsync,
-} from "../src/lib/tokens";
+} from "../src/text/tokens";
 
 describe("Batch Token Counting", () => {
   beforeEach(() => {

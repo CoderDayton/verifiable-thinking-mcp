@@ -3,7 +3,7 @@
  * Run: bun test/compression-benchmark.ts
  */
 
-import { compress } from "../src/lib/compression";
+import { compress } from "../src/text/compression";
 
 interface BenchmarkCase {
   name: string;

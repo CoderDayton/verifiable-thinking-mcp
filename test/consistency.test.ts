@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { checkConsistency, checkStepConsistency } from "../src/lib/think/consistency.ts";
+import { checkConsistency, checkStepConsistency } from "../src/think/consistency.ts";
 
 describe("checkConsistency", () => {
   test("returns no contradictions for single step", () => {

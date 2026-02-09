@@ -12,8 +12,7 @@
  */
 
 import type { Context } from "fastmcp";
-import { compress, needsCompression } from "../lib/compression.ts";
-import { contextAwareCompute } from "../lib/compute/context.ts";
+import { contextAwareCompute } from "../compute/context.ts";
 import {
   type DetectedMistake,
   detectCommonMistakesFromText,
@@ -22,23 +21,24 @@ import {
   suggestNextStepFromText,
   suggestSimplificationPath,
   tryLocalCompute,
-} from "../lib/compute/index.ts";
-import { stripMarkdown } from "../lib/extraction.ts";
-import { SessionManager, type ThoughtRecord } from "../lib/session.ts";
-import { challenge, shouldChallenge } from "../lib/think/challenge.ts";
-import { assessPromptComplexity } from "../lib/think/complexity.ts";
-import { analyzeConfidenceDrift } from "../lib/think/confidence-drift.ts";
-import { checkStepConsistency } from "../lib/think/consistency.ts";
-import { detectDomain } from "../lib/think/guidance.ts";
-import { analyzeStepForResolution } from "../lib/think/hypothesis.ts";
+} from "../compute/index.ts";
+import { verify } from "../domain/verification.ts";
+import { SessionManager, type ThoughtRecord } from "../session/manager.ts";
+import { compress, needsCompression } from "../text/compression.ts";
+import { stripMarkdown } from "../text/extraction.ts";
+import { calculateTokenUsage } from "../text/tokens.ts";
+import { challenge, shouldChallenge } from "../think/challenge.ts";
+import { assessPromptComplexity } from "../think/complexity.ts";
+import { analyzeConfidenceDrift } from "../think/confidence-drift.ts";
+import { checkStepConsistency } from "../think/consistency.ts";
+import { detectDomain } from "../think/guidance.ts";
+import { analyzeStepForResolution } from "../think/hypothesis.ts";
 import {
   type ScratchpadArgs,
   type ScratchpadResponse,
   ScratchpadSchema,
-} from "../lib/think/scratchpad-schema.ts";
-import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
-import { calculateTokenUsage } from "../lib/tokens.ts";
-import { verify } from "../lib/verification.ts";
+} from "../think/scratchpad-schema.ts";
+import { primeQuestion, spotCheck } from "../think/spot-check.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
 
@@ -2703,7 +2703,7 @@ FLOW:
       // If compression was applied, recalculate input using actual compressed thought tokens
       if (response.compression?.applied) {
         // Import countTokens for accurate tiktoken-based counting
-        const { countTokens } = await import("../lib/tokens.ts");
+        const { countTokens } = await import("../text/tokens.ts");
 
         // Get the compressed thought from the stored record
         const session = SessionManager.get(response.session_id);

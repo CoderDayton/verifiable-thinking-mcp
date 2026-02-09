@@ -3,7 +3,7 @@
  * Allows external tools to read reasoning chains
  */
 
-import { SessionManager } from "../lib/session.ts";
+import { SessionManager } from "../session/manager.ts";
 
 /**
  * Resource template for accessing individual sessions

@@ -23,8 +23,8 @@ import {
   tryMultiStepWordProblem,
   tryProbability,
   tryWordProblem,
-} from "../src/lib/compute/index";
-import type { ComputeResult } from "../src/lib/compute/types";
+} from "../src/compute/index";
+import type { ComputeResult } from "../src/compute/types";
 
 // =============================================================================
 // TEST HARNESS TYPES

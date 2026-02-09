@@ -3,8 +3,8 @@
  * Research-backed failure pattern detection and guidance generation
  */
 
-import type { ThoughtRecord } from "../session.ts";
-import type { VerificationDomain } from "../verification.ts";
+import type { VerificationDomain } from "../domain/verification.ts";
+import type { ThoughtRecord } from "../session/manager.ts";
 
 // ============================================================================
 // FAILURE PATTERNS - Research-backed reasoning hazards

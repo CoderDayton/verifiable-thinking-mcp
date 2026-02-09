@@ -5,20 +5,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { detectMetaDomain, type MetaDomain } from "../src/lib/domain";
-import { assessPromptComplexity, isTrivialQuestion } from "../src/lib/think/complexity";
-import {
-  DOMAIN_PROMPTS,
-  getSystemPrompt,
-  getUserPrompt,
-  getVerbosity,
-} from "../src/lib/think/prompts";
+import { detectMetaDomain, type MetaDomain } from "../src/domain/detection";
+import { assessPromptComplexity, isTrivialQuestion } from "../src/think/complexity";
+import { DOMAIN_PROMPTS, getSystemPrompt, getUserPrompt, getVerbosity } from "../src/think/prompts";
 import {
   detectOverthinking,
   getComplexityInfo,
   isExplanatoryQuestion,
   routeQuestion,
-} from "../src/lib/think/route";
+} from "../src/think/route";
 
 // =============================================================================
 // ROUTING TESTS

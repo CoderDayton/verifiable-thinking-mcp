@@ -4,7 +4,7 @@
  * Includes rate limiting to prevent memory exhaustion under high load
  */
 
-import type { VerificationDomain, VerificationResult } from "./verification.ts";
+import type { VerificationDomain, VerificationResult } from "../domain/verification.ts";
 
 interface CacheEntry {
   result: VerificationResult;

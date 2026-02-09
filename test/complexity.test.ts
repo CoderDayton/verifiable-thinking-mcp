@@ -8,7 +8,7 @@ import {
   assessPromptComplexity,
   getTrivialPrompt,
   isTrivialQuestion,
-} from "../src/lib/think/complexity";
+} from "../src/think/complexity";
 
 describe("assessPromptComplexity", () => {
   describe("Low complexity (simple questions)", () => {
@@ -381,7 +381,7 @@ describe("Performance", () => {
 // ROUTING TESTS
 // =============================================================================
 
-import { routeQuestion } from "../src/lib/think/route";
+import { routeQuestion } from "../src/think/route";
 
 describe("routeQuestion", () => {
   describe("Path: trivial", () => {

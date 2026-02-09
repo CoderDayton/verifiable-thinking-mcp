@@ -9,7 +9,7 @@ import {
   compress,
   needsCompression,
   quickCompress,
-} from "../src/lib/compression";
+} from "../src/text/compression";
 
 describe("Compression", () => {
   test("compresses text with ratio", () => {
@@ -210,9 +210,9 @@ describe("CompressionDetection - needsCompression", () => {
 // cases, computeNCD / jaccardSimilarity
 // ============================================================================
 
-import { computeNCD, jaccardSimilarity, splitSentences } from "../src/lib/compression";
-import { countTokens } from "../src/lib/tokens";
-import { clearEstimateCache, estimateTokensFast } from "../src/lib/tokens-fast";
+import { computeNCD, jaccardSimilarity, splitSentences } from "../src/text/compression";
+import { countTokens } from "../src/text/tokens";
+import { clearEstimateCache, estimateTokensFast } from "../src/text/tokens-fast";
 
 // ----------------------------------------------------------------------------
 // splitSentences
@@ -508,7 +508,7 @@ import {
   restoreCodeBlocks,
   rougeLScore,
   tokenize,
-} from "../src/lib/compression";
+} from "../src/text/compression";
 
 // ----------------------------------------------------------------------------
 // extractCodeBlocks / restoreCodeBlocks
@@ -787,7 +787,7 @@ describe("compress() filler scoring", () => {
 // getFillerTier
 // ----------------------------------------------------------------------------
 
-import { getFillerTier, median, telegraphicCompress } from "../src/lib/compression";
+import { getFillerTier, median, telegraphicCompress } from "../src/text/compression";
 
 describe("getFillerTier", () => {
   test("returns 1 for pure filler: Let me think", () => {

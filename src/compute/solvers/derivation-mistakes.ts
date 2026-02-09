@@ -7,8 +7,8 @@
  * @module derivation-mistakes
  */
 
+import { compareExpressions, formatAST } from "../../domain/verification.ts";
 import type { ASTNode, BinaryNode } from "../../math/ast.ts";
-import { compareExpressions, formatAST } from "../../verification.ts";
 import { extractDerivationSteps } from "./derivation-core.ts";
 import { parseToAST } from "./derivation-simplify.ts";
 import { gcd, nodesEqual, normalizeOperator } from "./derivation-transform.ts";

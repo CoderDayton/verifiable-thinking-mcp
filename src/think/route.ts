@@ -5,7 +5,7 @@
  * The runner should just call routeQuestion() and follow the instructions.
  */
 
-import { detectMetaDomain } from "../domain.ts";
+import { detectMetaDomain } from "../domain/detection.ts";
 import {
   assessPromptComplexity,
   type ComplexityResult,

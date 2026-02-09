@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { type CompressionResult, compress, quickCompress } from "../lib/compression.ts";
-import { calculateTokenUsage } from "../lib/tokens.ts";
+import { type CompressionResult, compress, quickCompress } from "../text/compression.ts";
+import { calculateTokenUsage } from "../text/tokens.ts";
 
 /**
  * Standalone compress tool - Enhanced CPC-style context compression

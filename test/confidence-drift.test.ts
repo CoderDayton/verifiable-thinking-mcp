@@ -6,13 +6,13 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import type { ThoughtRecord } from "../src/lib/session";
+import type { ThoughtRecord } from "../src/session/manager";
 import {
   analyzeConfidenceDrift,
   computeTrajectoryStats,
   extractConfidenceTrajectory,
   hasConcerningDrift,
-} from "../src/lib/think/confidence-drift";
+} from "../src/think/confidence-drift";
 
 // ============================================================================
 // HELPERS

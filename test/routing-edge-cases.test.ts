@@ -6,9 +6,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { assessPromptComplexity } from "../src/lib/think/complexity";
-import { getComplexityInfo, isExplanatoryQuestion, routeQuestion } from "../src/lib/think/route";
-import { needsSpotCheck, primeQuestion, spotCheck } from "../src/lib/think/spot-check";
+import { assessPromptComplexity } from "../src/think/complexity";
+import { getComplexityInfo, isExplanatoryQuestion, routeQuestion } from "../src/think/route";
+import { needsSpotCheck, primeQuestion, spotCheck } from "../src/think/spot-check";
 
 // =============================================================================
 // TIER BOUNDARY TESTS
