@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-09
+
+### Added
+
+- **Telegraphic Compression** - Word-level pruning for scratchpad thinking tokens
+  - Strips articles (`a`, `an`, `the`), filler adverbs (`really`, `basically`, `actually`), and auxiliary verbs (`is`, `are`, `was`) while preserving reasoning connectives (`because`, `therefore`, `if`, `then`, `however`)
+  - 70+ phrase replacements condensing verbose patterns (e.g., "in order to" → "to", "due to the fact that" → "because")
+  - Protection patterns prevent damage to URLs, inline code, dates, versions, model IDs, file paths, slash-separated terms (A/B), numbers with units, markdown headers, and list markers
+  - Applied after sentence selection — kept sentences get word-level compression on top of sentence-level filtering
+  - New export: `telegraphicCompress(text: string): string`
+
+- **Compression Benchmarks** - Two new benchmark suites
+  - `test/compression-benchmark.ts` — 5 structured test cases with 27 pass/fail checks validating that key information survives and filler gets dropped
+  - `test/compression-realworld.ts` — 3 long-form thinking scenarios (coding/fibonacci, math/probability, architecture analysis) with latency measurements
+  - Average **49.1% token reduction** on real-world thinking text (37.8%–64.5% range)
+  - Latency: 13–17ms per compression
+
+### Changed
+
+- **God-Optimized Compression Module** - `src/lib/compression.ts` reduced from 1,707 → 1,158 lines (32% reduction) via 8 optimization passes while preserving all behavior
+  - Removed dead code: `estimateTokens()` wrapper (inlined `estimateTokensFast` at all call sites), `computeNCDAsync()` and its `gzipAsync`/`promisify` imports, duplicate filler penalty in `relevanceScore()`
+  - Collapsed `STOP_WORDS` (88 lines → 1 line) and `ABBREVIATIONS` (32 lines → 1 line) using `.split(" ")`
+  - Extracted `makeSentenceMetadata()` factory replacing 3 identical object literals
+  - Fused `tokenize()` and `tokenizeForTfIdf()` into `tokenize(text, filterStopWords?)` with backward-compatible alias
+  - Converted `calculateAdaptiveRatio()` from 6-level if/else chain to lookup table
+  - Cached entity sets on `SentenceMetadata` to avoid redundant `extractEntities()` calls
+  - Reordered file sections for temporal coherence (types → text processing → scoring → selection → telegraphic → public API)
+  - Renamed `hasCausalConnective` → `hasDependencyConnective` for accuracy
+
+### Removed
+
+- `computeNCDAsync()` — Async NCD variant was never called in the compression pipeline. Use `computeNCD()` (sync) instead.
+
+### Performance
+
+- **Telegraphic compression:** 49.1% average token reduction on real-world chain-of-thought text
+- **Compression latency:** 13–17ms for 700–920 token inputs
+- **Module size:** 32% fewer lines with identical behavior (1,967 tests passing)
+
 ## [0.5.0] - 2025-01-24
 
 ### Added
@@ -228,7 +267,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - First-write-wins for `setQuestion()` prevents session hijacking
 - OIDC trusted publishing for npm (no tokens stored)
 
-[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.5.0...v0.6.0
 [0.4.2]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/CoderDayton/verifiable-thinking-mcp/compare/v0.3.0...v0.4.0

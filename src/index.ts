@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { FastMCP } from "fastmcp";
 import { allResources, allResourceTemplates } from "./resources/index.ts";
 import {
@@ -8,9 +9,12 @@ import {
   scratchpadTool,
 } from "./tools/index.ts";
 
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json");
+
 const server = new FastMCP({
   name: "Verifiable Thinking MCP",
-  version: "0.1.0",
+  version,
 });
 
 // Register tools

@@ -132,6 +132,30 @@ CPC-style sentence-level relevance scoring:
 3. **Coref preservation** — Keep sentences containing pronouns' antecedents
 4. **Causal enforcement** — Preserve "because", "therefore", "thus" for reasoning chains
 
+**Telegraphic compression (NEW in v0.6.0):**
+After sentence selection, kept sentences undergo word-level pruning:
+
+- Strips articles (`a`, `an`, `the`), filler adverbs (`really`, `basically`), auxiliary verbs (`is`, `are`, `was`)
+- 70+ phrase replacements ("in order to" → "to", "due to the fact that" → "because")
+- Preserves reasoning connectives (`because`, `therefore`, `if`, `then`, `however`)
+- Protection patterns prevent damage to URLs, inline code, dates, versions, model IDs, file paths, A/B terms
+
+```typescript
+import { telegraphicCompress } from "verifiable-thinking-mcp";
+
+telegraphicCompress("The algorithm is able to process the data in order to find the result")
+// → "algorithm able to process data to find result"
+```
+
+**Real-world results (v0.6.0):**
+
+| Thinking Type | Original Tokens | Compressed | Reduction | Latency |
+|---------------|----------------|------------|-----------|---------|
+| Coding (Fibonacci) | 918 | 571 | 37.8% | 13ms |
+| Math (Probability) | 680 | 374 | 45.0% | 17ms |
+| Architecture Analysis | 921 | 327 | 64.5% | 14ms |
+| **Average** | | | **49.1%** | **15ms** |
+
 **Target ratio:** 50% by default (configurable per-operation, or auto-tuned).
 
 ```typescript
@@ -423,7 +447,13 @@ Every tool response includes token metadata:
 - ✅ **Async token API** — `countTokensAsync()` and `countTokensBatchAsync()` prevent event loop blocking
 - ✅ **Adaptive compression** — Auto-tunes `target_ratio` based on entropy and context length
 
-### Planned (v0.6.0)
+### ✅ Implemented (v0.6.0)
+
+- ✅ **Telegraphic compression** — Word-level pruning strips articles, filler adverbs, and auxiliary verbs while preserving reasoning connectives. 70+ phrase replacements. 49.1% average reduction on real-world thinking text.
+- ✅ **Protection patterns** — URLs, inline code, dates, versions, model IDs, file paths, and A/B terms are shielded from compression damage.
+- ✅ **Compression module optimization** — 32% code reduction (1,707 → 1,158 lines) via dead code elimination, ceremony stripping, and causal dataflow fusion. Zero behavior change.
+
+### Planned (v0.7.0)
 
 - **Streaming compression** — Compress incrementally as tokens arrive (saves 200-300ms)
 - **Token budget inheritance** — Child branches inherit parent's remaining budget

@@ -56,7 +56,7 @@ Add to Claude Desktop (`claude_desktop_config.json`):
 | 🔍 **Contradiction Detection** | Catches "Let x=5" then "Now x=10" across steps |
 | 🌿 **Hypothesis Branching** | Explore alternatives, auto-detects when branches confirm/refute |
 | 🔢 **Local Math** | Evaluates expressions without LLM round-trips |
-| 🗜️ **Smart Compression** | 56.8% token savings with query-aware CPC compression |
+| 🗜️ **Smart Compression** | 49% token savings with telegraphic + sentence-level compression |
 | ⚡ **Real Token Counting** | Tiktoken integration—3,922× cache speedup, zero estimation error |
 
 ## Token Efficiency
@@ -65,7 +65,7 @@ Every operation counts. Verifiable Thinking uses **real token counting** (tiktok
 
 ```typescript
 // Traditional reasoning: ~1,350 tokens for 10-step chain
-// Verifiable Thinking: ~580 tokens (56.8% savings)
+// Verifiable Thinking: ~580 tokens (49–57% savings)
 
 // Real token counting (not estimation)
 countTokens("What is 2+2?")  // → 7 tokens (not 3)
@@ -187,9 +187,9 @@ scratchpad({ operation: "complete", final_answer: "$0.05" })
 | Local compute | ❌ | ✅ |
 | Token budgets | ❌ | Soft + hard limits |
 | Real token counting | ❌ | Tiktoken (3,922× cache speedup) |
-| Compression | ❌ | 56.8% token savings |
+| Compression | ❌ | 49–57% token savings |
 
-Sequential Thinking is ~100 lines. This is 22,000+ with 1,831 tests.
+Sequential Thinking is ~100 lines. This is 22,000+ with 1,967 tests.
 
 See [`docs/competitive-analysis.md`](docs/competitive-analysis.md) for full breakdown.
 
@@ -199,7 +199,7 @@ See [`docs/competitive-analysis.md`](docs/competitive-analysis.md) for full brea
 git clone https://github.com/CoderDayton/verifiable-thinking-mcp.git
 cd verifiable-thinking-mcp && bun install
 bun run dev      # Interactive MCP Inspector
-bun test         # 1,831 tests
+bun test         # 1,967 tests
 ```
 
 ## License
