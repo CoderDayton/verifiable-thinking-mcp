@@ -607,7 +607,7 @@ async function applyCompression(
   autoCompressed: boolean;
 }> {
   const shouldCompress =
-    args.compress ||
+    args.compress !== false ||
     budgetExceeded ||
     (thought.length > 500 && needsCompression(thought).shouldCompress);
 
@@ -2630,7 +2630,7 @@ FLOW:
             branch: "main",
             operation: args.operation,
             chain_confidence: 0,
-            confidence_threshold: args.confidence_threshold,
+            confidence_threshold: args.confidence_threshold ?? 0.8,
             steps_with_confidence: 0,
             status: "budget_exhausted",
             suggested_action:
