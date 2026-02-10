@@ -42,14 +42,14 @@ export const ScratchpadSchema = z.object({
     .number()
     .min(0)
     .max(1)
-    .default(0.8)
-    .describe("Chain confidence threshold to suggest completion"),
+    .optional()
+    .describe("Chain confidence threshold to suggest completion (default: 0.8)"),
   token_budget: z
     .number()
     .int()
     .min(100)
-    .default(3000)
-    .describe("Max tokens before auto-compressing new steps"),
+    .optional()
+    .describe("Max tokens before auto-compressing new steps (default: 3000)"),
   warn_at_tokens: z
     .number()
     .int()
@@ -99,12 +99,12 @@ export const ScratchpadSchema = z.object({
       "Run domain verification. Auto-enabled for chains >3 steps. Set to false to disable.",
     ),
   domain: z.enum(["math", "logic", "code", "general"]).optional(),
-  local_compute: z.boolean().default(false).describe("Try local compute for math"),
+  local_compute: z.boolean().optional().describe("Try local compute for math (default: false)"),
   augment_compute: z
     .boolean()
-    .default(true)
+    .optional()
     .describe("Auto-inject computed values into thought (default: true)"),
-  compress: z.boolean().default(true).describe("Compress thought before storing"),
+  compress: z.boolean().optional().describe("Compress thought before storing (default: true)"),
   compression_query: z.string().optional().describe("Query for context-aware compression"),
   max_step_tokens: z
     .number()
@@ -112,7 +112,10 @@ export const ScratchpadSchema = z.object({
     .min(10)
     .optional()
     .describe("Max tokens for this step. Rejects if exceeded (default: no limit)"),
-  force_large: z.boolean().default(false).describe("Allow step even if it exceeds max_step_tokens"),
+  force_large: z
+    .boolean()
+    .optional()
+    .describe("Allow step even if it exceeds max_step_tokens (default: false)"),
   preconditions: z
     .array(z.string())
     .optional()
@@ -127,7 +130,7 @@ export const ScratchpadSchema = z.object({
     ),
   step_id: z.number().int().min(1).optional().describe("Step number to view"),
   branch_id: z.string().optional().describe("Filter history by branch"),
-  limit: z.number().int().min(1).max(50).default(10).describe("Max steps to return"),
+  limit: z.number().int().min(1).max(50).optional().describe("Max steps to return (default: 10)"),
 
   // Branch operation fields
   from_step: z.number().int().min(1).optional().describe("Step to branch from (default: current)"),
@@ -161,7 +164,10 @@ export const ScratchpadSchema = z.object({
     .optional()
     .describe("Text containing math expressions to compute and inject (augment/mistakes)"),
   system_context: z.string().optional().describe("System prompt context for domain filtering"),
-  store_as_step: z.boolean().default(false).describe("Store augmented result as a reasoning step"),
+  store_as_step: z
+    .boolean()
+    .optional()
+    .describe("Store augmented result as a reasoning step (default: false)"),
 
   // Override operation fields
   acknowledge: z
@@ -183,9 +189,14 @@ export const ScratchpadSchema = z.object({
     .describe("Number of steps to reveal. Omit to auto-increment when continuing."),
   cumulative: z
     .boolean()
-    .default(true)
-    .describe("Show all steps up to reveal_count (true) or just the nth step (false)"),
-  reset: z.boolean().default(false).describe("Reset hint state and start from beginning"),
+    .optional()
+    .describe(
+      "Show all steps up to reveal_count (true) or just the nth step (false). Default: true",
+    ),
+  reset: z
+    .boolean()
+    .optional()
+    .describe("Reset hint state and start from beginning (default: false)"),
 
   // Spot check operation fields
   answer: z.string().optional().describe("The proposed answer to check for trap patterns"),

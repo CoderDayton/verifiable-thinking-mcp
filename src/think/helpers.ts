@@ -247,7 +247,7 @@ export interface AugmentResult {
  * @returns Augmented thought and metadata, or null if disabled/no computations
  */
 export function tryAugment(args: ThinkArgs, thought: string): AugmentResult | null {
-  if (!args.augment_compute) {
+  if (args.augment_compute === false) {
     return null;
   }
 
