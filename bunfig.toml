@@ -4,7 +4,7 @@ coverageSkipTestFiles = true
 coverageDir = "coverage"
 coverageReporter = ["text", "lcov"]
 
-# Coverage thresholds: 80% for src/lib/
+# Coverage thresholds: 80% for src modules
 coverageThreshold = { lines = 0.8, functions = 0.8 }
 
 # Ignore patterns

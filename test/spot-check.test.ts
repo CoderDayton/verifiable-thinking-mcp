@@ -3,15 +3,15 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { SessionManager } from "../src/lib/session.ts";
-import { routeQuestion } from "../src/lib/think/route.ts";
+import { SessionManager } from "../src/session/manager.ts";
+import { routeQuestion } from "../src/think/route.ts";
 import {
   hasTrapPatterns,
   needsSpotCheck,
   primeQuestion,
   type SpotCheckResult,
   spotCheck,
-} from "../src/lib/think/spot-check.ts";
+} from "../src/think/spot-check.ts";
 
 // =============================================================================
 // HELPER

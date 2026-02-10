@@ -22,9 +22,7 @@ For each step:
 1. State the operation or theorem being applied
 2. Show the transformation clearly
 3. Use verify=true to check arithmetic and algebraic validity
-4. Mark final answer with is_final=true
-
-Enable track_concepts to track mathematical entities (variables, functions, theorems).`,
+4. Use operation="complete" with final_answer= to finalize`,
   },
 
   "logical-deduction": {
@@ -51,7 +49,7 @@ For each step:
 1. Focus on one aspect: syntax, logic, edge cases, performance, security
 2. Quote specific code when identifying issues
 3. Use verify=true to check assertions about code behavior
-4. Use compress_context=true if reviewing large files
+4. Use compress=true for large files (default: on)
 
 Categories to check: null handling, off-by-one errors, resource leaks, error handling, type safety.`,
   },
@@ -81,7 +79,7 @@ For each step:
 1. Identify the core question or goal
 2. Break into independent sub-problems where possible
 3. Note dependencies between sub-problems
-4. Use track_concepts=true to maintain a concept graph
+4. Track key concepts/variables across steps
 
 Aim for sub-problems that can be solved independently and combined.`,
   },
@@ -95,7 +93,7 @@ Aim for sub-problems that can be solved independently and combined.`,
 For each step:
 1. Define evaluation criteria first
 2. Analyze each option against criteria
-3. Use branch_id to evaluate options in parallel
+3. Use operation="branch" to evaluate options in parallel
 4. Synthesize findings with weighted trade-offs
 
 Avoid bias: evaluate all options with same criteria before concluding.`,
@@ -128,7 +126,7 @@ export const mathematicalProofPrompt = {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Problem: ${args.problem || "Not specified"}\n\nUse the 'think' tool with domain="math" and verify=true for each step.`,
+            text: `Problem: ${args.problem || "Not specified"}\n\nUse the 'scratchpad' tool with domain="math" and verify=true for each step.`,
           },
         },
       ],
@@ -167,7 +165,7 @@ export const logicalDeductionPrompt = {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Premises:\n${args.premises || "Not specified"}\n\n${goal}\n\nUse the 'think' tool with domain="logic" and verify=true.`,
+            text: `Premises:\n${args.premises || "Not specified"}\n\n${goal}\n\nUse the 'scratchpad' tool with domain="logic" and verify=true.`,
           },
         },
       ],
@@ -206,7 +204,7 @@ export const codeReviewPrompt = {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Review this code:\n\`\`\`\n${args.code || "No code provided"}\n\`\`\`\n${focusNote}\n\nUse the 'think' tool with domain="code" and verify=true.`,
+            text: `Review this code:\n\`\`\`\n${args.code || "No code provided"}\n\`\`\`\n${focusNote}\n\nUse the 'scratchpad' tool with domain="code" and verify=true.`,
           },
         },
       ],
@@ -245,7 +243,7 @@ export const debuggingPrompt = {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Bug symptom: ${args.symptom || "Not specified"}${contextNote}\n\nUse the 'think' tool with domain="code" to investigate.`,
+            text: `Bug symptom: ${args.symptom || "Not specified"}${contextNote}\n\nUse the 'scratchpad' tool with domain="code" to investigate.`,
           },
         },
       ],
@@ -278,7 +276,7 @@ export const problemDecompositionPrompt = {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Problem: ${args.problem || "Not specified"}\n\nUse the 'think' tool with track_concepts=true to decompose.`,
+            text: `Problem: ${args.problem || "Not specified"}\n\nUse the 'scratchpad' tool to decompose step by step.`,
           },
         },
       ],
@@ -317,7 +315,7 @@ export const comparativeAnalysisPrompt = {
           role: "user" as const,
           content: {
             type: "text" as const,
-            text: `Compare these options: ${args.options || "Not specified"}${criteriaNote}\n\nUse the 'think' tool with branch_id to evaluate each option.`,
+            text: `Compare these options: ${args.options || "Not specified"}${criteriaNote}\n\nUse the 'scratchpad' tool with operation="branch" to evaluate each option.`,
           },
         },
       ],

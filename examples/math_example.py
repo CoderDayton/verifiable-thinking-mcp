@@ -17,7 +17,7 @@ Run this script to see example injections:
 To test with actual TypeScript implementation:
     cd /path/to/verifiable_thinking
     bun -e "
-    import { extractAndCompute } from './src/lib/compute';
+    import { extractAndCompute } from './src/compute';
     console.log(extractAndCompute('Calculate 17 + 28 for the total.'));
     "
 """
@@ -282,19 +282,19 @@ def show_typescript_usage() -> None:
     print_header("TypeScript Usage")
     print("""
 // Direct solve - returns result immediately if computable
-import { tryLocalCompute } from './src/lib/compute';
+import { tryLocalCompute } from './src/compute';
 
 const result = tryLocalCompute("What is 17 + 28?");
 // => { solved: true, result: 45, method: "arithmetic", confidence: 1, time_ms: 0.2 }
 
 // Prompt injection - augments text with computed values
-import { extractAndCompute } from './src/lib/compute';
+import { extractAndCompute } from './src/compute';
 
 const augmented = extractAndCompute("Calculate 15 * 4 for the area.");
 // => { augmented: "Calculate 15 * 4 [=60] for the area.", computations: [...] }
 
 // Context-aware - filters by domain relevance  
-import { contextAwareCompute } from './src/lib/compute';
+import { contextAwareCompute } from './src/compute';
 
 const result = contextAwareCompute({
   systemPrompt: "You are a financial advisor.",
@@ -303,7 +303,7 @@ const result = contextAwareCompute({
 // => No calculus injection (derivative = financial term in context)
 
 // Simple API - just returns augmented string
-import { computeWithContext } from './src/lib/compute';
+import { computeWithContext } from './src/compute';
 
 const text = computeWithContext(
   "What is 5! ways to arrange?",  // thought
@@ -332,13 +332,13 @@ cd /path/to/verifiable_thinking
 
 # Test direct solve
 bun -e "
-import { tryLocalCompute } from './src/lib/compute';
+import { tryLocalCompute } from './src/compute';
 console.log(tryLocalCompute('sqrt(144)'));
 "
 
 # Test injection
 bun -e "
-import { extractAndCompute } from './src/lib/compute';
+import { extractAndCompute } from './src/compute';
 console.log(extractAndCompute('First calculate 8 * 7 = 56, then add 4.'));
 "
 

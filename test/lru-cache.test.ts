@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { LRUCache } from "../src/lib/LRUCache.ts";
+import { LRUCache } from "../src/infra/lru-cache.ts";
 
 describe("LRUCache Performance", () => {
   test("O(1) get/set operations", () => {

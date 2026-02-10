@@ -4,7 +4,7 @@
  * Includes content-hash caching for repeated verifications
  */
 
-import { verificationCache } from "./cache.ts";
+import { verificationCache } from "../infra/cache.ts";
 
 // Re-export math module for backwards compatibility
 export {
@@ -43,7 +43,7 @@ export {
   type UnaryNode,
   type VariableNode,
   validateExpression,
-} from "./math/index.ts";
+} from "../math/index.ts";
 
 // Import for internal use
 import {
@@ -51,7 +51,7 @@ import {
   isMathOperator,
   MATH_OPERATOR_PATTERN,
   validateExpression,
-} from "./math/index.ts";
+} from "../math/index.ts";
 
 export type VerificationDomain = "math" | "logic" | "code" | "general";
 
@@ -552,18 +552,17 @@ function verifyGeneral(
 // HELPERS
 // ============================================================================
 
+const OPEN_TO_CLOSE: Record<string, string> = { "(": ")", "{": "}", "[": "]" };
+const CLOSE_TO_OPEN: Record<string, string> = { ")": "(", "}": "{", "]": "[" };
+
 function checkBalanced(text: string): boolean {
-  const brackets: Record<string, string> = { "(": ")", "{": "}", "[": "]" };
   const stack: string[] = [];
 
   for (const char of text) {
-    if (char in brackets) {
+    if (char in OPEN_TO_CLOSE) {
       stack.push(char);
-    } else if (Object.values(brackets).includes(char)) {
-      const last = stack.pop();
-      if (!last || brackets[last] !== char) {
-        return false;
-      }
+    } else if (char in CLOSE_TO_OPEN) {
+      if (stack.pop() !== CLOSE_TO_OPEN[char]) return false;
     }
   }
 

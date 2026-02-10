@@ -3,7 +3,7 @@
  */
 
 import { beforeEach, describe, expect, test } from "bun:test";
-import { SessionManager, SessionManagerImpl } from "../src/lib/session";
+import { SessionManager, SessionManagerImpl } from "../src/session/manager";
 
 describe("SessionManager", () => {
   beforeEach(() => {

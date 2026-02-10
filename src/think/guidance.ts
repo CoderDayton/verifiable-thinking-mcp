@@ -3,8 +3,8 @@
  * Research-backed failure pattern detection and guidance generation
  */
 
-import type { ThoughtRecord } from "../session.ts";
-import type { VerificationDomain } from "../verification.ts";
+import type { VerificationDomain } from "../domain/verification.ts";
+import type { ThoughtRecord } from "../session/manager.ts";
 
 // ============================================================================
 // FAILURE PATTERNS - Research-backed reasoning hazards
@@ -67,20 +67,6 @@ export const FAILURE_PATTERNS: Record<string, FailurePattern> = {
     minLength: 100,
   },
 };
-
-// Valid purpose categories
-export const VALID_PURPOSES = new Set([
-  "analysis",
-  "action",
-  "reflection",
-  "decision",
-  "summary",
-  "validation",
-  "exploration",
-  "hypothesis",
-  "correction",
-  "planning",
-]);
 
 // ============================================================================
 // GUIDANCE ENGINE - Proactive reasoning assistance
@@ -166,10 +152,9 @@ export function analyzeThought(
   };
 }
 
-// ============================================================================
-// DOMAIN DETECTION
-// ============================================================================
-
+// Simple heuristic domain detection for reasoning guidance.
+// Intentionally simpler than domain/detection.ts — triggers on any math-like tokens
+// rather than requiring dominant domain classification.
 export function detectDomain(thought: string): VerificationDomain {
   if (/\d+\s*[+\-*/^=]\s*\d+|equation|solve|derivative|integral|sum\s+of/i.test(thought)) {
     return "math";

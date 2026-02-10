@@ -12,8 +12,7 @@
  */
 
 import type { Context } from "fastmcp";
-import { compress, needsCompression } from "../lib/compression.ts";
-import { contextAwareCompute } from "../lib/compute/context.ts";
+import { contextAwareCompute } from "../compute/context.ts";
 import {
   type DetectedMistake,
   detectCommonMistakesFromText,
@@ -22,23 +21,24 @@ import {
   suggestNextStepFromText,
   suggestSimplificationPath,
   tryLocalCompute,
-} from "../lib/compute/index.ts";
-import { stripMarkdown } from "../lib/extraction.ts";
-import { SessionManager, type ThoughtRecord } from "../lib/session.ts";
-import { challenge, shouldChallenge } from "../lib/think/challenge.ts";
-import { assessPromptComplexity } from "../lib/think/complexity.ts";
-import { analyzeConfidenceDrift } from "../lib/think/confidence-drift.ts";
-import { checkStepConsistency } from "../lib/think/consistency.ts";
-import { detectDomain } from "../lib/think/guidance.ts";
-import { analyzeStepForResolution } from "../lib/think/hypothesis.ts";
+} from "../compute/index.ts";
+import { verify } from "../domain/verification.ts";
+import { SessionManager, type ThoughtRecord } from "../session/manager.ts";
+import { compress, needsCompression } from "../text/compression.ts";
+import { stripMarkdown } from "../text/extraction.ts";
+import { calculateTokenUsage } from "../text/tokens.ts";
+import { challenge, shouldChallenge } from "../think/challenge.ts";
+import { assessPromptComplexity } from "../think/complexity.ts";
+import { analyzeConfidenceDrift } from "../think/confidence-drift.ts";
+import { checkStepConsistency } from "../think/consistency.ts";
+import { detectDomain } from "../think/guidance.ts";
+import { analyzeStepForResolution } from "../think/hypothesis.ts";
 import {
   type ScratchpadArgs,
   type ScratchpadResponse,
   ScratchpadSchema,
-} from "../lib/think/scratchpad-schema.ts";
-import { primeQuestion, spotCheck } from "../lib/think/spot-check.ts";
-import { calculateTokenUsage } from "../lib/tokens.ts";
-import { verify } from "../lib/verification.ts";
+} from "../think/scratchpad-schema.ts";
+import { primeQuestion, spotCheck } from "../think/spot-check.ts";
 
 type MCPContext = Context<Record<string, unknown> | undefined>;
 
@@ -2579,29 +2579,29 @@ export const scratchpadTool = {
   description: `Structured reasoning w/verification, trap detection, self-challenge. []=optional
 
 OPS (required: operation=):
-step thought= [question=1st] [confidence=] [verify=] [compress=true] [compression_query=]→add step. Auto-verify@4+. Disable compress to keep full text.
+step thought= [question=1st] [confidence=] [verify=] [domain=math|logic|code|general] [compress=true]→add step. Auto-verifies when chain >3 steps.
 complete [final_answer=] [summary=]→finalize+spot-check
 revise target_step= thought= [reason=]→fix step
 branch thought= [from_step=] [hypothesis=] [success_criteria=]→fork path
 navigate view=history|branches|step|path [step_id=] [limit=10]→inspect
-augment text= [store_as_step=false]→compute+inject math
+augment text= [store_as_step=false]→compute+inject math results
 hint [expression=] [reveal_count=] [cumulative=true] [reset=false]→progressive hints (auto-continues)
 mistakes text=→check algebraic errors
-spot_check question= answer=→manual trap detect
-challenge [target_claim=] [challenge_type=all]→adversarial check
-override failed_step= [reason=]→force-commit
+spot_check question= answer=→check for common reasoning traps
+challenge [target_claim=] [challenge_type=all]→adversarial self-check
+override failed_step= [reason=]→force-commit failed step
 
-DEFAULTS: session_id=auto confidence_threshold=0.8 token_budget=3000 augment_compute=true local_compute=false compress=true
+DEFAULTS: session_id=auto confidence_threshold=0.8 token_budget=3000 augment_compute=true compress=true
 
 STATUS→ACTION:
 continue→add steps | threshold_reached→complete or verify | review→use reconsideration.suggested_revise | verification_failed→revise|branch|override | budget_exhausted→complete or new session
 
 FLOW:
-1.step(question=,thought=)→primes trap detect
-2.step(thought=)×N→auto-verify@4+, auto-compress if budget exceeded, CDD, consistency checks
-3.[optional]challenge()→adversarial self-check
-4.complete(final_answer=)→auto spot-check
-5.if review→revise per reconsideration.suggested_revise
+1.step(question="...",thought="...")→primes trap detection for the question
+2.step(thought="...")×N→auto-verify, auto-compress, confidence-drift detection, consistency checks
+3.[optional]challenge()→adversarial self-check of claims
+4.complete(final_answer="...")→auto spot-check against common traps
+5.if status=review→revise per reconsideration.suggested_revise
 `,
 
   parameters: ScratchpadSchema,
@@ -2703,7 +2703,7 @@ FLOW:
       // If compression was applied, recalculate input using actual compressed thought tokens
       if (response.compression?.applied) {
         // Import countTokens for accurate tiktoken-based counting
-        const { countTokens } = await import("../lib/tokens.ts");
+        const { countTokens } = await import("../text/tokens.ts");
 
         // Get the compressed thought from the stored record
         const session = SessionManager.get(response.session_id);

@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { SolverType } from "../src/lib/compute/classifier.ts";
+import { SolverType } from "../src/compute/classifier.ts";
 import {
   detectDomainFull,
   detectMetaDomain,
@@ -12,7 +12,7 @@ import {
   getDomainWeight,
   getRelevantSolvers,
   isSolverRelevant,
-} from "../src/lib/domain.ts";
+} from "../src/domain/detection.ts";
 
 describe("detectDomainFull", () => {
   test("detects financial domain from system prompt", () => {

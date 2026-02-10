@@ -1,5 +1,5 @@
 /**
- * Unit tests for src/lib/math module
+ * Unit tests for src/math module
  * Tests operators, tokenizer, and AST functionality
  */
 
@@ -26,7 +26,7 @@ import {
   simplifyAST,
   tokenizeMathExpression,
   validateExpression,
-} from "../src/lib/math";
+} from "../src/math";
 
 // =============================================================================
 // OPERATOR TESTS
@@ -787,7 +787,7 @@ describe("performance", () => {
 // CROSS-EVALUATOR CONSISTENCY TESTS
 // =============================================================================
 
-import { safeEvaluate } from "../src/lib/compute/math.ts";
+import { safeEvaluate } from "../src/compute/math.ts";
 
 describe("cross-evaluator consistency", () => {
   // Expressions that both evaluators should handle identically

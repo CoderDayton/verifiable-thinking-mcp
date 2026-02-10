@@ -78,25 +78,17 @@ export function runSolvers(text: string, lower: string, mask: SolverMask): Compu
  */
 export function getRegistryStats(): { count: number; byType: Record<string, number> } {
   const byType: Record<string, number> = {};
+  const typeEntries = Object.entries(SolverType).filter(
+    ([k, v]) => typeof v === "number" && k !== "ALL_FORMULAS" && k !== "WORD_ALL",
+  ) as [string, number][];
 
   for (const solver of solvers) {
-    if (solver.types & SolverType.ARITHMETIC) byType.arithmetic = (byType.arithmetic || 0) + 1;
-    if (solver.types & SolverType.FORMULA_TIER1)
-      byType.formula_tier1 = (byType.formula_tier1 || 0) + 1;
-    if (solver.types & SolverType.FORMULA_TIER2)
-      byType.formula_tier2 = (byType.formula_tier2 || 0) + 1;
-    if (solver.types & SolverType.FORMULA_TIER3)
-      byType.formula_tier3 = (byType.formula_tier3 || 0) + 1;
-    if (solver.types & SolverType.FORMULA_TIER4)
-      byType.formula_tier4 = (byType.formula_tier4 || 0) + 1;
-    if (solver.types & SolverType.WORD_PROBLEM)
-      byType.word_problem = (byType.word_problem || 0) + 1;
-    if (solver.types & SolverType.MULTI_STEP) byType.multi_step = (byType.multi_step || 0) + 1;
-    if (solver.types & SolverType.CALCULUS) byType.calculus = (byType.calculus || 0) + 1;
-    if (solver.types & SolverType.FACTS) byType.facts = (byType.facts || 0) + 1;
-    if (solver.types & SolverType.LOGIC) byType.logic = (byType.logic || 0) + 1;
-    if (solver.types & SolverType.PROBABILITY) byType.probability = (byType.probability || 0) + 1;
-    if (solver.types & SolverType.DERIVATION) byType.derivation = (byType.derivation || 0) + 1;
+    for (const [name, bit] of typeEntries) {
+      if (solver.types & bit) {
+        const key = name.toLowerCase();
+        byType[key] = (byType[key] || 0) + 1;
+      }
+    }
   }
 
   return { count: solvers.length, byType };

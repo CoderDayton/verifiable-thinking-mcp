@@ -8,7 +8,7 @@
  * @module derivation-core
  */
 
-import { compareExpressions } from "../../verification.ts";
+import { compareExpressions } from "../../domain/verification.ts";
 import type { ComputeResult } from "../types.ts";
 
 /** Result of verifying a single derivation step */

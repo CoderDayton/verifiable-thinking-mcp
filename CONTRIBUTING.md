@@ -55,7 +55,7 @@ bun run test:coverage
 
 ### Architecture Principles
 
-1. **No duplication**: Extract shared logic into `src/lib/`
+1. **No duplication**: Extract shared logic into the appropriate module under `src/`
 2. **Type safety**: No `any` without explicit justification
 3. **O(n) complexity**: Keep trap detection and routing fast
 4. **Test coverage**: New features require tests
@@ -119,14 +119,6 @@ Open an issue with:
 - Use case / motivation
 - Proposed implementation (optional)
 
-### Adding Trap Patterns
-
-Trap patterns are in `src/lib/traps/`. To add a new pattern:
-
-1. Add pattern to `src/lib/traps/patterns.ts`
-2. Add detection logic
-3. Add test cases in `test/traps/`
-4. Update README if significant
 
 ### Documentation
 

@@ -66,6 +66,46 @@ import {
   RE_WORD_FRACTION_START,
 } from "./patterns.ts";
 
+// =============================================================================
+// SHARED STRIP HELPERS — used by stripLLMOutput, stripThinkingTagsFast, streaming
+// =============================================================================
+
+/** All thinking/reasoning tag patterns (order doesn't matter — independent regexes) */
+const THINKING_TAG_PATTERNS: [RegExp, string][] = [
+  [RE_THINK, ""],
+  [RE_THINKING, ""],
+  [RE_REASONING, ""],
+  [RE_ANTITHINK, ""],
+  [RE_THOUGHT, ""],
+  [RE_THOUGHTS, ""],
+  [RE_REFLECTION, ""],
+  [RE_INTERNAL_MONOLOGUE, ""],
+];
+
+/** Unicode superscript → digit map (hoisted to avoid per-call allocation) */
+const SUPERSCRIPT_MAP: Record<string, string> = {
+  "⁰": "0",
+  "¹": "1",
+  "²": "2",
+  "³": "3",
+  "⁴": "4",
+  "⁵": "5",
+  "⁶": "6",
+  "⁷": "7",
+  "⁸": "8",
+  "⁹": "9",
+  "⁻": "-",
+};
+
+/** Strip all thinking/reasoning tags from text */
+function stripThinkingTagsCore(text: string): string {
+  let result = text;
+  for (const [re, rep] of THINKING_TAG_PATTERNS) {
+    result = result.replace(re, rep);
+  }
+  return result;
+}
+
 /**
  * Strip all LLM output artifacts for clean display/comparison.
  * Handles:
@@ -80,16 +120,7 @@ import {
  */
 export function stripLLMOutput(text: string): string {
   return (
-    text
-      // === THINKING/REASONING TAGS ===
-      .replace(RE_THINK, "")
-      .replace(RE_THINKING, "")
-      .replace(RE_REASONING, "")
-      .replace(RE_ANTITHINK, "")
-      .replace(RE_THOUGHT, "")
-      .replace(RE_THOUGHTS, "")
-      .replace(RE_REFLECTION, "")
-      .replace(RE_INTERNAL_MONOLOGUE, "")
+    stripThinkingTagsCore(text)
 
       // === TOOL/ARTIFACT CONTAINERS ===
       .replace(RE_TOOL_CALL, "")
@@ -169,15 +200,7 @@ export const stripMarkdown = stripLLMOutput;
  * ```
  */
 export function stripThinkingTagsFast(text: string): string {
-  return text
-    .replace(RE_THINK, "")
-    .replace(RE_THINKING, "")
-    .replace(RE_REASONING, "")
-    .replace(RE_ANTITHINK, "")
-    .replace(RE_THOUGHT, "")
-    .replace(RE_THOUGHTS, "")
-    .replace(RE_REFLECTION, "")
-    .replace(RE_INTERNAL_MONOLOGUE, "")
+  return stripThinkingTagsCore(text)
     .replace(RE_MODEL_TOKENS_FAST, "")
     .replace(RE_MULTI_NEWLINE, "\n\n")
     .replace(RE_MULTI_SPACE, " ")
@@ -236,17 +259,7 @@ export function* stripLLMOutputStreaming(text: string): Generator<string, void, 
   }
 
   // Phase 1: Strip all thinking tags first (they can span chunks)
-  // Uses individual patterns (faster than combined backreference regex)
-  const withoutThinking = text
-    .replace(RE_THINK, "")
-    .replace(RE_THINKING, "")
-    .replace(RE_REASONING, "")
-    .replace(RE_ANTITHINK, "")
-    .replace(RE_THOUGHT, "")
-    .replace(RE_THOUGHTS, "")
-    .replace(RE_REFLECTION, "")
-    .replace(RE_INTERNAL_MONOLOGUE, "")
-    .replace(RE_MODEL_TOKENS_FAST, "");
+  const withoutThinking = stripThinkingTagsCore(text).replace(RE_MODEL_TOKENS_FAST, "");
 
   // Phase 2: Chunk the remaining content for markdown/entity cleanup
   const cleanedLen = withoutThinking.length;
@@ -882,25 +895,12 @@ function parseNumericValue(input: string): number | null {
   }
 
   // Check for Unicode superscript exponents (10⁸, 10⁻³)
-  const superscriptMap: Record<string, string> = {
-    "⁰": "0",
-    "¹": "1",
-    "²": "2",
-    "³": "3",
-    "⁴": "4",
-    "⁵": "5",
-    "⁶": "6",
-    "⁷": "7",
-    "⁸": "8",
-    "⁹": "9",
-    "⁻": "-",
-  };
   const superMatch = trimmed.match(/^(-?[\d.]+)\s*[×xX]\s*10([⁰¹²³⁴⁵⁶⁷⁸⁹⁻]+)$/);
   if (superMatch?.[1] && superMatch?.[2]) {
     const base = Number.parseFloat(superMatch[1]);
     const expStr = superMatch[2]
       .split("")
-      .map((c) => superscriptMap[c] ?? c)
+      .map((c) => SUPERSCRIPT_MAP[c] ?? c)
       .join("");
     const exp = Number.parseInt(expStr, 10);
     if (!Number.isNaN(base) && !Number.isNaN(exp)) return base * 10 ** exp;

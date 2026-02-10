@@ -6,8 +6,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { SessionManager, type ThoughtRecord } from "../src/lib/session";
-import { analyzeConfidenceDrift } from "../src/lib/think/confidence-drift";
+import { SessionManager, type ThoughtRecord } from "../src/session/manager";
+import { analyzeConfidenceDrift } from "../src/think/confidence-drift";
 
 // ============================================================================
 // HELPERS

@@ -13,8 +13,8 @@ import {
   methodToSolverType,
   SolverType,
   wouldKeepComputation,
-} from "../src/lib/compute/index.ts";
-import { type ThinkArgs, tryAugment } from "../src/lib/think/index.ts";
+} from "../src/compute/index.ts";
+import { type ThinkArgs, tryAugment } from "../src/think/index.ts";
 
 // =============================================================================
 // FILTER.TS TESTS

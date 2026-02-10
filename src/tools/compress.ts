@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { type CompressionResult, compress, quickCompress } from "../lib/compression.ts";
-import { calculateTokenUsage } from "../lib/tokens.ts";
+import { type CompressionResult, compress, quickCompress } from "../text/compression.ts";
+import { calculateTokenUsage } from "../text/tokens.ts";
 
 /**
  * Standalone compress tool - Enhanced CPC-style context compression
@@ -8,7 +8,7 @@ import { calculateTokenUsage } from "../lib/tokens.ts";
  */
 export const compressTool = {
   name: "compress",
-  description: `CPC-style sentence-level compression. TF-IDF + NCD scoring, coreference/causal chains, filler removal. 10× faster than token-level. Keeps query-relevant sentences.`,
+  description: `CPC-style sentence-level compression. TF-IDF + NCD scoring, coreference/causal chains, filler removal. 10× faster than token-level LLM compression. Keeps query-relevant sentences.`,
 
   parameters: z.object({
     context: z.string().max(1_000_000, "Max 1MB").describe("Text to compress"),

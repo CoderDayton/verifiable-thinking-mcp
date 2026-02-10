@@ -16,7 +16,7 @@ import {
   stripLLMOutputStreaming,
   stripMarkdown,
   stripThinkingTagsFast,
-} from "../src/lib/extraction";
+} from "../src/text/extraction";
 
 describe("AnswerExtraction - stripMarkdown", () => {
   test("removes bold markdown", () => {

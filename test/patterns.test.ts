@@ -58,7 +58,7 @@ import {
   RE_UNORDERED_LIST,
   RE_WORD_FRACTION,
   RE_WORD_FRACTION_START,
-} from "../src/lib/patterns.ts";
+} from "../src/text/patterns.ts";
 
 /** Helper to test global regex without state issues */
 function testMatch(pattern: RegExp, text: string): boolean {

@@ -4,7 +4,6 @@
  */
 
 import { beforeEach, describe, expect, test } from "bun:test";
-import { verificationCache } from "../src/lib/cache";
 import {
   canonicalizeExpression,
   derivationTextToLatex,
@@ -21,13 +20,7 @@ import {
   tryFormula,
   trySimplifyToConstant,
   verifyDerivationSteps,
-} from "../src/lib/compute/index";
-import { ConceptTracker, clearTracker, getTracker } from "../src/lib/concepts";
-import {
-  estimateCodeTokens,
-  estimateTokens,
-  estimateTokensBatch,
-} from "../src/lib/think/verification";
+} from "../src/compute/index";
 import {
   buildAST,
   compareExpressions,
@@ -35,7 +28,10 @@ import {
   simplifyAST,
   tokenizeMathExpression,
   verify,
-} from "../src/lib/verification";
+} from "../src/domain/verification";
+import { verificationCache } from "../src/infra/cache";
+import { ConceptTracker, clearTracker, getTracker } from "../src/session/concepts";
+import { estimateCodeTokens, estimateTokens, estimateTokensBatch } from "../src/think/verification";
 
 describe("Concepts", () => {
   beforeEach(() => {

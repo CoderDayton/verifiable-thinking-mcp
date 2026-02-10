@@ -168,7 +168,7 @@ The verifiable-thinking MCP server includes automatic detection of common algebr
 ### From Code
 
 ```typescript
-import { detectCommonMistakesFromText } from "./src/lib/compute/solvers/derivation";
+import { detectCommonMistakesFromText } from "./src/compute/solvers/derivation";
 
 const result = detectCommonMistakesFromText("2x + 3x = 6x");
 
@@ -234,7 +234,7 @@ Each detected mistake includes a confidence score (0-1):
 
 To add a new mistake type:
 
-1. Add type to `MistakeType` union in `src/lib/compute/solvers/derivation.ts`
+1. Add type to `MistakeType` union in `src/compute/solvers/derivation.ts`
 2. Create checker function following the pattern:
    ```typescript
    function checkNewError(

@@ -12,14 +12,14 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { getDomainWeight } from "../src/lib/domain";
+import { getDomainWeight } from "../src/domain/detection";
 import {
   assessPromptComplexity,
   type ComplexityResult,
   isTrivialQuestion,
-} from "../src/lib/think/complexity";
-import { type RouteResult, routeQuestion } from "../src/lib/think/route";
-import { needsSpotCheck } from "../src/lib/think/spot-check";
+} from "../src/think/complexity";
+import { type RouteResult, routeQuestion } from "../src/think/route";
+import { needsSpotCheck } from "../src/think/spot-check";
 
 // Suppress unused import warnings - types are used
 void (isTrivialQuestion as unknown);

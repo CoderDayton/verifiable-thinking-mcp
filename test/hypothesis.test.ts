@@ -3,10 +3,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import {
-  analyzeHypothesisResolution,
-  analyzeStepForResolution,
-} from "../src/lib/think/hypothesis.ts";
+import { analyzeHypothesisResolution, analyzeStepForResolution } from "../src/think/hypothesis.ts";
 
 describe("analyzeStepForResolution", () => {
   const hypothesis = "The number n is prime";

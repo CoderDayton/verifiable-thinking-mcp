@@ -3,7 +3,6 @@
  * These helpers handle specific phases of the think tool's execute function.
  */
 
-import { compress, needsCompression } from "../compression.ts";
 import {
   type ContextAwareResult,
   contextAwareCompute,
@@ -11,8 +10,13 @@ import {
   tryLocalCompute,
 } from "../compute/index.ts";
 import type { ComputeResult } from "../compute/types.ts";
-import { SessionManager, type ThoughtRecord } from "../session.ts";
-import { type VerificationDomain, type VerificationResult, verify } from "../verification.ts";
+import {
+  type VerificationDomain,
+  type VerificationResult,
+  verify,
+} from "../domain/verification.ts";
+import { SessionManager, type ThoughtRecord } from "../session/manager.ts";
+import { compress, needsCompression } from "../text/compression.ts";
 import type { ThoughtAnalysis } from "./guidance.ts";
 import {
   analyzeThought,

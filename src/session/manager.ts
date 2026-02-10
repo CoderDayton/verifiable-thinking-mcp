@@ -11,7 +11,7 @@
  * - Embedded token tracking (no WeakMap indirection)
  */
 
-import { LRUCache } from "./LRUCache.ts";
+import { LRUCache } from "../infra/lru-cache.ts";
 
 export interface ThoughtRecord {
   id: string;

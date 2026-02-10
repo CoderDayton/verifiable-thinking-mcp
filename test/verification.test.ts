@@ -4,7 +4,6 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { verificationCache } from "../src/lib/cache";
 import {
   buildAST,
   canBeUnary,
@@ -23,7 +22,8 @@ import {
   tokenizeMathExpression,
   validateExpression,
   verify,
-} from "../src/lib/verification";
+} from "../src/domain/verification";
+import { verificationCache } from "../src/infra/cache";
 
 describe("Verification", () => {
   test("verifies math domain", () => {

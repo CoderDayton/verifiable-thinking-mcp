@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { SessionManager } from "../src/lib/session.ts";
-import { calculateTokenUsage, estimateObjectTokens, estimateTokens } from "../src/lib/tokens.ts";
+import { SessionManager } from "../src/session/manager.ts";
+import { calculateTokenUsage, estimateObjectTokens, estimateTokens } from "../src/text/tokens.ts";
 
 describe("Token estimation", () => {
   test("estimateTokens returns 0 for empty string", () => {

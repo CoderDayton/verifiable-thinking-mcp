@@ -18,7 +18,7 @@
  *   unresolved = drift_score > threshold AND no revision step exists
  */
 
-import type { ThoughtRecord } from "../session.ts";
+import type { ThoughtRecord } from "../session/manager.ts";
 
 // ============================================================================
 // TYPES

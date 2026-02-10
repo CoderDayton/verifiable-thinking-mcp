@@ -8,7 +8,7 @@
  */
 
 import { encoding_for_model, type Tiktoken } from "tiktoken";
-import { LRUCache } from "./LRUCache.ts";
+import { LRUCache } from "../infra/lru-cache.ts";
 
 // ============================================================================
 // TIKTOKEN SINGLETON

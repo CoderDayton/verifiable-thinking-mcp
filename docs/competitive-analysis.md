@@ -103,13 +103,16 @@ Math evaluation without LLM round-trips:
 
 ### 6. Context Compression (VT Exclusive)
 
-CPC-style sentence-level compression:
+Dual-pipeline compression: sentence-level selection + word-level telegraphic pruning:
 
 - TF-IDF + NCD (gzip-based) relevance scoring
 - Coreference constraint preservation
 - Causal chain preservation
-- Filler/meta-cognition removal
-- Up to 10x faster than token-level methods
+- Filler/meta-cognition sentence removal
+- Telegraphic word-level pruning (strips articles, filler adverbs, auxiliary verbs)
+- 70+ phrase replacements ("in order to" → "to", "due to the fact that" → "because")
+- Protection patterns for URLs, code, dates, versions, model IDs
+- 49.1% average reduction on real-world thinking text (13–17ms latency)
 
 ## Code Complexity Comparison
 
@@ -118,7 +121,7 @@ CPC-style sentence-level compression:
 | Core logic (lines) | ~150 | ~5000+ |
 | Tools | 1 | 5 |
 | Operations | 1 (implicit in params) | 11 |
-| Test coverage | Unknown | 1831 tests, 100% lines |
+| Test coverage | Unknown | 1967 tests, 100% lines |
 | Runtime | Node.js | Bun (native) |
 
 ## User Pain Points Addressed
@@ -157,7 +160,7 @@ From issues and forums, users wanted:
 | Verification | N/A | <10ms |
 | Spot-check | N/A | <2ms |
 | Consistency check | N/A | <100ms (100 steps) |
-| Compression | N/A | 10x faster than token-level |
+| Compression | N/A | 49% reduction, 13–17ms |
 
 ## Conclusion
 

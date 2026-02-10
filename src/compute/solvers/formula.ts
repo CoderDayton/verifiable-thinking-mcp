@@ -2,7 +2,12 @@
  * Formula solver - tiered pattern matching for mathematical formulas
  */
 
-import { type ASTNode, buildAST, simplifyAST, tokenizeMathExpression } from "../../verification.ts";
+import {
+  type ASTNode,
+  buildAST,
+  simplifyAST,
+  tokenizeMathExpression,
+} from "../../domain/verification.ts";
 import { SolverType } from "../classifier.ts";
 import {
   combinations,

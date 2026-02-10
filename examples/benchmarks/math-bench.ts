@@ -22,7 +22,7 @@ import {
   formatAST,
   simplifyAST,
   tokenizeMathExpression,
-} from "../../src/lib/math";
+} from "../../src/math";
 
 // ============================================================================
 // Types

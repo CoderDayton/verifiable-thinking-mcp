@@ -7,14 +7,14 @@
  * @module derivation-simplify
  */
 
-import type { ASTNode } from "../../math/ast.ts";
 import {
   buildAST,
   compareExpressions,
   formatAST,
   simplifyAST,
   tokenizeMathExpression,
-} from "../../verification.ts";
+} from "../../domain/verification.ts";
+import type { ASTNode } from "../../math/ast.ts";
 import { extractDerivationSteps } from "./derivation-core.ts";
 import { applyTransformation, TRANSFORM_PATTERNS } from "./derivation-transform.ts";
 

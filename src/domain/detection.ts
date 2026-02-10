@@ -10,7 +10,7 @@
  * Returns both granular domain and meta-category for different consumers.
  */
 
-import { type SolverMask, SolverType } from "./compute/classifier.ts";
+import { type SolverMask, SolverType } from "../compute/classifier.ts";
 
 // =============================================================================
 // TYPES

@@ -6,9 +6,9 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { assessPromptComplexity } from "../src/lib/think/complexity";
-import { routeQuestion } from "../src/lib/think/route";
-import { needsSpotCheck } from "../src/lib/think/spot-check";
+import { assessPromptComplexity } from "../src/think/complexity";
+import { routeQuestion } from "../src/think/route";
+import { needsSpotCheck } from "../src/think/spot-check";
 
 // =============================================================================
 // MUTATION POINTS IN complexity.ts
